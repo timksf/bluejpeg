@@ -22,6 +22,7 @@
                         cmake
                         ninja
                         bluespec
+                        iverilog
                         vscode-extensions.ms-vscode.cmake-tools
                     ];
                 };
