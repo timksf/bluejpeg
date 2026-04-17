@@ -1,0 +1,50 @@
+[*]
+[*] GTKWave Analyzer v3.3.118 (w)1999-2023 BSI
+[*] Sun Sep  1 22:20:58 2024
+[*]
+[dumpfile] "/home/tim/Documents/HardwareDescription/jpeg/hdl/encoder/build/dump.vcd"
+[dumpfile_mtime] "Sun Sep  1 22:20:07 2024"
+[dumpfile_size] 213133624
+[savefile] "/home/tim/Documents/HardwareDescription/jpeg/hdl/encoder/view_aximm2s.gtkw"
+[timestart] 0
+[size] 2560 1361
+[pos] -1 -1
+*-16.500000 525000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] main.
+[treeopen] main.top.
+[sst_width] 514
+[signals_width] 406
+[sst_expanded] 1
+[sst_vpaned_height] 415
+@200
+-AXI4 MM Read Master
+-Read Address
+@28
+main.top.testVec_0_t1_aximm2s_aximm_rd_arreadyIn
+main.top.testVec_0_t1_ram_arvalidIn
+@22
+main.top.testVec_0_t1_aximm2s_aximm_rd_waraddr[63:0]
+@200
+-Read Data
+@28
+main.top.testVec_0_t1_aximm2s_aximm_rd_rvalidIn
+main.top.testVec_0_t1_ram_prreadyIn
+@22
+main.top.testVec_0_t1_ram_wrdata[63:0]
+@28
+main.top.testVec_0_t1_ram_wrlast
+@200
+-AXI S Write Master
+@28
+main.top.testVec_0_t1_aximm2s_axis_wr_treadyIn
+@22
+main.top.testVec_0_t1_aximm2s_axis_wr_tdataOut[23:0]
+@28
+main.top.testVec_0_t1_axis_rx_tvalidIn
+main.top.testVec_0_t1_axis_rx_lastIn
+@22
+main.top.testVec_0_t1_aximm2s_rCurrentAddr[63:0]
+@23
+main.top.testVec_0_t1_aximm2s_rFinalAddr[63:0]
+[pattern_trace] 1
+[pattern_trace] 0

@@ -1,0 +1,32 @@
+[*]
+[*] GTKWave Analyzer v3.3.118 (w)1999-2023 BSI
+[*] Fri Mar  6 09:17:59 2026
+[*]
+[dumpfile] "/home/tim/Documents/HardwareDescription/jpeg/hdl/encoder/build/dump.vcd"
+[dumpfile_mtime] "Fri Mar  6 09:12:00 2026"
+[dumpfile_size] 332397
+[savefile] "/home/tim/Documents/HardwareDescription/jpeg/hdl/encoder/dct2d.gtkw"
+[timestart] 0
+[size] 2560 1393
+[pos] -1 -1
+*-7.500000 138 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] main.
+[treeopen] main.top.
+[treeopen] main.top.testVec_0.
+[sst_width] 511
+[signals_width] 182
+[sst_expanded] 1
+[sst_vpaned_height] 434
+@24
+main.top.testVec_0.dut.rg_row[2:0]
+@22
+main.top.testVec_0.dut.rg_row_buf[95:0]
+@28
+main.top.testVec_0.dut.rg_row_valid
+@24
+main.top.testVec_0.dut.rg_col_idx[2:0]
+@25
+main.top.testVec_0.dut.tp0_rg_write_i[2:0]
+main.top.testVec_0.dut.tp0_rg_write_j[2:0]
+[pattern_trace] 1
+[pattern_trace] 0

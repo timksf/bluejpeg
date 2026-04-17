@@ -1,0 +1,300 @@
+package TestBlueJPEG;
+
+import StmtFSM :: *;
+import GetPut :: *;
+import Connectable :: *;
+import Clocks :: *;
+
+import BlueAXI :: *;
+
+import BDPI :: *;
+import Types :: *;
+import PrintUtil :: *;
+import TestHelper :: *;
+import BlueJPEG :: *;
+import RGB2YCbCr :: *;
+
+String input_image_path = "../../../assets/sample_192x192.bmp";
+String output_jpeg_path = "../result.jpg";
+
+typedef 192 InputWidth;
+typedef 192 InputHeight;
+
+//SimRAM definitions
+typedef 32 WordWidth;
+
+//DUT type parameters
+typedef 2560 MaxImgWidth;
+typedef 16  DCTScale;
+typedef 16  QuantScale;
+
+
+module [Module] mkTestBlueJPEG(TestHandler);
+
+    function print_s  = print_mod_pre_color_t_s;
+    function print_fmt = print_mod_pre_color_t_f;
+
+    let t1 <- test;
+
+    Stmt s = seq
+        t1.go();
+        while (!t1.done()) action endaction
+    endseq;
+
+    FSM fsm_test <- mkFSM(s);
+
+    method Action go();
+        fsm_test.start();
+    endmethod
+
+    method Bool done();
+        return fsm_test.done();
+    endmethod
+
+endmodule
+
+module [Module] test(TestHandler)
+    provisos(
+        NumAlias#(n_pixels, TMul#(InputWidth, InputHeight)),
+        NumAlias#(ram_words, 'd3_000_000)
+    );
+
+    function print_s  = print_mod_pre_color_t_s;
+    function print_fmt = print_mod_pre_color_t_f;
+
+    // ---- clocks (same domain in simulation) ----
+    let cur_clk <- exposeCurrentClock;
+    let cur_rst <- exposeCurrentReset;
+
+    // ---- DUT: BlueJPEG ----
+    let jpeg_cfg = BlueJPEGCfg_t {
+        slow_clock : cur_clk,
+        slow_reset : cur_rst,
+        _prx_miw   : ?,
+        _prx_dsc   : ?,
+        _prx_qsc   : ?
+    };
+    BlueJPEG_ifc#(MaxImgWidth, DCTScale, QuantScale) dut <- mkBlueJPEG(jpeg_cfg);
+
+    // ---- AXI-Lite master for DUT configuration ----
+    AXI4_Lite_Master_Rd#(32, 32) cfg_rd <- mkAXI4_Lite_Master_Rd(1);
+    AXI4_Lite_Master_Wr#(32, 32) cfg_wr <- mkAXI4_Lite_Master_Wr(16);
+
+    // ---- AXI-Stream: pixel input (32-bit) ----
+    AXI4_Stream_Wr#(24, 0) axis_tx <- mkAXI4_Stream_Wr(128);
+
+    // ---- AXI-Stream: JPEG byte output (8-bit) ----
+    AXI4_Stream_Rd#(8, 0) axis_out <- mkAXI4_Stream_Rd(128);
+
+    // ---- connections ----
+    mkConnection(axis_tx.fab,       dut.s_axis);
+    mkConnection(dut.m_axis,        axis_out.fab);
+    mkConnection(dut.s_axi_cfg_rd, cfg_rd.fab);
+    mkConnection(dut.s_axi_cfg_wr, cfg_wr.fab);
+
+    // ---- state ----
+    Reg#(UInt#(64)) rg_ram_ptr      <- mkRegU;
+    Reg#(UInt#(64)) rg_img_load_ptr <- mkRegU;
+    Reg#(Bit#(32))  rg_axil_rsp     <- mkRegU;
+    Reg#(Bool)      rg_finished     <- mkReg(False);
+    Reg#(UInt#(32)) rg_out_count    <- mkReg(0);
+    Reg#(UInt#(32)) rg_pixel_idx    <- mkReg(0);
+    Reg#(File)      rg_out_file     <- mkRegU;
+
+    // output write base address in SimRAM (word-addressed, after input image)
+    UInt#(64) out_base_addr = fromInteger(valueOf(n_pixels));
+
+    // ---- sub-FSMs ----
+
+    // Feed pixels from SimRAM into DUT via AXI stream
+    // Interleaved format: one pixel per 64-bit word, R in low byte
+    // Truncate to 32 bits -> {0x00, B, G, R} per beat
+    Stmt feed_pixels = seq
+        rg_pixel_idx <= 0;
+        while (rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
+            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
+            Bit#(24) pixel = truncate(pack(word));
+            Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
+                unpack(pixel[23:16]),   //R
+                unpack(pixel[15:08]),   //G
+                unpack(pixel[07:00])    //B
+            );
+            YCbCr_t pix_ycbcr = YCbCr_t { 
+                y:  unpack(ycbcr_raw[23:16]),
+                cb: unpack(ycbcr_raw[15:08]),
+                cr: unpack(ycbcr_raw[07:00])
+            };
+            let is_last = (rg_pixel_idx == fromInteger(valueOf(n_pixels) - 1));
+            axis_tx.pkg.put(AXI4_Stream_Pkg {
+                data: pack(pix_ycbcr),
+                user: ?,
+                keep: unpack(-1),
+                dest: 0,
+                last: is_last
+            });
+            rg_pixel_idx <= rg_pixel_idx + 1;
+        endaction
+    endseq;
+    FSM fsm_feed_pixels <- mkFSM(feed_pixels);
+
+    // Collect JPEG output bytes:
+    //   - write to SimRAM output region (one byte per word)
+    //   - write to output file
+    Stmt collect_output = seq
+        action
+            let fd <- $fopen(output_jpeg_path, "wb");
+            if (fd == InvalidFile) begin
+                print_s("ERROR: cannot open output file", RED);
+                $finish();
+            end
+            rg_out_file <= fd;
+        endaction
+        while (!rg_finished) action
+            let pkg <- axis_out.pkg.get();
+            Bit#(8) b = pkg.data;
+            // write to SimRAM
+            write_word_SimRAM(rg_ram_ptr,
+                out_base_addr + extend(rg_out_count),
+                unpack(extend(b)));
+            // write to file
+            $fwrite(rg_out_file, "%c", b);
+            rg_out_count <= rg_out_count + 1;
+            if (pkg.last) begin
+                print_fmt($format("Received TLAST, total bytes: %0d", rg_out_count + 1), GREEN);
+                rg_finished <= True;
+            end
+        endaction
+        $fclose(rg_out_file);
+    endseq;
+    FSM fsm_collect <- mkFSM(collect_output);
+
+    // Poll CTRL register for done bit
+    Stmt poll_done = seq
+        rg_axil_rsp <= 0;
+        while (!unpack(rg_axil_rsp[ctrl_done_bit]) && !rg_finished) seq
+            axi4_lite_read(cfg_rd, fromInteger(cfg_ctrl_offs));
+            action
+                let rsp <- axi4_lite_read_response(cfg_rd);
+                rg_axil_rsp <= rsp;
+            endaction
+        endseq
+        if (!rg_finished) seq
+            print_s("DUT signaled done via CTRL register", GREEN);
+            rg_finished <= True;
+        endseq
+    endseq;
+    FSM fsm_poll_done <- mkFSM(poll_done);
+
+    // Wait for default table init (poll STATUS.ready)
+    Stmt wait_tables_ready = seq
+        rg_axil_rsp <= 0;
+        while (!unpack(rg_axil_rsp[sts_ready_bit])) seq
+            axi4_lite_read(cfg_rd, fromInteger(cfg_status_offs));
+            action
+                let rsp <- axi4_lite_read_response(cfg_rd);
+                rg_axil_rsp <= rsp;
+            endaction
+        endseq
+        print_s("Tables ready", GREEN);
+    endseq;
+    FSM fsm_wait_ready <- mkFSM(wait_tables_ready);
+
+    // Trigger Huffman codegen for one table type and wait for completion
+    function Stmt trigger_codegen(Bit#(32) htt_val);
+        return seq
+            axi4_lite_write(cfg_wr, fromInteger(cfg_codegen_offs),
+                htt_val | (1 << cg_trigger_bit));
+            // poll STATUS.codegen_busy until clear
+            rg_axil_rsp <= 'hFFFF;
+            while (unpack(rg_axil_rsp[sts_cg_busy_bit])) seq
+                axi4_lite_read(cfg_rd, fromInteger(cfg_status_offs));
+                action
+                    let rsp <- axi4_lite_read_response(cfg_rd);
+                    rg_axil_rsp <= rsp;
+                endaction
+            endseq
+        endseq;
+    endfunction
+
+    // ================================================================
+    // Main test sequence
+    // ================================================================
+
+    Stmt main = seq
+        rg_out_count <= 0;
+        rg_finished <= False;
+        rg_axil_rsp <= 0;
+
+        print_fmt($format("=== TestBlueJPEG start ==="), GREEN);
+
+        // ---- phase 1: create SimRAM and load image ----
+        action
+            let ram <- create_SimRAM(fromInteger(valueOf(ram_words)), fromInteger(valueof(TDiv#(WordWidth, 8))));
+            rg_ram_ptr <= ram;
+        endaction
+        print_s("Loading image into SimRAM...", YELLOW);
+        action
+            let img <- create_ImageLoader(input_image_path);
+            rg_img_load_ptr <= img;
+        endaction
+        write_to_mem_interleaved_ImageLoader(rg_img_load_ptr, rg_ram_ptr, 0);
+        print_s("Image loaded", GREEN);
+
+        // ---- phase 2: wait for table init ----
+        print_s("Waiting for default table init...", YELLOW);
+        fsm_wait_ready.start();
+        await(fsm_wait_ready.done());
+
+        // ---- phase 3: generate Huffman codes (4 tables) ----
+        // Default BITS/VAL tables are already loaded at init; just run codegen.
+        // HuffTableType_t: DC_Luma=0, DC_Chroma=1, AC_Luma=2, AC_Chroma=3
+        print_s("Generating Huffman codes...", YELLOW);
+        trigger_codegen(0);  // DC_Luma
+        trigger_codegen(1);  // DC_Chroma
+        trigger_codegen(2);  // AC_Luma
+        trigger_codegen(3);  // AC_Chroma
+        print_s("Huffman code generation complete", GREEN);
+
+        // ---- phase 4: configure BlueJPEG ----
+        print_s("Configuring BlueJPEG...", YELLOW);
+        action
+            // IMG_SIZE: [15:0]=width, [31:16]=height
+            Bit#(16) im_width = fromInteger(valueof(InputWidth));
+            Bit#(16) im_height = fromInteger(valueof(InputHeight));
+            axi4_lite_write(cfg_wr, fromInteger(cfg_img_size_offs),
+                {im_height, im_width});
+        endaction
+        // SUBSAMPLING: 4:4:4 = 0
+        axi4_lite_write(cfg_wr, fromInteger(cfg_subsampling_offs), 1);
+
+        // ---- phase 5: start encoder ----
+        print_s("Starting BlueJPEG encoder...", YELLOW);
+        axi4_lite_write(cfg_wr, fromInteger(cfg_ctrl_offs),
+            1 << ctrl_start_bit);
+
+        // ---- phase 6: feed pixels + collect output + poll done ----
+        par
+            seq fsm_feed_pixels.start(); await(fsm_feed_pixels.done()); endseq
+            seq fsm_collect.start();     await(fsm_collect.done());     endseq
+            seq fsm_poll_done.start();   await(fsm_poll_done.done());   endseq
+        endpar
+
+        print_fmt($format("JPEG encoding complete, %0d bytes output", rg_out_count), GREEN);
+        print_fmt($format("Output written to %s and SimRAM[%0d..]",
+            output_jpeg_path, out_base_addr), GREEN);
+        print_fmt($format("=== TestBlueJPEG PASSED ==="), GREEN);
+    endseq;
+
+    FSM fsm_test <- mkFSM(main);
+
+    method Action go();
+        fsm_test.start();
+    endmethod
+
+    method Bool done();
+        return fsm_test.done();
+    endmethod
+
+endmodule
+
+endpackage

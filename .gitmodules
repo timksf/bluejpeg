@@ -10,3 +10,6 @@
 [submodule "dep/BlueSY"]
 	path = dep/BlueSY
 	url = https://github.com/timksf/BlueSY.git
+[submodule "dep/CImg"]
+	path = dep/CImg
+	url = https://github.com/GreycLab/CImg.git
