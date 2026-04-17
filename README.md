@@ -119,3 +119,8 @@ make compile          # compile BSV for Bluesim
 make sim              # run simulation (default: TestBlueJPEG)
 make verilog          # generate Verilog from mkBlueJPEG
 ```
+
+At the moment, generating the verilog for a specific module works like this:
+```sh
+make SIM_TYPE=VERILOG MAIN_MODULE=SynthTest TOP_MODULE=mkBlueJPEGTop_2560_12_12 compile_top
+```
