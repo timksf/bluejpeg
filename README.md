@@ -70,6 +70,7 @@ a ready-to-use core.
 
 #### Not yet completed
 
+- [ ] Make Image Tiler optional
 - [ ] Working verilog simulation for all testbenches (VPI imports still fail)
 - [ ] Fix chroma subsampling (4:2:2 / 4:2:0)
 - [ ] Hardware verification on FPGA
