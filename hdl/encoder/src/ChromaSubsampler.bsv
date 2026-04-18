@@ -2,8 +2,9 @@ package ChromaSubsampler;
 
 import FIFO :: *;
 import GetPut :: *;
-import SpecialFIFOs :: *;
+import BUtils :: *;
 import RegFile :: *;
+import SpecialFIFOs :: *;
 
 import Types :: *;
 
@@ -37,7 +38,7 @@ module mkChromaSubsampler#(NumProxy#(block_w) _)(ChromaSubsampler_ifc)
     endfunction
 
     Bool col_odd = rg_col[0] == 1;
-    Bit#(line_addr_w) pair_idx = truncate(rg_col >> 1);
+    Bit#(line_addr_w) pair_idx = cExtend(rg_col >> 1);
 
     function Action advance_col();
         return action

@@ -40,7 +40,7 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
     //all port-0 rules are mutually exclusive
     (* conflict_free = "r_emit, r_stuff, r_pad, r_pad_done, r_check_done" *)
 
-    //accept new codeword when buffer has room (port 1 sees emit's updates)
+    //accept new codeword when buffer has room (port 1 sees emit updates)
     rule r_accumulate (!rg_finishing && rg_bits[1] <= 32 && !rg_stuff[1]);
         let cw = f_in.first; f_in.deq;
 

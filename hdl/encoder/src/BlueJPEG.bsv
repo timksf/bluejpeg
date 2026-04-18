@@ -15,6 +15,7 @@ import ImageTilingEngine :: *;
 import ChannelSplitter :: *;
 import YBlockReorder :: *;
 import ChromaSubsampler :: *;
+import ChromaBlockReorder :: *;
 import DUDispatcher :: *;
 import DUProc :: *;
 import RLE :: *;
@@ -50,8 +51,8 @@ Integer sts_cg_busy_bit = 1;
 Integer cg_trigger_bit  = 31;
 
 //table write address ranges
-Integer tbl_range_base           = 'h0100;
-Integer tbl_range_end            = 'h2000;
+Integer tbl_range_base          = 'h0100;
+Integer tbl_range_end           = 'h2000;
 
 Integer tbl_qluma_raw_base      = 'h0100;  // 64 × 4B
 Integer tbl_qchroma_raw_base    = 'h0200;
@@ -268,9 +269,6 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         // -- quant_scale fits in 32 bits (mkTableStorage, mkDUProc via mkQuantize_RT)
         Add#(a__, quant_scale, 32),
 
-        // -- mkChromaSubsampler: line-buffer address width fits in 13 bits
-        Add#(b__, TLog#(TDiv#(max_imw, 2)), 13),
-
         // -- mkImageTilingEngine: line-width counter fits in BRAM address width (always true)
         Add#(c__, TLog#(max_imw), TLog#(TMul#(max_imw, 8))),
 
@@ -285,7 +283,11 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         //    Supports non-power-of-2 max widths (e.g. 2560).
         Div#(max_imw, 64, max_blk_cols),
         NumAlias#(bram_addr_w, TLog#(TMul#(max_blk_cols, 64))),
-        Add#(g__, bram_addr_w, 32)
+        Add#(g__, bram_addr_w, 32),
+
+        // -- mkChromaBlockReorder: bram with capacity to store 4x4 downsampled blocks for entire 
+        //    image width. Address width of 32 has to fit (which it definitely will)
+        Add#(b__, TLog#(TMul#(max_blk_cols, 16)), 32)
     );
 
     function print_s = print_mod_pre_color_t_s;
@@ -301,7 +303,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         scale_in_dct     : False,
         transpose_in_dct : False,
         _q_scale         : cfg._prx_qsc,
-        debug            : True
+        debug            : False
     };
 
     NumProxy#(max_blk_cols) _prx_mbc = ?;
@@ -320,9 +322,14 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     ImageTilingEngine_ifc#(YCbCr_t, 8, 8)   img_tiler <- mkImageTilingEngine(cfg._prx_miw);
     ChannelSplitter_ifc                     ch_splt   <- mkChannelSplitter;
 
+    NumProxy#(8) _prx_bw = ?;
+
     YBlockReorder_ifc                       y_reord   <- mkYBlockReorder(_prx_mbc, False);
-    ChromaSubsampler_ifc#(max_imw)          subs_cb   <- mkChromaSubsampler(True);
-    ChromaSubsampler_ifc#(max_imw)          subs_cr   <- mkChromaSubsampler(True);
+    ChromaSubsampler_ifc                    subs_cb   <- mkChromaSubsampler(_prx_bw);
+    ChromaSubsampler_ifc                    subs_cr   <- mkChromaSubsampler(_prx_bw);
+
+    ChromaBlockReorder_ifc                  cr_reord_cb <- mkChromaBlockReorder(_prx_mbc);
+    ChromaBlockReorder_ifc                  cr_reord_cr <- mkChromaBlockReorder(_prx_mbc);
 
     DUDispatcher_ifc                        du_disp   <- mkDUDispatcher;
     DUProc_t#(DPw)                          du_proc   <- mkDUProc(du_proc_cfg);
@@ -356,9 +363,12 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     FIFO#(UInt#(8)) f_cb_du_buf <- mkSizedFIFO(64);
     FIFO#(UInt#(8)) f_cr_du_buf <- mkSizedFIFO(64);
 
+    mkConnection(subs_cb.pixel_out, cr_reord_cb.pixel_in);  //subsampled Cb -> chroma reorder
+    mkConnection(subs_cr.pixel_out, cr_reord_cr.pixel_in);  //subsampled Cr -> chroma reorder
+
     mkConnection(y_reord.pixel_out, du_disp.y);             //reordered Y -> dispatcher
-    mkConnection(subs_cb.pixel_out, toPut(f_cb_du_buf));    //subsampled Cb -> chroma DU buffer
-    mkConnection(subs_cr.pixel_out, toPut(f_cr_du_buf));    //subsampled Cr -> chroma DU buffer
+    mkConnection(cr_reord_cb.pixel_out, toPut(f_cb_du_buf)); //reordered Cb -> chroma DU buffer
+    mkConnection(cr_reord_cr.pixel_out, toPut(f_cr_du_buf)); //reordered Cr -> chroma DU buffer
     mkConnection(toGet(f_cb_du_buf), du_disp.cb);           //chroma DU buffer -> dispatcher
     mkConnection(toGet(f_cr_du_buf), du_disp.cr);           //chroma DU buffer -> dispatcher
 
@@ -528,8 +538,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         img_tiler.set_img_width(truncate(width));
         du_disp.set_mode(mode);
         y_reord.configure(mode, truncate(blk_cols));
-        subs_cb.configure(mode, truncate(width));
-        subs_cr.configure(mode, truncate(width));
+        subs_cb.configure(mode);
+        subs_cr.configure(mode);
+        cr_reord_cb.configure(mode, truncate(blk_cols));
+        cr_reord_cr.configure(mode, truncate(blk_cols));
         fwriter.configure(width, height, mode);
 
         rg_state     <= S_RUNNING;
