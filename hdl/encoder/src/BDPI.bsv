@@ -129,5 +129,13 @@ import "BDPI" function ActionValue#(Int#(16)) quant_ref_i16(Int#(16) val, Bit#(3
 
 import "BDPI" function ActionValue#(Bit#(1024)) zigzag_ref_i16(Bit#(1024) in, Bool transposed);
 
+// Full JPEG reference encoder: runs bit-accurate SW pipeline and stores
+// output bytes in SimRAM. Returns total byte count.
+import "BDPI" function ActionValue#(UInt#(32)) jpeg_encode_ref(
+    String image_path,
+    UInt#(8) subsampling_mode,
+    UInt#(64) ram_ptr,
+    UInt#(64) start_addr
+);
 
 endpackage

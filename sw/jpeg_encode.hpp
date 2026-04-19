@@ -116,6 +116,7 @@ namespace jpegencode {
         subsampling_t subsampling_mode;
         bool use_predefined_huffman_tables = false;
         const jpeg_huffman_table_set_t *huffman_tables = nullptr;
+        bool interleaved = false; // true: single interleaved scan matching HW encoder
     };
     
     static uint8_t std_luma_quant[64] = { 
@@ -448,9 +449,13 @@ namespace jpegencode {
         }
 
         // DC values in the entropy-coded scan must always be differenced, regardless of how the Huffman tables were built.
-        JPEGHuffmanCode::dc_diff(y_dct | std::views::stride(64));
-        JPEGHuffmanCode::dc_diff(cb_dct | std::views::stride(64));
-        JPEGHuffmanCode::dc_diff(cr_dct | std::views::stride(64));
+        // For interleaved mode, dc_diff is done inline in write_interleaved_scan with per-component predictors,
+        // so we must NOT pre-difference the coefficients.
+        if (!params.interleaved) {
+            JPEGHuffmanCode::dc_diff(y_dct | std::views::stride(64));
+            JPEGHuffmanCode::dc_diff(cb_dct | std::views::stride(64));
+            JPEGHuffmanCode::dc_diff(cr_dct | std::views::stride(64));
+        }
 
 #ifdef DEBUG
         if(debug) {
@@ -473,21 +478,40 @@ namespace jpegencode {
         }
 #endif
 
-        uintmax_t s = jpegwriter::write_jpeg_file(
-            params.output_filename,
-            params.width,
-            params.height,
-            y_dct,
-            cb_dct,
-            cr_dct, 
-            params.subsampling_mode,
-            luma_quantizer,
-            chroma_quantizer,
-            huff_luma_dc,
-            huff_luma_ac,
-            huff_chroma_dc,
-            huff_chroma_ac
-        );
+        uintmax_t s;
+        if (params.interleaved) {
+            s = jpegwriter::write_jpeg_file_interleaved(
+                params.output_filename,
+                params.width,
+                params.height,
+                y_dct,
+                cb_dct,
+                cr_dct,
+                params.subsampling_mode,
+                luma_quantizer,
+                chroma_quantizer,
+                huff_luma_dc,
+                huff_luma_ac,
+                huff_chroma_dc,
+                huff_chroma_ac
+            );
+        } else {
+            s = jpegwriter::write_jpeg_file(
+                params.output_filename,
+                params.width,
+                params.height,
+                y_dct,
+                cb_dct,
+                cr_dct, 
+                params.subsampling_mode,
+                luma_quantizer,
+                chroma_quantizer,
+                huff_luma_dc,
+                huff_luma_ac,
+                huff_chroma_dc,
+                huff_chroma_ac
+            );
+        }
         return s;
     }
 

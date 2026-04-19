@@ -89,7 +89,8 @@ int main(int argc, char **argv) {
         .output_filename                = output_name,
         .subsampling_mode               = subsampling,
         .use_predefined_huffman_tables  = true,
-        .huffman_tables                 = nullptr
+        .huffman_tables                 = nullptr,
+        .interleaved                    = true
     };
 
     std::cout << "Bit-accurate encoding: " << input_file

@@ -62,7 +62,7 @@ void print_range_formatted(std::string_view fmt, InRange&& vs, const char* delim
     std::ranges::copy(fmtd, std::ostream_iterator<std::string>(std::cout, delim));
 }
 
-ycbcr_t rgb2ycbcr(rgb_t rgb) {
+inline ycbcr_t rgb2ycbcr(rgb_t rgb) {
     float M[3][3] = {
         {0.299, 0.587, 0.114 },
         {-0.168736, -0.331264, 0.5},
