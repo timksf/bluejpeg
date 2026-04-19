@@ -5,10 +5,35 @@
 #include <cstdint>
 #include <utility>
 #include <bitset>
+#include <span>
+#include <concepts>
 
 enum class JPEGCoeffCategory: uint8_t {
     DC = 0,
     AC = 1
+};
+
+/*
+    Concepts for generic JPEG block processing pipeline.
+    These constrain the callables that can be injected into process_channel / encode_jpeg.
+*/
+
+// 2D DCT: takes input block and writes frequency coefficients to output block
+template<typename F>
+concept dct_2d_fn = requires(F f, std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
+    { f(in, out) } -> std::same_as<void>;
+};
+
+// Block quantization: modifies coefficients in-place (captures table internally)
+template<typename F>
+concept quantize_block_fn = requires(F f, std::span<int16_t, 64> block) {
+    { f(block) } -> std::same_as<void>;
+};
+
+// Block reordering (zigzag): reads from input span, writes reordered to output span
+template<typename F>
+concept reorder_block_fn = requires(F f, std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
+    { f(in, out) } -> std::same_as<void>;
 };
 
 constexpr size_t MAX_CODE_LEN = 32;

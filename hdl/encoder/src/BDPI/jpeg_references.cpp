@@ -2,6 +2,7 @@
 #include "../../../../sw/dct.hpp"
 #include "../../../../sw/util.hpp"
 #include "../../../../sw/jpeg_encode.hpp"
+#include "jpeg_fixed_point.hpp"
 #include <cstdint>
 #include <span>
 #include <cstdlib>
@@ -274,63 +275,73 @@ extern "C" {
         }
     }
 
-    //fixed point AAN to model hardware
+    //fixed point AAN — delegates to shared header (jpeg_fixed_point.hpp)
     void dct1d_aan_fixed(std::span<int16_t, 8> block, std::span<int16_t, 8> freqs, int f_scale) {
-        int32_t a1 = static_cast<int32_t>(std::round(0.707106781 * (1 << f_scale)));
-        int32_t a2 = static_cast<int32_t>(std::round(0.541196100 * (1 << f_scale)));
-        int32_t a3 = a1;
-        int32_t a4 = static_cast<int32_t>(std::round(1.306562964 * (1 << f_scale)));
-        int32_t a5 = static_cast<int32_t>(std::round(0.382683432 * (1 << f_scale)));
+        //runtime dispatch to compile-time scale; only 12 and 8 are used in practice
+        if (f_scale == 12) {
+            fixedpoint::dct1d_aan_fixed<12>(block, freqs);
+        } else if (f_scale == 8) {
+            fixedpoint::dct1d_aan_fixed<8>(block, freqs);
+        } else {
+            //fallback: use runtime-parameterized version for other scales
+            //mirrors BSV pipeline: all intermediates are int16_t, additions saturate
+            using fixedpoint::sat_add;
 
-        auto mul = [&](int32_t val, int32_t mult) -> int32_t {
-            //fixed point multiplication with rounding
-            return (val * mult + (1 << (f_scale - 1))) >> f_scale;
-        };
+            int32_t a1 = static_cast<int32_t>(std::round(0.707106781 * (1 << f_scale)));
+            int32_t a2 = static_cast<int32_t>(std::round(0.541196100 * (1 << f_scale)));
+            int32_t a3 = a1;
+            int32_t a4 = static_cast<int32_t>(std::round(1.306562964 * (1 << f_scale)));
+            int32_t a5 = static_cast<int32_t>(std::round(0.382683432 * (1 << f_scale)));
 
-        //stage 0
-        int32_t b0 =  block[0] + block[7];
-        int32_t b1 =  block[1] + block[6];
-        int32_t b2 =  block[2] + block[5];
-        int32_t b3 =  block[3] + block[4];
-        int32_t b4 = -block[4] + block[3];
-        int32_t b5 = -block[5] + block[2];
-        int32_t b6 = -block[6] + block[1];
-        int32_t b7 = -block[7] + block[0];
+            auto mul = [&](int16_t val, int32_t mult) -> int16_t {
+                int32_t prod = static_cast<int32_t>(val) * mult;
+                return static_cast<int16_t>((prod + (1 << (f_scale - 1))) >> f_scale);
+            };
 
-        //stage 1
-        int32_t c0 =  b0 + b3;  int32_t c1 = b1 + b2;
-        int32_t c2 = -b2 + b1;  int32_t c3 = -b3 + b0;
-        int32_t c4 = -b4 - b5;  int32_t c5 = b5 + b6;
-        int32_t c6 =  b6 + b7;  int32_t c7 = b7;
+            int16_t b0 = sat_add( block[0],  block[7]);
+            int16_t b1 = sat_add( block[1],  block[6]);
+            int16_t b2 = sat_add( block[2],  block[5]);
+            int16_t b3 = sat_add( block[3],  block[4]);
+            int16_t b4 = sat_add(static_cast<int16_t>(-block[4]), block[3]);
+            int16_t b5 = sat_add(static_cast<int16_t>(-block[5]), block[2]);
+            int16_t b6 = sat_add(static_cast<int16_t>(-block[6]), block[1]);
+            int16_t b7 = sat_add(static_cast<int16_t>(-block[7]), block[0]);
 
-        //stage 2
-        int32_t d0 = c0 + c1; int32_t d1 = -c1 + c0;
-        int32_t d2 = c2 + c3; int32_t d3 = c3;
-        int32_t d4 = c4;      int32_t d5 = c5;
-        int32_t d6 = c6;      int32_t d7 = c7;
+            int16_t c0 = sat_add( b0,  b3); int16_t c1 = sat_add( b1,  b2);
+            int16_t c2 = sat_add(static_cast<int16_t>(-b2), b1);
+            int16_t c3 = sat_add(static_cast<int16_t>(-b3), b0);
+            int16_t c4 = sat_add(static_cast<int16_t>(-b4), static_cast<int16_t>(-b5));
+            int16_t c5 = sat_add( b5,  b6);
+            int16_t c6 = sat_add( b6,  b7);
+            int16_t c7 = b7;
 
-        int32_t helper = mul(d4 + d6, a5);
+            int16_t d0 = sat_add( c0,  c1); int16_t d1 = sat_add(static_cast<int16_t>(-c1), c0);
+            int16_t d2 = sat_add( c2,  c3); int16_t d3 = c3;
+            int16_t d4 = c4; int16_t d5 = c5; int16_t d6 = c6; int16_t d7 = c7;
 
-        //stage 3
-        int32_t e0 = d0;                    int32_t e1 = d1;
-        int32_t e2 = mul(d2, a1);           int32_t e3 = d3;
-        int32_t e4 = mul(-d4, a2) - helper; int32_t e5 = mul(d5, a3);
-        int32_t e6 = mul(d6, a4) - helper;  int32_t e7 = d7;
+            int16_t helper = mul(sat_add(d4, d6), a5);
 
-        //stage 4
-        int32_t f0 = e0;      int32_t f1 = e1;
-        int32_t f2 = e2 + e3; int32_t f3 = e3 - e2;
-        int32_t f4 = e4;      int32_t f5 = e5 + e7;
-        int32_t f6 = e6;      int32_t f7 = e7 - e5;
+            int16_t e0 = d0; int16_t e1 = d1;
+            int16_t e2 = mul(d2, a1); int16_t e3 = d3;
+            int16_t e4 = sat_add(static_cast<int16_t>(-mul(d4, a2)), static_cast<int16_t>(-helper));
+            int16_t e5 = mul(d5, a3);
+            int16_t e6 = sat_add(mul(d6, a4), static_cast<int16_t>(-helper));
+            int16_t e7 = d7;
 
-        //stage 5 (write unscaled outputs)
-        freqs[0] = f0;          freqs[4] = f1;
-        freqs[2] = f2;          freqs[6] = f3;
-        freqs[5] = f4 + f7;     freqs[1] = f5 + f6;
-        freqs[7] = -f6 + f5;    freqs[3] = f7 - f4;
+            int16_t f0 = e0; int16_t f1 = e1;
+            int16_t f2 = sat_add( e2,  e3); int16_t f3 = sat_add( e3, static_cast<int16_t>(-e2));
+            int16_t f4 = e4; int16_t f5 = sat_add( e5,  e7);
+            int16_t f6 = e6; int16_t f7 = sat_add( e7, static_cast<int16_t>(-e5));
+
+            freqs[0] = f0; freqs[4] = f1; freqs[2] = f2; freqs[6] = f3;
+            freqs[5] = sat_add( f4,  f7); freqs[1] = sat_add( f5,  f6);
+            freqs[7] = sat_add(static_cast<int16_t>(-f6), f5);
+            freqs[3] = sat_add( f7, static_cast<int16_t>(-f4));
+        }
     }
 
     void mcu_proc_ref(uint32_t *output_packed, const uint32_t *input_packed, uint8_t luma_not_chroma) {
+        using namespace jpegencode;
         int16_t input[64];
         int16_t shifted[64];
         int16_t dct_out[64];
@@ -349,22 +360,29 @@ extern "C" {
             shifted[i] = input[i] - 128;
         }
 
-        //dct
-        std::span<int16_t, 64> in_span(shifted, 64);
-        std::span<int16_t, 64> out_span(dct_out, 64);
-        dct::dct2d_as_1d<int16_t, 8>(in_span, out_span, [](std::span<int16_t, 8> in, std::span<int16_t, 8> out) {
-            dct1d_aan_fixed(in, out, 12); // Use 12-bit fixed point HW emulation
-        });
+        //dct — use shared fixed-point implementation
+        fixedpoint::dct2d_fixed<12>(
+            std::span<int16_t, 64>(shifted, 64),
+            std::span<int16_t, 64>(dct_out, 64)
+        );
 
-        //quantization
+        //quantization — use shared fixed-point quantization
+        std::array<int16_t, 64> scaled_mults;
+        uint8_t *table = luma_not_chroma ? std_luma_quant : std_chroma_quant;
+        fixedpoint::compute_scaled_quant_table<12>(
+            std::span<const uint8_t, 64>(table, 64),
+            scaled_mults
+        );
         for (int i = 0; i < 64; ++i) {
-            quant_out[i] = quant_ref_i16(dct_out[i], i, luma_not_chroma, true, 12);
+            quant_out[i] = fixedpoint::quantize_coeff_fixed<12>(dct_out[i], scaled_mults[i]);
         }
 
         //zigzag
-        std::span<int16_t, 64> q_span(quant_out, 64);
-        std::span<int16_t, 64> f_span(final_out, 64);
-        jpegencode::reorder(q_span, f_span, std::span{ zigzag });
+        reorder(
+            std::span<int16_t, 64>(quant_out, 64),
+            std::span<int16_t, 64>(final_out, 64),
+            std::span{ zigzag }
+        );
 
         //pack output
         for(int i = 0; i < 32; ++i) {

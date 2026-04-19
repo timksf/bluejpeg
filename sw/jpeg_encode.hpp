@@ -245,14 +245,17 @@ namespace jpegencode {
         2D DCT-II -> quantization -> reordering (zigzag) -> DC diff calculation
         
         These steps are performed in 8x8 blocks.
+        The processing functions (DCT, quantization, reordering) are injected as callables,
+        constrained by the concepts defined in jpeg_types.hpp.
     */
-    template<rng::random_access_range Channel, numeric_type R>
+    template<rng::random_access_range Channel, dct_2d_fn DctFn, quantize_block_fn QuantFn, reorder_block_fn ReorderFn>
     auto process_channel(
         Channel&& channel,
         size_t width,
         size_t height,
-        std::span<R, 64> quantizer, //quantization table as span with static extent
-        bool luma_not_chroma,
+        DctFn&& dct_fn,
+        QuantFn&& quant_fn,
+        ReorderFn&& reorder_fn,
         bool debug
     ){
         assert(width % 8 == 0 && "Width is not a multiple of 8");
@@ -269,8 +272,10 @@ namespace jpegencode {
                 get_block8x8(channel, block, j, i, width, height);
                 
 #ifdef DEBUG
-                std::cout << std::format("block{} {}:", (i/8*width/8)+j/8, luma_not_chroma ? "Y" : "CHR") << std::endl;
-                print_range_2d_formatted("{:4d}", std::span{ block }, 8, 8);
+                if(debug) {
+                    std::cout << std::format("block{}:", (i/8*width/8)+j/8) << std::endl;
+                    print_range_2d_formatted("{:4d}", std::span{ block }, 8, 8);
+                }
 #endif
                 
                 //mean shift to 0
@@ -278,30 +283,34 @@ namespace jpegencode {
                     block[l] -= 128;
                 
                 //perform 2D DCT-II
-                auto cosine = cosine_lookup<8>;
-                // dct::dct2d_fast<int16_t, 8>(block, dct, cosine);
-                dct::dct2d_as_1d<int16_t, 8>(block, dct, dct::dct1d_aan_unscaled<int16_t, float>);
+                dct_fn(std::span<int16_t, 64>{ block }, std::span<int16_t, 64>{ dct });
 
 #ifdef DEBUG
-                std::cout << std::endl << "after DCT:" << std::endl;
-                print_range_2d_formatted("{:4d}", dct, 8, 8);
+                if(debug) {
+                    std::cout << std::endl << "after DCT:" << std::endl;
+                    print_range_2d_formatted("{:4d}", dct, 8, 8);
+                }
 #endif
 
                 //quantize dct values
-                quantize(std::span{ dct }, quantizer);
+                quant_fn(std::span<int16_t, 64>{ dct });
 
 #ifdef DEBUG
-                std::cout << std::endl << "after quantization:" << std::endl;
-                print_range_2d_formatted("{:4d}", dct, 8, 8);
+                if(debug) {
+                    std::cout << std::endl << "after quantization:" << std::endl;
+                    print_range_2d_formatted("{:4d}", dct, 8, 8);
+                }
 #endif
 
                 //reorder into zigzag pattern
-                reorder(std::span{ dct }, std::span{ zigzagged }, std::span{ zigzag });
+                reorder_fn(std::span<int16_t, 64>{ dct }, std::span<int16_t, 64>{ zigzagged });
 
 #ifdef DEBUG
-                std::cout << std::endl << "after zigzagging:";
-                print_range_formatted("{:4d}", zigzagged);
-                std::cout << std::endl;
+                if(debug) {
+                    std::cout << std::endl << "after zigzagging:";
+                    print_range_formatted("{:4d}", zigzagged);
+                    std::cout << std::endl;
+                }
 #endif
 
                 //copy reordered data into result sequence
@@ -313,24 +322,28 @@ namespace jpegencode {
         return dcts;
     }
 
-    template<rng::random_access_range Channel, numeric_type R>
+    template<rng::random_access_range Channel, dct_2d_fn DctFn, quantize_block_fn QuantFn, reorder_block_fn ReorderFn>
     auto process_luma(
         Channel &&luma,
         size_t width,
         size_t height,
-        std::span<R, 64> quantizer,
+        DctFn&& dct_fn,
+        QuantFn&& quant_fn,
+        ReorderFn&& reorder_fn,
         bool debug
     ) {
-        return process_channel(luma, width, height, quantizer, true, debug);
+        return process_channel(luma, width, height, dct_fn, quant_fn, reorder_fn, debug);
     }
 
-    template<rng::random_access_range Channel, numeric_type R>
+    template<rng::random_access_range Channel, dct_2d_fn DctFn, quantize_block_fn QuantFn, reorder_block_fn ReorderFn>
     auto process_chroma(
         Channel &&chroma,
         size_t width,
         size_t height,
         subsampling_t subsampling_mode,
-        std::span<R, 64> quantizer,
+        DctFn&& dct_fn,
+        QuantFn&& quant_fn,
+        ReorderFn&& reorder_fn,
         bool debug
     ) {
         //after subsampling, extract the new coding blocks with strided access
@@ -356,11 +369,34 @@ namespace jpegencode {
             rng::copy(chroma | subsample_extract, std::back_inserter(chroma_sub));
             assert(chroma_sub.size() == chroma.size()/4 && "Subsampling failed");
         }
-        return process_channel(chroma_sub, width / div_horiz, height / div_vert, quantizer, false, debug);
+        return process_channel(chroma_sub, width / div_horiz, height / div_vert, dct_fn, quant_fn, reorder_fn, debug);
     }
 
-    template<rng::input_range InRange> requires rng::sized_range<InRange>
-    uintmax_t encode_jpeg(InRange &&img_ycbcr, const jpeg_params_t &params, bool debug = false){
+    /*
+        Generic JPEG encoder. Processing functions (DCT, quantization, reordering) are injected
+        as callables constrained by the concepts in jpeg_types.hpp.
+        
+        The quantization callables capture their respective tables internally.
+        Raw quantization tables must still be provided for the JPEG file header.
+    */
+    template<
+        rng::input_range InRange,
+        dct_2d_fn DctFn,
+        quantize_block_fn QuantLumaFn,
+        quantize_block_fn QuantChromaFn,
+        reorder_block_fn ReorderFn
+    > requires rng::sized_range<InRange>
+    uintmax_t encode_jpeg(
+        InRange &&img_ycbcr,
+        const jpeg_params_t &params,
+        std::span<uint8_t, 64> luma_quantizer,
+        std::span<uint8_t, 64> chroma_quantizer,
+        DctFn&& dct_fn,
+        QuantLumaFn&& quant_luma_fn,
+        QuantChromaFn&& quant_chroma_fn,
+        ReorderFn&& reorder_fn,
+        bool debug = false
+    ){
         JPEGHuffmanCode huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac;
         std::vector<uint8_t> Y, CB, CR;
 
@@ -376,27 +412,21 @@ namespace jpegencode {
         subsample(CR, params.height, params.width, params.subsampling_mode);
         subsample(CB, params.height, params.width, params.subsampling_mode);
 
-        uint8_t luma_quantizer[64], chroma_quantizer[64];
-        rng::copy(std_luma_quant, std::end(std_luma_quant), luma_quantizer);
-        rng::copy(std_chroma_quant, std::end(std_chroma_quant), chroma_quantizer);
-
-        //setup quantization tables
-        set_quality(std::span{ luma_quantizer }, params.quality);
-        set_quality(std::span{ chroma_quantizer }, params.quality);
-
 #ifdef DEBUG
-        std::cout << "Quantization Tables" << std::endl;
-        std::cout << "LUMA: " << std::endl;
-        print_range_2d_formatted("{:d}", luma_quantizer, 8, 8);
-        std::cout << std::endl << "CHROMA: " << std::endl;
-        print_range_2d_formatted("{:d}", chroma_quantizer, 8, 8);
-        std::cout << std::endl;
+        if(debug) {
+            std::cout << "Quantization Tables" << std::endl;
+            std::cout << "LUMA: " << std::endl;
+            print_range_2d_formatted("{:d}", luma_quantizer, 8, 8);
+            std::cout << std::endl << "CHROMA: " << std::endl;
+            print_range_2d_formatted("{:d}", chroma_quantizer, 8, 8);
+            std::cout << std::endl;
+        }
 #endif
 
         //perform DCT transformation
-        auto y_dct = process_luma(Y, params.width, params.height, std::span{ luma_quantizer }, debug);
-        auto cb_dct = process_chroma(CB, params.width, params.height, params.subsampling_mode, std::span{ chroma_quantizer }, debug);
-        auto cr_dct = process_chroma(CR, params.width, params.height, params.subsampling_mode, std::span{ chroma_quantizer }, debug);
+        auto y_dct = process_luma(Y, params.width, params.height, dct_fn, quant_luma_fn, reorder_fn, debug);
+        auto cb_dct = process_chroma(CB, params.width, params.height, params.subsampling_mode, dct_fn, quant_chroma_fn, reorder_fn, debug);
+        auto cr_dct = process_chroma(CR, params.width, params.height, params.subsampling_mode, dct_fn, quant_chroma_fn, reorder_fn, debug);
 
         if(params.use_predefined_huffman_tables) {
             auto &tables = params.huffman_tables == nullptr ? default_huffman_tables() : *params.huffman_tables;
@@ -423,8 +453,10 @@ namespace jpegencode {
         JPEGHuffmanCode::dc_diff(cr_dct | std::views::stride(64));
 
 #ifdef DEBUG
-        std::cout << "Huffman Table Information" << std::endl;
-        JPEGHuffmanPrinter::print_symbol_freqs(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
+        if(debug) {
+            std::cout << "Huffman Table Information" << std::endl;
+            JPEGHuffmanPrinter::print_symbol_freqs(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
+        }
 #endif
 
         huff_luma_dc.build_table();
@@ -433,10 +465,12 @@ namespace jpegencode {
         huff_chroma_ac.build_table();
 
 #ifdef DEBUG
-        JPEGHuffmanPrinter::print_symbol_lengths(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
-        JPEGHuffmanPrinter::print_encoded_symb_freqs(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
-        JPEGHuffmanPrinter::print_sorted_code_lengths(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
-        JPEGHuffmanPrinter::print_sorted_codes(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
+        if(debug) {
+            JPEGHuffmanPrinter::print_symbol_lengths(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
+            JPEGHuffmanPrinter::print_encoded_symb_freqs(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
+            JPEGHuffmanPrinter::print_sorted_code_lengths(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
+            JPEGHuffmanPrinter::print_sorted_codes(huff_luma_dc, huff_luma_ac, huff_chroma_dc, huff_chroma_ac);
+        }
 #endif
 
         uintmax_t s = jpegwriter::write_jpeg_file(
@@ -447,14 +481,61 @@ namespace jpegencode {
             cb_dct,
             cr_dct, 
             params.subsampling_mode,
-            std::span{ luma_quantizer },
-            std::span{ chroma_quantizer },
+            luma_quantizer,
+            chroma_quantizer,
             huff_luma_dc,
             huff_luma_ac,
             huff_chroma_dc,
             huff_chroma_ac
         );
         return s;
+    }
+
+    /*
+        Default float-based JPEG encoder — preserves the original API.
+        Uses floating-point AAN DCT, integer-division quantization, and standard zigzag reorder.
+    */
+    template<rng::input_range InRange> requires rng::sized_range<InRange>
+    uintmax_t encode_jpeg(InRange &&img_ycbcr, const jpeg_params_t &params, bool debug = false){
+        uint8_t luma_quantizer[64], chroma_quantizer[64];
+        rng::copy(std_luma_quant, std::end(std_luma_quant), luma_quantizer);
+        rng::copy(std_chroma_quant, std::end(std_chroma_quant), chroma_quantizer);
+
+        //setup quantization tables
+        set_quality(std::span{ luma_quantizer }, params.quality);
+        set_quality(std::span{ chroma_quantizer }, params.quality);
+
+        // Float AAN DCT
+        auto dct_fn = [](std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
+            dct::dct2d_as_1d<int16_t, 8>(in, out, dct::dct1d_aan_unscaled<int16_t, float>);
+        };
+
+        // Integer-division quantization (captures table by copy)
+        auto make_quant_fn = [](std::span<uint8_t, 64> table) {
+            std::array<uint8_t, 64> qtable;
+            std::copy(table.begin(), table.end(), qtable.begin());
+            return [qtable](std::span<int16_t, 64> block) {
+                for(size_t i = 0; i < 64; ++i)
+                    block[i] /= qtable[i];
+            };
+        };
+
+        // Standard zigzag reorder
+        auto reorder_fn = [](std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
+            reorder(in, out, std::span{ zigzag });
+        };
+
+        return encode_jpeg(
+            std::forward<InRange>(img_ycbcr),
+            params,
+            std::span<uint8_t, 64>{ luma_quantizer },
+            std::span<uint8_t, 64>{ chroma_quantizer },
+            dct_fn,
+            make_quant_fn(std::span<uint8_t, 64>{ luma_quantizer }),
+            make_quant_fn(std::span<uint8_t, 64>{ chroma_quantizer }),
+            reorder_fn,
+            debug
+        );
     }   
 
 }
