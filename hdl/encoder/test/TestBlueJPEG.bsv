@@ -6,7 +6,6 @@ import Connectable :: *;
 import Clocks :: *;
 
 import BlueAXI :: *;
-import AXI4LiteTestHelper :: *;
 import BlueJPEGTestHelper :: *;
 
 import BDPI :: *;
@@ -29,7 +28,7 @@ typedef 32 WordWidth;
 typedef 2560 MaxImgWidth;
 typedef 16  DCTScale;
 typedef 16  QuantScale;
-typedef 12  DPw;
+typedef 16  DPw;
 
 
 module [Module] mkTestBlueJPEG(TestHandler);
