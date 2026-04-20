@@ -69,8 +69,8 @@ module [Module] test(TestHandler)
     let cur_rst <- exposeCurrentReset;
 
     // ---- DUT: BlueJPEG ----
-    BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, DPw) jpeg_cfg 
-        = BlueJPEGCfg_t {
+    BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, DPw) jpeg_cfg = 
+        BlueJPEGCfg_t {
             slow_clock : cur_clk,
             slow_reset : cur_rst,
             _prx_miw   : ?,
@@ -141,9 +141,7 @@ module [Module] test(TestHandler)
     endseq;
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
 
-    // Collect JPEG output bytes:
-    //   - write to SimRAM output region (one byte per word)
-    //   - write to output file
+    //collect JPEG output bytes to output file and RAM output region
     Stmt collect_output = seq
         action
             let fd <- $fopen(output_jpeg_path, "wb");
@@ -172,10 +170,10 @@ module [Module] test(TestHandler)
     endseq;
     FSM fsm_collect <- mkFSM(collect_output);
 
-    // Poll CTRL register for done bit
+    //poll CTRL register for done bit
     FSM fsm_poll_done <- mkFSM(bjpeg_poll_done(cfg_rd, rg_axil_rsp, rg_finished));
 
-    // Wait for default table init (poll STATUS.ready)
+    //wait for default table init (poll STATUS.ready)
     FSM fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(cfg_rd, rg_axil_rsp));
 
 
@@ -226,8 +224,7 @@ module [Module] test(TestHandler)
 
         // ---- phase 5: start encoder ----
         print_s("Starting BlueJPEG encoder...", YELLOW);
-        axi4_lite_write(cfg_wr, fromInteger(cfg_ctrl_offs),
-            1 << ctrl_start_bit);
+        axi4_lite_write(cfg_wr, fromInteger(cfg_ctrl_offs), 1 << ctrl_start_bit);
 
         // ---- phase 6: feed pixels + collect output + poll done ----
         par

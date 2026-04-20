@@ -26,6 +26,7 @@ typedef 32 WordWidth;
 typedef 2560 MaxImgWidth;
 typedef 12   DCTScale;
 typedef 12   QuantScale;
+typedef 16   DPw;
 
 
 module [Module] mkTestJPEGBitAccuracy(TestHandler);
@@ -66,14 +67,16 @@ module [Module] test(TestHandler)
     let cur_rst <- exposeCurrentReset;
 
     // ---- DUT: BlueJPEG ----
-    let jpeg_cfg = BlueJPEGCfg_t {
-        slow_clock : cur_clk,
-        slow_reset : cur_rst,
-        _prx_miw   : ?,
-        _prx_dsc   : ?,
-        _prx_qsc   : ?
-    };
-    BlueJPEG_ifc#(MaxImgWidth, DCTScale, QuantScale) dut <- mkBlueJPEG(jpeg_cfg);
+    BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, DPw) jpeg_cfg = 
+        BlueJPEGCfg_t {
+            slow_clock : cur_clk,
+            slow_reset : cur_rst,
+            _prx_miw   : ?,
+            _prx_dsc   : ?,
+            _prx_qsc   : ?,
+            _prx_dpw   : ?
+        };
+    BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
 
     // ---- AXI-Lite master for DUT configuration ----
     AXI4_Lite_Master_Rd#(32, 32) cfg_rd <- mkAXI4_Lite_Master_Rd(1);
@@ -224,8 +227,7 @@ module [Module] test(TestHandler)
 
         // ---- phase 6: start encoder ----
         print_s("Starting BlueJPEG encoder...", YELLOW);
-        axi4_lite_write(cfg_wr, fromInteger(cfg_ctrl_offs),
-            1 << ctrl_start_bit);
+        axi4_lite_write(cfg_wr, fromInteger(cfg_ctrl_offs), 1 << ctrl_start_bit);
 
         // ---- phase 7: feed pixels + collect output + poll done ----
         par
