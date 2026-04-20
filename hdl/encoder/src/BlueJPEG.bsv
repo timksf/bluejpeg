@@ -34,6 +34,9 @@ Integer cfg_status_offs      = 'h04;
 Integer cfg_img_size_offs    = 'h08;
 Integer cfg_subsampling_offs = 'h0C;
 Integer cfg_codegen_offs     = 'h10;
+Integer cfg_perfcycles_offs  = 'h20;
+Integer cfg_perfpixels_offs  = 'h24;
+Integer cfg_perfbytes_offs   = 'h28;
 
 //control register bit positions
 Integer ctrl_start_bit  = 0;
@@ -83,6 +86,10 @@ interface BlueJPEGCfg_ifc;
     method Action set_status(Bool tables_ready, Bool codegen_busy);
     method Action clear_codegen_trigger();
 
+    method Action perf_rst();
+    method Action perf_cycles_incr();
+    method Action perf_pixels_incr();
+
     interface ReadOnly#(Bool) start;
     interface ReadOnly#(Bit#(16)) img_width;
     interface ReadOnly#(Bit#(16)) img_height;
@@ -98,11 +105,13 @@ endinterface
 
 module [ConfigCtx#(32, 32)] blueJPEGConfig(BlueJPEGCfg_ifc);
 
-    Reg#(Bit#(32)) rg_ctrl         <- mkReg(0);
-    Reg#(Bit#(32)) rg_status       <- mkReg(0);
-    Reg#(Bit#(32)) rg_img_size     <- mkReg(0);
-    Reg#(Bit#(32)) rg_subsampling  <- mkReg(0);
-    Reg#(Bit#(32)) rg_codegen      <- mkReg(0);
+    Reg#(Bit#(32)) rg_ctrl          <- mkReg(0);
+    Reg#(Bit#(32)) rg_status        <- mkReg(0);
+    Reg#(Bit#(32)) rg_img_size      <- mkReg(0);
+    Reg#(Bit#(32)) rg_subsampling   <- mkReg(0);
+    Reg#(Bit#(32)) rg_codegen       <- mkReg(0);
+    Reg#(Bit#(32)) rg_perfcycles    <- mkReg(0);
+    Reg#(Bit#(32)) rg_perfpixels    <- mkReg(0);
 
     FIFO#(TableWriteCmd_t) f_tbl_wr <- mkFIFO;
 
@@ -112,6 +121,8 @@ module [ConfigCtx#(32, 32)] blueJPEGConfig(BlueJPEGCfg_ifc);
     addReg(cfg_img_size_offs, rg_img_size);
     addReg(cfg_subsampling_offs, rg_subsampling);
     addReg(cfg_codegen_offs, rg_codegen);
+    addRegRO(cfg_perfcycles_offs, rg_perfcycles);
+    addRegRO(cfg_perfpixels_offs, rg_perfpixels);
 
     // --- table write range (0x0100 – 0x1FFF) ---
     // A single WriteRangeOperator covers the whole table space.
@@ -184,6 +195,14 @@ module [ConfigCtx#(32, 32)] blueJPEGConfig(BlueJPEGCfg_ifc);
     method Action clear_codegen_trigger();
         rg_codegen <= 0;
     endmethod
+
+    method Action perf_rst  = action 
+        rg_perfcycles <= 0; 
+        rg_perfpixels <= 0;
+    endaction;
+
+    method Action perf_cycles_incr = action rg_perfcycles <= rg_perfcycles + 1; endaction;
+    method Action perf_pixels_incr = action rg_perfpixels <= rg_perfpixels + 1; endaction;
 
     interface ReadOnly start;
         method Bool _read();
@@ -425,6 +444,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     // ---- AXI input -> tiler ----
 
     rule r_axis_to_tiler (rg_state == S_RUNNING);
+        config_.device_ifc.perf_pixels_incr(); //count ingested pixels
         let pkg <- axis_rd.pkg.get();
         YCbCr_t pix = unpack(pkg.data);
         img_tiler.line_in.put(pix);
@@ -518,6 +538,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             rg_du_pix <= rg_du_pix + 1;
     endrule
 
+    rule rperf (rg_state == S_RUNNING);
+        config_.device_ifc.perf_cycles_incr();
+    endrule
+
     // ---- start handling (driven by CTRL register) ----
 
     rule r_start (rg_state == S_IDLE && config_.device_ifc.start() && tables.ready() && !tables.codegen_busy());
@@ -558,6 +582,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         rg_du_pix    <= 0;
         img_tiler.start();
         fwriter.start();
+
+        config_.device_ifc.perf_rst();
     endrule
 
     // ---- done handling ----

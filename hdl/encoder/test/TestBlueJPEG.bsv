@@ -233,6 +233,11 @@ module [Module] test(TestHandler)
             seq fsm_poll_done.start();   await(fsm_poll_done.done());   endseq
         endpar
 
+        axil_read(cfg_rd, fromInteger(cfg_perfcycles_offs), rg_axil_rsp);
+        print_fmt($format("Elapsed Cycles: %0d", rg_axil_rsp), GREEN);
+        axil_read(cfg_rd, fromInteger(cfg_perfpixels_offs), rg_axil_rsp);
+        print_fmt($format("Processed Pixels: %0d", rg_axil_rsp), GREEN);
+
         print_fmt($format("JPEG encoding complete, %0d bytes output", rg_out_count), GREEN);
         print_fmt($format("Output written to %s and SimRAM[%0d..]",
             output_jpeg_path, out_base_addr), GREEN);
