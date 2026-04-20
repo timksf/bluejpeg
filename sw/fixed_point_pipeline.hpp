@@ -7,6 +7,10 @@
     
     These plug the fixed-point kernels from jpeg_fixed_point.hpp into the generic
     encode_jpeg pipeline to produce a bit-accurate HW model.
+
+    The bits template parameter (default 16) selects the data path width,
+    matching BSV Int#(bits). For bits <= 16 the coefficient type is int16_t;
+    for bits <= 32 it is int32_t.
 */
 
 #include "jpeg_types.hpp"
@@ -18,36 +22,41 @@
 
 namespace fixedpoint_pipeline {
 
-    // Returns a lambda satisfying dct_2d_fn that performs fixed-point 2D AAN DCT.
-    template<int dct_scale>
+    //returns a lambda satisfying dct_2d_fn that performs fixed-point 2D AAN DCT.
+    template<int dct_scale, int bits = 16>
     auto make_fixed_dct() {
-        return [](std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
-            fixedpoint::dct2d_fixed<dct_scale>(in, out);
+        using coeff = jpeg_fixedpoint::coeff_t<bits>;
+        return [](std::span<coeff, 64> in, std::span<coeff, 64> out) {
+            jpeg_fixedpoint::dct2d_fixed<dct_scale, bits>(in, out);
         };
     }
 
-    // Returns a lambda satisfying quantize_block_fn.
-    // Pre-computes scaled multipliers from the raw Q-table (absorbing AAN factors)
-    // and captures them. Applies fixed-point quantization per coefficient.
-    template<int q_scale>
-    auto make_fixed_quantize(std::span<const uint8_t, 64> raw_q_table) {
-        std::array<int16_t, 64> scaled_mults;
-        fixedpoint::compute_scaled_quant_table<q_scale>(raw_q_table, scaled_mults);
-        return [scaled_mults](std::span<int16_t, 64> block) {
+    //returns a lambda satisfying quantize_block_fn.
+    //computes scaled multipliers from the raw Q-table (absorbing AAN factors) at each call,
+    //then applies fixed-point quantization per coefficient.
+    template<int q_scale, int bits = 16>
+    auto make_fixed_quantize() {
+        using coeff = jpeg_fixedpoint::coeff_t<bits>;
+        return [](std::span<coeff, 64> block, std::span<const uint8_t, 64> raw_q_table) {
+            std::array<coeff, 64> scaled_mults;
+            //TODO: move scaling outside this function
+            jpeg_fixedpoint::compute_scaled_quant_table<q_scale, bits>(raw_q_table, scaled_mults);
             for (size_t i = 0; i < 64; ++i) {
-                block[i] = fixedpoint::quantize_coeff_fixed<q_scale>(block[i], scaled_mults[i]);
+                block[i] = jpeg_fixedpoint::quantize_coeff_fixed<q_scale, bits>(block[i], scaled_mults[i]);
             }
         };
     }
 
-    // Returns a lambda satisfying reorder_block_fn using the standard JPEG zigzag order.
-    inline auto make_zigzag() {
-        return [](std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
+    //returns a lambda satisfying reorder_block_fn using the standard JPEG zigzag order.
+    template<int bits = 16>
+    auto make_zigzag() {
+        using coeff = jpeg_fixedpoint::coeff_t<bits>;
+        return [](std::span<coeff, 64> in, std::span<coeff, 64> out) {
             for (size_t i = 0; i < 64; ++i)
                 out[i] = in[zigzag[i]];
         };
     }
 
-} // namespace fixedpoint_pipeline
+}
 
 #endif // __FIXED_POINT_PIPELINE_HPP__

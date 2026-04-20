@@ -23,9 +23,9 @@ typedef 16 DPw;
 //
 // Bit-accuracy regression test.
 //
-// Feeds pixel blocks through the HW DUProc pipeline (DCT→Quant→Zigzag)
+// Feeds pixel blocks through the HW DUProc pipeline (DCT->Quant->Zigzag)
 // and through the C++ bit-accurate model (mcu_proc_ref, which uses the
-// shared fixedpoint:: kernels from jpeg_fixed_point.hpp).
+// shared jpeg_fixedpoint:: kernels from jpeg_fixed_point.hpp).
 //
 // Asserts **exact** match (max_diff == 0) for every coefficient.
 // Tests both Luma and Chroma paths, with random and deterministic data.

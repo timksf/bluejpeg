@@ -55,7 +55,7 @@ CXX_NO_OPT := 1
 CPP_FILES += $(PWD)/src/BDPI/*.cpp
 
 # Custom defines added to compile steps
-EXTRA_FLAGS+=-I $(PWD)/../../dep/BlueSY/src -Xc++ -std=c++23 -I $(PWD)/../../dep/CImg -Xc++ -std=c++23 -D cimg_use_png
+EXTRA_FLAGS+=-I $(PWD)/src/BDPI -I $(PWD)/../../dep/BlueSY/src -Xc++ -std=c++23 -I $(PWD)/../../dep/CImg -Xc++ -std=c++23 -D cimg_use_png
 
 # EXTRA_FLAGS+=-Wno-format-overflow -Wno-dangling-else
 

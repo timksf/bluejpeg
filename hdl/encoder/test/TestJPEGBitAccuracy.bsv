@@ -22,8 +22,8 @@ typedef 192 InputHeight;
 typedef 32 WordWidth;
 
 typedef 2560 MaxImgWidth;
-typedef 16   DCTScale;
-typedef 16   QuantScale;
+typedef 12   DCTScale;
+typedef 12   QuantScale;
 
 
 module [Module] mkTestJPEGBitAccuracy(TestHandler);
@@ -235,7 +235,7 @@ module [Module] test(TestHandler)
         // ---- phase 2: run SW reference encoder ----
         print_s("Running SW reference encoder...", YELLOW);
         action
-            // subsampling_mode=1 → YCBCR_422 (matching HW config below)
+            // subsampling_mode=1 -> YCBCR_422 (matching HW config below)
             let n <- jpeg_encode_ref(input_image_path, 1, rg_ram_ptr, ref_out_base);
             rg_ref_bytes <= n;
         endaction

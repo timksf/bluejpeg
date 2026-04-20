@@ -12,6 +12,7 @@
 #include "../../../../sw/bmp.hpp"
 #include "../../../../sw/ppm.hpp"
 #include "../../../../sw/util.hpp"
+#include "../../../../sw/fixed_point_pipeline.hpp"
 #include "../../../../sw/jpeg_encode.hpp"
 
 #include <cstdint>
@@ -22,8 +23,9 @@
 #include <vector>
 #include <ranges>
 
-static constexpr int DCT_SCALE = 16;
-static constexpr int Q_SCALE   = 16;
+static constexpr int DPW        = 16;
+static constexpr int DCT_SCALE  = 12;
+static constexpr int Q_SCALE    = 12;
 
 extern "C" {
 
@@ -65,39 +67,17 @@ extern "C" {
             default: ss = subsampling_t::YCBCR_444; break;
         }
 
-        // Standard JPEG quantization tables (quality 50, no scaling)
+        //standard JPEG quantization tables (quality 50, no scaling)
         uint8_t luma_q[64], chroma_q[64];
-        std::copy(std::begin(jpegencode::std_luma_quant),
-                  std::end(jpegencode::std_luma_quant), luma_q);
-        std::copy(std::begin(jpegencode::std_chroma_quant),
-                  std::end(jpegencode::std_chroma_quant), chroma_q);
+        std::copy(std::begin(jpegencode::std_luma_quant),   std::end(jpegencode::std_luma_quant), luma_q);
+        std::copy(std::begin(jpegencode::std_chroma_quant), std::end(jpegencode::std_chroma_quant), chroma_q);
 
-        // Build fixed-point pipeline callables (dct_scale=16, q_scale=16)
-        auto dct_fn = [](std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
-            fixedpoint::dct2d_fixed<DCT_SCALE>(in, out);
-        };
+        //build fixed-point pipeline callables (dct_scale=16, q_scale=16)
+        auto dct_fn     = fixedpoint_pipeline::make_fixed_dct<DCT_SCALE, DPW>();
+        auto quant_fn   = fixedpoint_pipeline::make_fixed_quantize<Q_SCALE, DPW>();
+        auto reorder_fn = fixedpoint_pipeline::make_zigzag<DPW>();
 
-        std::array<int16_t, 64> luma_mults, chroma_mults;
-        fixedpoint::compute_scaled_quant_table<Q_SCALE>(
-            std::span<const uint8_t, 64>{ luma_q }, luma_mults);
-        fixedpoint::compute_scaled_quant_table<Q_SCALE>(
-            std::span<const uint8_t, 64>{ chroma_q }, chroma_mults);
-
-        auto quant_luma_fn = [luma_mults](std::span<int16_t, 64> block) {
-            for (size_t i = 0; i < 64; ++i)
-                block[i] = fixedpoint::quantize_coeff_fixed<Q_SCALE>(block[i], luma_mults[i]);
-        };
-        auto quant_chroma_fn = [chroma_mults](std::span<int16_t, 64> block) {
-            for (size_t i = 0; i < 64; ++i)
-                block[i] = fixedpoint::quantize_coeff_fixed<Q_SCALE>(block[i], chroma_mults[i]);
-        };
-
-        auto reorder_fn = [](std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
-            for (size_t i = 0; i < 64; ++i)
-                out[i] = in[zigzag[i]];
-        };
-
-        // Encode to a temporary file
+        //encode to a temporary file
         std::string tmp_name = "/tmp/jpeg_encode_ref_output";
 
         jpegencode::jpeg_params_t params {
@@ -115,7 +95,7 @@ extern "C" {
             img_ycbcr, params,
             std::span<uint8_t, 64>{ luma_q },
             std::span<uint8_t, 64>{ chroma_q },
-            dct_fn, quant_luma_fn, quant_chroma_fn, reorder_fn
+            dct_fn, quant_fn, reorder_fn
         );
 
         // Read JPEG file back and store bytes in SimRAM (one byte per word)

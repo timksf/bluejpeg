@@ -265,7 +265,7 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
         if (rg_cnt == 15) begin
             rg_cnt <= 0;
             if (rg_huffval_total == 0) begin
-                //no HUFFVAL entries — advance to next table or to SOS
+                //no HUFFVAL entries - advance to next table or to SOS
                 if (rg_dht == 3)
                     rg_state <= SCAN_HEAD;
                 else begin

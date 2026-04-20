@@ -97,6 +97,54 @@ namespace jpegwriter {
         f << 1; //quant table
     }
 
+    // Core per-block entropy coder. Encodes one 64-coefficient block.
+    //   dc_coeff: already-differenced DC value to encode
+    //   block:    random-access range; block[1..63] are the AC values (block[0] unused)
+    // Does NOT flush the bitstream — caller is responsible.
+    template<rng::random_access_range Block>
+    void write_block_coeffs(
+        bit_ostream &bitstream,
+        int16_t dc_coeff,
+        Block &&block,
+        const JPEGHuffmanCode &huff_dc,
+        const JPEGHuffmanCode &huff_ac
+    ) {
+        // DC
+#ifdef DEBUG
+        std::cout << std::format("Writing DC value={:d}", dc_coeff) << std::endl;
+#endif
+        bitstream << huff_dc.encode_coeff(dc_coeff);
+
+        // find last nonzero AC coefficient
+        int last_nonzero = 63;
+        while (last_nonzero > 0 && block[last_nonzero] == 0)
+            last_nonzero--;
+
+        int consecutive_zeros = 0;
+        for (int i = 1; i <= 63; i++) {
+            if (i > last_nonzero) {
+#ifdef DEBUG
+                std::cout << std::format("Writing EOB at {}", i) << std::endl;
+#endif
+                bitstream << std::make_pair(huff_ac.huffcode(0x00), huff_ac.huffsize(0x00)); // EOB
+                break;
+            }
+            if (block[i] == 0) {
+                if (++consecutive_zeros == 16) {
+                    bitstream << std::make_pair(huff_ac.huffcode(0xF0), huff_ac.huffsize(0xF0)); // ZRL
+                    consecutive_zeros = 0;
+                }
+            } else {
+#ifdef DEBUG
+                std::cout << std::format("Writing AC value={:d} with {:d} preceeding zeros", block[i], consecutive_zeros) << std::endl;
+#endif
+                bitstream << huff_ac.encode_coeff(block[i], consecutive_zeros);
+                consecutive_zeros = 0;
+            }
+        }
+        // if last_nonzero == 63, no EOB emitted — matches HW RLE
+    }
+
     template<rng::input_range InRange>
         requires (
             rng::sized_range<InRange> &&
@@ -121,59 +169,18 @@ namespace jpegwriter {
         f << 0x0 << 63; //Ss, Se
         f << 0x0; //unused Ah, Al
 
-        std::stringstream test_bits;
-        std::stringstream all_codes;
-
-        /*  Write encoded values
-            
-            Values are written as entropy coded segment which means they'll 
-            be converted to their huffman code and then written to the output file.
-
-            Since the codes are not necessarily 8 bits long, a temporary buffer is needed to
-            correctly append the entropy coded values to each other, this is handled inside bit_ostream
-            
-            There are also some special, implicit AC symbols for EOB and zero run lengths > 15,
-            these have to be handled separately
-        */
         bit_ostream bitstream { f };
-        int consecutive_zeros = 0, last_nonzero = 0;
-        for(auto i = 0; i < dct.size(); i++){
-            if(i % 64 == 0) { //DC values 
-#ifdef DEBUG
-                std::cout << std::format("Writing DC value={:d}", dct[i]) << std::endl;
-#endif
-                codeword_t code = huff_dc.encode_coeff(dct[i]);
-                bitstream << code;
-                // all_codes << std::format("{:0{}b}", code.second, code.first);
-                //after each DC value, check how many trailing zeros are at the end of this MCU
-                last_nonzero = i + 63;
-                while(last_nonzero > i && dct[last_nonzero] == 0) //move from back to front until nonzero encountered
-                    last_nonzero--;
-            } else if(i == last_nonzero + 1){ //only zeros remaining, end block with EOB
-#ifdef DEBUG
-                std::cout << std::format("Writing EOB at {}", i%64) << std::endl;
-#endif
-                codeword_t EOB = std::make_pair(huff_ac.huffcode(0x00), huff_ac.huffsize(0x00));
-                bitstream << EOB;
-                i = (i/64+1)*64-1; //move to start of next block
-            } else if(dct[i] == 0) { //intermediate zero
-                consecutive_zeros++;
-                if(consecutive_zeros == 16) {
-                    codeword_t ZRL = std::make_pair(huff_ac.huffcode(0xF0), huff_ac.huffsize(0xF0));
-                    bitstream << ZRL;
-                    consecutive_zeros = 0;
-                }
-            } else { //ordinary AC value
-#ifdef DEBUG
-                std::cout << std::format("Writing AC value={:d} with {:d} preceeding zeros", dct[i], consecutive_zeros) << std::endl;
-#endif
-                codeword_t code = huff_ac.encode_coeff(dct[i], consecutive_zeros);
-                bitstream << code;
-                consecutive_zeros = 0;
-            }
-        }
-        if(flush) bitstream.flush();
+        for (size_t base = 0; base + 64 <= dct.size(); base += 64)
+            write_block_coeffs(bitstream, dct[base], dct | std::views::drop(base), huff_dc, huff_ac);
+        if (flush) bitstream.flush();
     }
+
+    template<rng::random_access_range YRange, rng::random_access_range CbRange, rng::random_access_range CrRange>
+        requires (rng::sized_range<YRange> && rng::sized_range<CbRange> && rng::sized_range<CrRange>)
+    void write_interleaved_scan(byte_ostream &f, YRange &&y_dct, CbRange &&cb_dct, CrRange &&cr_dct,
+        size_t width, size_t height, subsampling_t subsampling_mode,
+        const JPEGHuffmanCode &huff_luma_dc, const JPEGHuffmanCode &huff_luma_ac,
+        const JPEGHuffmanCode &huff_chroma_dc, const JPEGHuffmanCode &huff_chroma_ac);
 
     template<rng::input_range InRange>
         requires (
@@ -193,13 +200,14 @@ namespace jpegwriter {
         const JPEGHuffmanCode &luma_huff_dc,
         const JPEGHuffmanCode &luma_huff_ac,
         const JPEGHuffmanCode &chroma_huff_dc,
-        const JPEGHuffmanCode &chroma_huff_ac
+        const JPEGHuffmanCode &chroma_huff_ac,
+        bool interleaved = false
     ) {
 
         std::ofstream jpeg_file(filename + ".jpg", std::ios::out | std::ios::trunc | std::ios::binary);
         byte_ostream f{ jpeg_file };
 
-        write_header(f);
+        write_header(f, 0x02);
 
         write_quantization_table(f, luma_quant, 0); //luma quantizer has table id 0
         write_quantization_table(f, chroma_quant, 1); //chroma quantizer has table id 1
@@ -212,12 +220,18 @@ namespace jpegwriter {
 
         write_frame_header(f, width, height, subsampling_mode);
 
-        write_scan(f, y_dct, 1, 0, 0, luma_huff_dc, luma_huff_ac);
-        std::cout << "Finished writing Y scan" << std::endl;
-        write_scan(f, cb_dct, 2, 1, 1, chroma_huff_dc, chroma_huff_ac);
-        std::cout << "Finished writing CB scan" << std::endl;
-        write_scan(f, cr_dct, 3, 1, 1, chroma_huff_dc, chroma_huff_ac);
-        std::cout << "Finished writing CR scan" << std::endl;
+        if(!interleaved) {
+            write_scan(f, y_dct, 1, 0, 0, luma_huff_dc, luma_huff_ac);
+            write_scan(f, cb_dct, 2, 1, 1, chroma_huff_dc, chroma_huff_ac);
+            write_scan(f, cr_dct, 3, 1, 1, chroma_huff_dc, chroma_huff_ac);
+        } else {
+            write_interleaved_scan(
+                f, y_dct, cb_dct, cr_dct,
+                width, height, subsampling_mode,
+                luma_huff_dc, luma_huff_ac,
+                chroma_huff_dc, chroma_huff_ac
+            );
+        }
 
         f << EOI[0] << EOI[1];
 
@@ -261,50 +275,24 @@ namespace jpegwriter {
 
         bit_ostream bitstream { f };
 
-        // Per-component DC predictors
-        int16_t prev_dc[3] = { 0, 0, 0 }; // Y, Cb, Cr
+        //per-component DC predictors
+        int16_t prev_dc[3] = { 0, 0, 0 }; //Y, Cb, Cr
 
-        // Helper: write one 64-coefficient block to the bitstream
-        // block[0] is the raw (non-differenced) DC value
-        auto write_block = [&](auto &&dct, size_t block_offset, int comp_idx,
-                               const JPEGHuffmanCode &huff_dc, const JPEGHuffmanCode &huff_ac)
-        {
-            // DC with inline differencing
+        //helper: write one 64-coefficient block with inline DC differencing
+        auto write_block = [&](
+            auto &&dct,
+            size_t block_offset,
+            int comp_idx,
+            const JPEGHuffmanCode &huff_dc,
+            const JPEGHuffmanCode &huff_ac
+        ) {
             int16_t dc_raw = dct[block_offset];
             int16_t dc_diff = dc_raw - prev_dc[comp_idx];
             prev_dc[comp_idx] = dc_raw;
-            bitstream << huff_dc.encode_coeff(dc_diff);
-
-            // AC coefficients — find last nonzero
-            int last_nonzero = 63;
-            while (last_nonzero > 0 && dct[block_offset + last_nonzero] == 0)
-                last_nonzero--;
-
-            int consecutive_zeros = 0;
-            for (int i = 1; i <= 63; i++) {
-                if (i > last_nonzero) {
-                    // All remaining are zero — emit EOB
-                    codeword_t EOB = std::make_pair(huff_ac.huffcode(0x00), huff_ac.huffsize(0x00));
-                    bitstream << EOB;
-                    break;
-                }
-                int16_t val = dct[block_offset + i];
-                if (val == 0) {
-                    consecutive_zeros++;
-                    if (consecutive_zeros == 16) {
-                        codeword_t ZRL = std::make_pair(huff_ac.huffcode(0xF0), huff_ac.huffsize(0xF0));
-                        bitstream << ZRL;
-                        consecutive_zeros = 0;
-                    }
-                } else {
-                    bitstream << huff_ac.encode_coeff(val, consecutive_zeros);
-                    consecutive_zeros = 0;
-                }
-            }
-            // If last_nonzero == 63 (no trailing zeros), no EOB is emitted — matches HW RLE
+            write_block_coeffs(bitstream, dc_diff, dct | std::views::drop(block_offset), huff_dc, huff_ac);
         };
 
-        // Determine Y blocks per MCU and MCU grid dimensions
+        //determine Y blocks per MCU and MCU grid dimensions
         int y_blocks_per_mcu, mcu_cols, mcu_rows;
         int y_width_blocks = width / 8;
         switch (subsampling_mode) {
@@ -325,11 +313,11 @@ namespace jpegwriter {
 
         for (int mcu_row = 0; mcu_row < mcu_rows; mcu_row++) {
             for (int mcu_col = 0; mcu_col < mcu_cols; mcu_col++) {
-                // Y blocks within this MCU
-                // For 444: 1 block at (mcu_row, mcu_col)
-                // For 422: 2 blocks at (mcu_row, 2*mcu_col) and (mcu_row, 2*mcu_col+1)
-                // For 420: 4 blocks at (2*mcu_row, 2*mcu_col), (2*mcu_row, 2*mcu_col+1),
-                //                      (2*mcu_row+1, 2*mcu_col), (2*mcu_row+1, 2*mcu_col+1)
+                //Y blocks within this MCU
+                //For 444: 1 block  at (mcu_row, mcu_col)
+                //For 422: 2 blocks at (mcu_row, 2*mcu_col) and (mcu_row, 2*mcu_col+1)
+                //For 420: 4 blocks at (2*mcu_row, 2*mcu_col), (2*mcu_row, 2*mcu_col+1),
+                //                     (2*mcu_row+1, 2*mcu_col), (2*mcu_row+1, 2*mcu_col+1)
                 switch (subsampling_mode) {
                     case subsampling_t::YCBCR_444: {
                         size_t bidx = (mcu_row * y_width_blocks + mcu_col) * 64;
@@ -353,68 +341,16 @@ namespace jpegwriter {
                         break;
                     }
                 }
-                // Cb block
+                //Cb block
                 size_t cb_offset = (mcu_row * chroma_width_blocks + mcu_col) * 64;
                 write_block(cb_dct, cb_offset, 1, huff_chroma_dc, huff_chroma_ac);
-                // Cr block
+                //Cr block
                 size_t cr_offset = (mcu_row * chroma_width_blocks + mcu_col) * 64;
                 write_block(cr_dct, cr_offset, 2, huff_chroma_dc, huff_chroma_ac);
             }
         }
 
         bitstream.flush();
-    }
-
-    /*
-        Write a complete JPEG file with a single interleaved scan, matching the hardware encoder.
-        Marker order: SOI → APP0 → DQT×2 → DHT×4 → SOF0 → SOS(Ns=3) → scan data → EOI
-        JFIF version 1.02.
-    */
-    template<rng::random_access_range YRange, rng::random_access_range CbRange, rng::random_access_range CrRange>
-        requires (
-            rng::sized_range<YRange>  && rng::sized_range<CbRange> && rng::sized_range<CrRange>
-        )
-    uintmax_t write_jpeg_file_interleaved(
-        const std::string &filename,
-        size_t width,
-        size_t height,
-        YRange &&y_dct,
-        CbRange &&cb_dct,
-        CrRange &&cr_dct,
-        subsampling_t subsampling_mode,
-        std::span<uint8_t, 64> luma_quant,
-        std::span<uint8_t, 64> chroma_quant,
-        const JPEGHuffmanCode &luma_huff_dc,
-        const JPEGHuffmanCode &luma_huff_ac,
-        const JPEGHuffmanCode &chroma_huff_dc,
-        const JPEGHuffmanCode &chroma_huff_ac
-    ) {
-        std::ofstream jpeg_file(filename + ".jpg", std::ios::out | std::ios::trunc | std::ios::binary);
-        byte_ostream f{ jpeg_file };
-
-        write_header(f, 0x02); // JFIF 1.02
-
-        write_quantization_table(f, luma_quant, 0);
-        write_quantization_table(f, chroma_quant, 1);
-
-        write_huffman_table(f, luma_huff_dc, 0x0);
-        write_huffman_table(f, luma_huff_ac, 0x0);
-        write_huffman_table(f, chroma_huff_dc, 0x1);
-        write_huffman_table(f, chroma_huff_ac, 0x1);
-
-        write_frame_header(f, width, height, subsampling_mode);
-
-        write_interleaved_scan(
-            f, y_dct, cb_dct, cr_dct,
-            width, height, subsampling_mode,
-            luma_huff_dc, luma_huff_ac,
-            chroma_huff_dc, chroma_huff_ac
-        );
-
-        f << EOI[0] << EOI[1];
-
-        jpeg_file.close();
-        return f.size();
     }
 
 }

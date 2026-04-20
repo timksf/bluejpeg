@@ -373,7 +373,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     mkConnection(toGet(f_cr_du_buf), du_disp.cr);           //chroma DU buffer -> dispatcher
 
     // DU processing pipeline (Server chain)
-    // dispatcher outputs UInt#(8), DUProc expects Int#(DPw) — convert
+    // dispatcher outputs UInt#(8), DUProc expects Int#(DPw) - convert
     // (pixel dispatch is handled by r_disp_to_duproc below, which also tracks DU boundaries)
     mkConnection(du_proc.data.response, rle.data.request);
     mkConnection(rle.data.response,     huff.data.request);
@@ -494,7 +494,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         end
 
         if (rg_du_pix == 63) begin
-            // end of DU — advance MCU phase and DU count
+            // end of DU - advance MCU phase and DU count
             rg_du_pix <= 0;
             let n_du = dus_per_mcu(rg_mode);
             if (rg_mcu_phase == n_du - 1)

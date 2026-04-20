@@ -3,9 +3,9 @@ project(jpegencodersw)
 set(CMAKE_CXX_STANDARD 23)
 set(CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "-O3")
-add_compile_definitions(DEBUG)
+# add_compile_definitions(DEBUG)
 
-# Shared fixed-point header lives in the HDL BDPI directory
+#shared fixed-point header lives in the HDL BDPI directory
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../hdl/encoder/src/BDPI
@@ -13,7 +13,6 @@ include_directories(
 
 add_executable(${PROJECT_NAME} tests/main.cpp)
 add_executable(encode encode.cpp)
-add_executable(huffman huffman.cpp)
 
 add_executable(encode_bitaccurate encode_bitaccurate.cpp)
 

@@ -275,17 +275,17 @@ extern "C" {
         }
     }
 
-    //fixed point AAN — delegates to shared header (jpeg_fixed_point.hpp)
+    //fixed point AAN - delegates to shared header (jpeg_fixed_point.hpp)
     void dct1d_aan_fixed(std::span<int16_t, 8> block, std::span<int16_t, 8> freqs, int f_scale) {
         //runtime dispatch to compile-time scale; only 12 and 8 are used in practice
         if (f_scale == 12) {
-            fixedpoint::dct1d_aan_fixed<12>(block, freqs);
+            jpeg_fixedpoint::dct1d_aan_fixed<12>(block, freqs);
         } else if (f_scale == 8) {
-            fixedpoint::dct1d_aan_fixed<8>(block, freqs);
+            jpeg_fixedpoint::dct1d_aan_fixed<8>(block, freqs);
         } else {
             //fallback: use runtime-parameterized version for other scales
             //mirrors BSV pipeline: all intermediates are int16_t, additions saturate
-            using fixedpoint::sat_add;
+            using jpeg_fixedpoint::sat_add;
 
             int32_t a1 = static_cast<int32_t>(std::round(0.707106781 * (1 << f_scale)));
             int32_t a2 = static_cast<int32_t>(std::round(0.541196100 * (1 << f_scale)));
@@ -360,21 +360,21 @@ extern "C" {
             shifted[i] = input[i] - 128;
         }
 
-        //dct — use shared fixed-point implementation
-        fixedpoint::dct2d_fixed<12>(
+        //dct - use shared fixed-point implementation
+        jpeg_fixedpoint::dct2d_fixed<12>(
             std::span<int16_t, 64>(shifted, 64),
             std::span<int16_t, 64>(dct_out, 64)
         );
 
-        //quantization — use shared fixed-point quantization
+        //quantization - use shared fixed-point quantization
         std::array<int16_t, 64> scaled_mults;
         uint8_t *table = luma_not_chroma ? std_luma_quant : std_chroma_quant;
-        fixedpoint::compute_scaled_quant_table<12>(
+        jpeg_fixedpoint::compute_scaled_quant_table<12>(
             std::span<const uint8_t, 64>(table, 64),
             scaled_mults
         );
         for (int i = 0; i < 64; ++i) {
-            quant_out[i] = fixedpoint::quantize_coeff_fixed<12>(dct_out[i], scaled_mults[i]);
+            quant_out[i] = jpeg_fixedpoint::quantize_coeff_fixed<12>(dct_out[i], scaled_mults[i]);
         }
 
         //zigzag

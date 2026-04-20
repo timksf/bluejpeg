@@ -16,23 +16,25 @@ enum class JPEGCoeffCategory: uint8_t {
 /*
     Concepts for generic JPEG block processing pipeline.
     These constrain the callables that can be injected into process_channel / encode_jpeg.
+    The Coeff parameter (default int16_t) selects the coefficient storage type,
+    allowing different data path widths (e.g. int32_t for bits > 16).
 */
 
-// 2D DCT: takes input block and writes frequency coefficients to output block
-template<typename F>
-concept dct_2d_fn = requires(F f, std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
+//2D DCT: takes input block and writes frequency coefficients to output block
+template<typename F, typename Coeff = int16_t>
+concept dct_2d_fn = requires(F f, std::span<Coeff, 64> in, std::span<Coeff, 64> out) {
     { f(in, out) } -> std::same_as<void>;
 };
 
-// Block quantization: modifies coefficients in-place (captures table internally)
-template<typename F>
-concept quantize_block_fn = requires(F f, std::span<int16_t, 64> block) {
-    { f(block) } -> std::same_as<void>;
+//block quantization: modifies coefficients in-place given the raw quantization table
+template<typename F, typename Coeff = int16_t>
+concept quantize_block_fn = requires(F f, std::span<Coeff, 64> block, std::span<const uint8_t, 64> table) {
+    { f(block, table) } -> std::same_as<void>;
 };
 
-// Block reordering (zigzag): reads from input span, writes reordered to output span
-template<typename F>
-concept reorder_block_fn = requires(F f, std::span<int16_t, 64> in, std::span<int16_t, 64> out) {
+//block reordering (zigzag): reads from input span, writes reordered to output span
+template<typename F, typename Coeff = int16_t>
+concept reorder_block_fn = requires(F f, std::span<Coeff, 64> in, std::span<Coeff, 64> out) {
     { f(in, out) } -> std::same_as<void>;
 };
 

@@ -100,7 +100,7 @@ def build_module_db(src_dir):
         modules = parse_bsv_file(bsv_file)
         for name, insts in modules.items():
             if name in db:
-                # Module defined in multiple files (unlikely) — merge
+                # Module defined in multiple files (unlikely) - merge
                 db[name].extend(insts)
             else:
                 db[name] = insts
@@ -280,7 +280,7 @@ def print_hierarchy(hierarchy):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BSV module hierarchy → Vivado TCL utilization report")
+    parser = argparse.ArgumentParser(description="BSV module hierarchy -> Vivado TCL utilization report")
     parser.add_argument("src_dir", help="Directory containing BSV source files")
     parser.add_argument("top", help="Top-level module constructor (e.g., mkBlueJPEG)")
     parser.add_argument("--out", "-o", help="Output TCL file (default: stdout)")
