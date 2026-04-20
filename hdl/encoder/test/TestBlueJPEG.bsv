@@ -6,6 +6,8 @@ import Connectable :: *;
 import Clocks :: *;
 
 import BlueAXI :: *;
+import AXI4LiteTestHelper :: *;
+import BlueJPEGTestHelper :: *;
 
 import BDPI :: *;
 import Types :: *;
@@ -27,6 +29,7 @@ typedef 32 WordWidth;
 typedef 2560 MaxImgWidth;
 typedef 16  DCTScale;
 typedef 16  QuantScale;
+typedef 12  DPw;
 
 
 module [Module] mkTestBlueJPEG(TestHandler);
@@ -67,14 +70,16 @@ module [Module] test(TestHandler)
     let cur_rst <- exposeCurrentReset;
 
     // ---- DUT: BlueJPEG ----
-    let jpeg_cfg = BlueJPEGCfg_t {
-        slow_clock : cur_clk,
-        slow_reset : cur_rst,
-        _prx_miw   : ?,
-        _prx_dsc   : ?,
-        _prx_qsc   : ?
-    };
-    BlueJPEG_ifc#(MaxImgWidth, DCTScale, QuantScale) dut <- mkBlueJPEG(jpeg_cfg);
+    BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, DPw) jpeg_cfg 
+        = BlueJPEGCfg_t {
+            slow_clock : cur_clk,
+            slow_reset : cur_rst,
+            _prx_miw   : ?,
+            _prx_dsc   : ?,
+            _prx_qsc   : ?,
+            _prx_dpw   : ?
+        };
+    BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
 
     // ---- AXI-Lite master for DUT configuration ----
     AXI4_Lite_Master_Rd#(32, 32) cfg_rd <- mkAXI4_Lite_Master_Rd(1);
@@ -169,52 +174,11 @@ module [Module] test(TestHandler)
     FSM fsm_collect <- mkFSM(collect_output);
 
     // Poll CTRL register for done bit
-    Stmt poll_done = seq
-        rg_axil_rsp <= 0;
-        while (!unpack(rg_axil_rsp[ctrl_done_bit]) && !rg_finished) seq
-            axi4_lite_read(cfg_rd, fromInteger(cfg_ctrl_offs));
-            action
-                let rsp <- axi4_lite_read_response(cfg_rd);
-                rg_axil_rsp <= rsp;
-            endaction
-        endseq
-        if (!rg_finished) seq
-            print_s("DUT signaled done via CTRL register", GREEN);
-            rg_finished <= True;
-        endseq
-    endseq;
-    FSM fsm_poll_done <- mkFSM(poll_done);
+    FSM fsm_poll_done <- mkFSM(bjpeg_poll_done(cfg_rd, rg_axil_rsp, rg_finished));
 
     // Wait for default table init (poll STATUS.ready)
-    Stmt wait_tables_ready = seq
-        rg_axil_rsp <= 0;
-        while (!unpack(rg_axil_rsp[sts_ready_bit])) seq
-            axi4_lite_read(cfg_rd, fromInteger(cfg_status_offs));
-            action
-                let rsp <- axi4_lite_read_response(cfg_rd);
-                rg_axil_rsp <= rsp;
-            endaction
-        endseq
-        print_s("Tables ready", GREEN);
-    endseq;
-    FSM fsm_wait_ready <- mkFSM(wait_tables_ready);
+    FSM fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(cfg_rd, rg_axil_rsp));
 
-    // Trigger Huffman codegen for one table type and wait for completion
-    function Stmt trigger_codegen(Bit#(32) htt_val);
-        return seq
-            axi4_lite_write(cfg_wr, fromInteger(cfg_codegen_offs),
-                htt_val | (1 << cg_trigger_bit));
-            // poll STATUS.codegen_busy until clear
-            rg_axil_rsp <= 'hFFFF;
-            while (unpack(rg_axil_rsp[sts_cg_busy_bit])) seq
-                axi4_lite_read(cfg_rd, fromInteger(cfg_status_offs));
-                action
-                    let rsp <- axi4_lite_read_response(cfg_rd);
-                    rg_axil_rsp <= rsp;
-                endaction
-            endseq
-        endseq;
-    endfunction
 
     // ================================================================
     // Main test sequence
@@ -249,21 +213,15 @@ module [Module] test(TestHandler)
         // Default BITS/VAL tables are already loaded at init; just run codegen.
         // HuffTableType_t: DC_Luma=0, DC_Chroma=1, AC_Luma=2, AC_Chroma=3
         print_s("Generating Huffman codes...", YELLOW);
-        trigger_codegen(0);  // DC_Luma
-        trigger_codegen(1);  // DC_Chroma
-        trigger_codegen(2);  // AC_Luma
-        trigger_codegen(3);  // AC_Chroma
+        bjpeg_trigger_codegen(cfg_wr, cfg_rd, rg_axil_rsp, 0);  // DC_Luma
+        bjpeg_trigger_codegen(cfg_wr, cfg_rd, rg_axil_rsp, 1);  // DC_Chroma
+        bjpeg_trigger_codegen(cfg_wr, cfg_rd, rg_axil_rsp, 2);  // AC_Luma
+        bjpeg_trigger_codegen(cfg_wr, cfg_rd, rg_axil_rsp, 3);  // AC_Chroma
         print_s("Huffman code generation complete", GREEN);
 
         // ---- phase 4: configure BlueJPEG ----
         print_s("Configuring BlueJPEG...", YELLOW);
-        action
-            // IMG_SIZE: [15:0]=width, [31:16]=height
-            Bit#(16) im_width = fromInteger(valueof(InputWidth));
-            Bit#(16) im_height = fromInteger(valueof(InputHeight));
-            axi4_lite_write(cfg_wr, fromInteger(cfg_img_size_offs),
-                {im_height, im_width});
-        endaction
+        bjpeg_cfg_img_size(cfg_wr, fromInteger(valueof(InputWidth)), fromInteger(valueof(InputHeight)));
         // SUBSAMPLING: 4:4:4 = 0
         axi4_lite_write(cfg_wr, fromInteger(cfg_subsampling_offs), 1);
 

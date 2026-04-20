@@ -24,9 +24,6 @@ import JPEGBitstream :: *;
 import JPEGFramewriter :: *;
 import TableStorage :: *;
 
-//datapath width
-typedef 16 DPw;
-
 // ================================================================
 // AXI-Lite register map
 // ================================================================
@@ -226,11 +223,7 @@ endmodule
 // Top-level interface
 // ================================================================
 
-interface BlueJPEG_ifc#(
-    numeric type max_img_width,
-    numeric type dct_scale,
-    numeric type quant_scale
-);
+interface BlueJPEG_ifc;
     (*prefix="S_AXIS"*)
     interface AXI4_Stream_Rd_Fab#(24, 0) s_axis;
     (*prefix="M_AXIS"*)
@@ -245,13 +238,15 @@ endinterface
 typedef struct {
     Clock slow_clock;
     Reset slow_reset;
-    NumProxy#(max_img_width) _prx_miw;
-    NumProxy#(dct_scale)     _prx_dsc;
-    NumProxy#(quant_scale)   _prx_qsc;
+    NumProxy#(max_img_width)    _prx_miw;
+    NumProxy#(dct_scale)        _prx_dsc;
+    NumProxy#(quant_scale)      _prx_qsc;
+    NumProxy#(datapath_width)   _prx_dpw;
 } BlueJPEGCfg_t#(
     numeric type max_img_width,
     numeric type dct_scale,
-    numeric type quant_scale
+    numeric type quant_scale,
+    numeric type datapath_width
 );
 
 typedef enum { S_IDLE, S_CONFIGURE, S_RUNNING, S_FLUSH, S_DONE } FrameState_t
@@ -264,8 +259,9 @@ typedef enum { S_IDLE, S_CONFIGURE, S_RUNNING, S_FLUSH, S_DONE } FrameState_t
 module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         max_imw,
         dct_scale,
-        quant_scale
-    ) cfg)(BlueJPEG_ifc#(max_imw, dct_scale, quant_scale)) provisos(
+        quant_scale,
+        dpw
+    ) cfg)(BlueJPEG_ifc) provisos(
         // -- quant_scale fits in 32 bits (mkTableStorage, mkDUProc via mkQuantize_RT)
         Add#(a__, quant_scale, 32),
 
@@ -287,7 +283,19 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
         // -- mkChromaBlockReorder: bram with capacity to store 4x4 downsampled blocks for entire 
         //    image width. Address width of 32 has to fit (which it definitely will)
-        Add#(b__, TLog#(TMul#(max_blk_cols, 16)), 32)
+        Add#(b__, TLog#(TMul#(max_blk_cols, 16)), 32),
+
+        // -- mkHuffEncoder:
+        //dpw >= 1
+        //dpw <= 32
+        //flog2
+        //truncate in calc_magnitude
+        Add#(1, d__, dpw),
+        Add#(h__, dpw, 32),
+        Add#(dpw, i__, TExp#(TLog#(dpw))),
+        Add#(4, j__, TLog#(dpw)),
+
+        Add#(k__, 8, dpw)
     );
 
     function print_s = print_mod_pre_color_t_s;
@@ -332,10 +340,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     ChromaBlockReorder_ifc                  cr_reord_cr <- mkChromaBlockReorder(_prx_mbc);
 
     DUDispatcher_ifc                        du_disp   <- mkDUDispatcher;
-    DUProc_t#(DPw)                          du_proc   <- mkDUProc(du_proc_cfg);
+    DUProc_t#(dpw)                          du_proc   <- mkDUProc(du_proc_cfg);
 
-    RLE_ifc#(DPw)                           rle       <- mkRLE;
-    HuffEncoder_ifc#(DPw)                   huff      <- mkHuffEncoder;
+    RLE_ifc#(dpw)                           rle       <- mkRLE;
+    HuffEncoder_ifc#(dpw)                   huff      <- mkHuffEncoder;
     JPEGBitstream_ifc                       stuffer   <- mkJPEGBitstream(False);
 
     JPEGFramewriter_ifc                     fwriter   <- mkJPEGFramewriter;
@@ -373,7 +381,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     mkConnection(toGet(f_cr_du_buf), du_disp.cr);           //chroma DU buffer -> dispatcher
 
     // DU processing pipeline (Server chain)
-    // dispatcher outputs UInt#(8), DUProc expects Int#(DPw) - convert
+    // dispatcher outputs UInt#(8), DUProc expects Int#(dpw) - convert
     // (pixel dispatch is handled by r_disp_to_duproc below, which also tracks DU boundaries)
     mkConnection(du_proc.data.response, rle.data.request);
     mkConnection(rle.data.response,     huff.data.request);
