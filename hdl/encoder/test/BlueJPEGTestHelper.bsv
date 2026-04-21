@@ -32,9 +32,7 @@ function Stmt bjpeg_trigger_codegen(
         axi4_lite_write(cfg_wr, fromInteger(cfg_codegen_offs),
             htt_val | (1 << cg_trigger_bit));
         rg_rsp <= 'hFFFF;
-        while (unpack(rg_rsp[sts_cg_busy_bit])) seq
-            axil_read(cfg_rd, fromInteger(cfg_status_offs), rg_rsp);
-        endseq
+        wait_bit_not_set(cfg_rd, cfg_status_offs, sts_cg_busy_bit, rg_rsp);
     endseq;
 endfunction
 

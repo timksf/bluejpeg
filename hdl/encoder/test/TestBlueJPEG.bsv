@@ -154,11 +154,9 @@ module [Module] test(TestHandler)
         while (!rg_finished) action
             let pkg <- axis_out.pkg.get();
             Bit#(8) b = pkg.data;
-            // write to SimRAM
-            write_word_SimRAM(rg_ram_ptr,
-                out_base_addr + extend(rg_out_count),
-                unpack(extend(b)));
-            // write to file
+            //write to SimRAM
+            write_word_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count), unpack(extend(b)));
+            //write to file
             $fwrite(rg_out_file, "%c", b);
             rg_out_count <= rg_out_count + 1;
             if (pkg.last) begin
@@ -220,7 +218,7 @@ module [Module] test(TestHandler)
         print_s("Configuring BlueJPEG...", YELLOW);
         bjpeg_cfg_img_size(cfg_wr, fromInteger(valueof(InputWidth)), fromInteger(valueof(InputHeight)));
         // SUBSAMPLING: 4:4:4 = 0
-        axi4_lite_write(cfg_wr, fromInteger(cfg_subsampling_offs), 1);
+        axi4_lite_write(cfg_wr, fromInteger(cfg_subsampling_offs), 0);
 
         // ---- phase 5: start encoder ----
         print_s("Starting BlueJPEG encoder...", YELLOW);
