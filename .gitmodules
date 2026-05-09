@@ -13,3 +13,6 @@
 [submodule "dep/CImg"]
 	path = dep/CImg
 	url = https://github.com/GreycLab/CImg.git
+[submodule "dep/bluecsr"]
+	path = dep/bluecsr
+	url = https://github.com/timksf/bluecsr.git
