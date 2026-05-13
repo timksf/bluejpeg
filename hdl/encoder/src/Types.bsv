@@ -54,10 +54,10 @@ typedef struct {
 
 //huffman table write command (for runtime table configuration)
 typedef enum {
-    DC_Luma,
-    DC_Chroma,
-    AC_Luma,
-    AC_Chroma
+    DC_Luma = 0,
+    DC_Chroma = 1,
+    AC_Luma = 2,
+    AC_Chroma = 3
 } HuffTableType_t deriving(Eq, Bits, FShow);
 
 typedef struct {
