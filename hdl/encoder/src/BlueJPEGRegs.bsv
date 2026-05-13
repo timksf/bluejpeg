@@ -22,7 +22,15 @@ endinterface
 
 module [BlueCSRCtx_t#(32, 32)] blueJPEGConfig(BlueJPEGCfg_ifc);
 
+    Reg#(Bit#(1)) rg_start;
+    Reg#(Bit#(1)) rg_done;
+    Reg#(Bit#(1)) rg_error;
+
     csr_regmap_def("BlueJPEG", "Register File for BlueJPEG encoder.");
+
+    //an ID register is usefule in designs with many peripherals
+    csr_reg_def('h00, "MIV", "Module ID and version register");
+    csr_reg_rc('h00, Bit#(12)'('h001), 0, "MID", "Module ID", "Unique ID for this module.");
 
 endmodule
 

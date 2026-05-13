@@ -4,7 +4,7 @@
 # synth_design -top mkDCT2D_Optimized_14b -mode out_of_context
 # synth_design -top mkMCUProc_14b -mode out_of_context
 # synth_design -top mkImageTilingEngine_1920 -mode out_of_context
-synth_design -top mkBlueJPEGTop_2560_12_12 -mode out_of_context
+synth_design -top mkBlueJPEGTop_1920_12_12_16 -mode out_of_context
 puts "Finished synth_design"
 
 # implement
