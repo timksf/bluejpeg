@@ -140,52 +140,20 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
 
     // csr_reg_def('h3C, "PERF3", "Performance Counter Cycles.");
 
-    csr_region_def('h100, 256, "QLUMAR",    "Raw luma quantization table, used for bitstream generation.");
-    csr_region_rw('h100, 256, fn_table_read(QLuma), fn_table_write(QLuma), "", "");
+    csr_region_rw('h100,  256, fn_table_read(QLuma),          fn_table_write(QLuma),          "QLUMAR",   "Raw luma quantization table, used for bitstream generation.");
+    csr_region_rw('h200,  256, fn_table_read(QChroma),        fn_table_write(QChroma),        "QCHROMAR", "Raw chroma quantization table, used for bitstream generation.");
+    csr_region_rw('h300,  256, fn_table_read(QLumaScaled),    fn_table_write(QLumaScaled),    "QLUMASC",  "Scaled luma quantization table, used during encoding.");
+    csr_region_rw('h400,  256, fn_table_read(QChromaScaled),  fn_table_write(QChromaScaled),  "QCHROMASC","Scaled chroma quantization table, used during encoding.");
 
+    csr_region_rw('h500,   64, fn_table_read(HuffbitsLumaDC),   fn_table_write(HuffbitsLumaDC),   "HBITSDCL", "HUFFBITS table for DC luma components.");
+    csr_region_rw('h540,   64, fn_table_read(HuffbitsChromaDC), fn_table_write(HuffbitsChromaDC), "HBITSDCC", "HUFFBITS table for DC chroma components.");
+    csr_region_rw('h580,   64, fn_table_read(HuffbitsLumaAC),   fn_table_write(HuffbitsLumaAC),   "HBITSACL", "HUFFBITS table for AC luma components.");
+    csr_region_rw('h5C0,   64, fn_table_read(HuffbitsChromaAC), fn_table_write(HuffbitsChromaAC), "HBITSACC", "HUFFBITS table for AC chroma components.");
 
-    csr_region_def('h200, 256, "QCHROMAR",  "Raw chroma quantization table, used for bitstream generation.");
-    csr_region_rw('h100, 256, fn_table_read(QChroma), fn_table_write(QChroma), "", "");
-
-
-    csr_region_def('h300, 256, "QLUMASC",   "Scaled luma quantization table, used during encoding.");
-    csr_region_rw('h100, 256, fn_table_read(QLumaScaled), fn_table_write(QLumaScaled), "", "");
-
-
-    csr_region_def('h400, 256, "QCHROMASC", "Scaled chroma quantization table, used during encoding.");
-    csr_region_rw('h100, 256, fn_table_read(QChromaScaled), fn_table_write(QChromaScaled), "", "");
-
-
-    csr_region_def('h500,  64, "HBITSDCL", "HUFFBITS table for DC luma components.");
-    csr_region_rw('h100, 256, fn_table_read(HuffbitsLumaDC), fn_table_write(HuffbitsLumaDC), "", "");
-
-
-    csr_region_def('h540,  64, "HBITSDCC", "HUFFBITS table for DC chroma components.");
-    csr_region_rw('h100, 256, fn_table_read(HuffbitsChromaDC), fn_table_write(HuffbitsChromaDC), "", "");
-
-
-    csr_region_def('h580,  64, "HBITSACL", "HUFFBITS table for AC luma components.");
-    csr_region_rw('h100, 256, fn_table_read(HuffbitsLumaAC), fn_table_write(HuffbitsLumaAC), "", "");
-
-
-    csr_region_def('h5C0,  64, "HBITSACC", "HUFFBITS table for AC chroma components.");
-    csr_region_rw('h100, 256, fn_table_read(HuffbitsChromaAC), fn_table_write(HuffbitsChromaAC), "", "");
-
-
-    csr_region_def('h1000, 1024, "HVALDCL", "HUFFVAL table for DC luma components.");
-    csr_region_rw('h100, 256, fn_table_read(HuffvalLumaDC), fn_table_write(HuffvalLumaDC), "", "");
-
-
-    csr_region_def('h1400, 1024, "HVALDCC", "HUFFVAL table for DC chroma components.");
-    csr_region_rw('h100, 256, fn_table_read(HuffvalChromaDC), fn_table_write(HuffvalChromaDC), "", "");
-
-
-    csr_region_def('h1800, 1024, "HVALACL", "HUFFVAL table for AC luma components.");
-    csr_region_rw('h100, 256, fn_table_read(HuffvalLumaAC), fn_table_write(HuffvalLumaAC), "", "");
-
-
-    csr_region_def('h1C00, 1024, "HVALACC", "HUFFVAL table for AC chroma components.");
-    csr_region_rw('h100, 256, fn_table_read(HuffvalChromaAC), fn_table_write(HuffvalChromaAC), "", "");
+    csr_region_rw('h1000, 1024, fn_table_read(HuffvalLumaDC),   fn_table_write(HuffvalLumaDC),   "HVALDCL",  "HUFFVAL table for DC luma components.");
+    csr_region_rw('h1400, 1024, fn_table_read(HuffvalChromaDC), fn_table_write(HuffvalChromaDC), "HVALDCC",  "HUFFVAL table for DC chroma components.");
+    csr_region_rw('h1800, 1024, fn_table_read(HuffvalLumaAC),   fn_table_write(HuffvalLumaAC),   "HVALACL",  "HUFFVAL table for AC luma components.");
+    csr_region_rw('h1C00, 1024, fn_table_read(HuffvalChromaAC), fn_table_write(HuffvalChromaAC), "HVALACC",  "HUFFVAL table for AC chroma components.");
 
     method perf_rst         = action rg_perf_cycles <= 0; rg_perf_pixels <= 0; rg_perf_byteso <= 0; endaction;
 
