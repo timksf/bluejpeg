@@ -9,8 +9,10 @@ import SpecialFIFOs :: *;
 import ModuleCollect :: *;
 
 import BlueAXI :: *;
-import PrintUtil :: *;
+import BlueCSR :: *;
+
 import Types :: *;
+import PrintUtil :: *;
 import ImageTilingEngine :: *;
 import ChannelSplitter :: *;
 import YBlockReorder :: *;
@@ -23,220 +25,7 @@ import HuffEncoder :: *;
 import JPEGBitstream :: *;
 import JPEGFramewriter :: *;
 import TableStorage :: *;
-
-// ================================================================
-// AXI-Lite register map
-// ================================================================
-
-//control / status registers
-Integer cfg_ctrl_offs        = 'h00;
-Integer cfg_status_offs      = 'h04;
-Integer cfg_img_size_offs    = 'h08;
-Integer cfg_subsampling_offs = 'h0C;
-Integer cfg_codegen_offs     = 'h10;
-Integer cfg_perfcycles_offs  = 'h20;
-Integer cfg_perfpixels_offs  = 'h24;
-Integer cfg_perfbytes_offs   = 'h28;
-
-//control register bit positions
-Integer ctrl_start_bit  = 0;
-Integer ctrl_done_bit   = 1;
-Integer ctrl_error_bit  = 2;
-
-//status register bit positions
-Integer sts_ready_bit   = 0;
-Integer sts_cg_busy_bit = 1;
-
-//codegen register: [1:0]=HuffTableType, [31]=trigger
-Integer cg_trigger_bit  = 31;
-
-//table write address ranges
-Integer tbl_range_base          = 'h0100;
-Integer tbl_range_end           = 'h2000;
-
-Integer tbl_qluma_raw_base      = 'h0100;  // 64 × 4B
-Integer tbl_qchroma_raw_base    = 'h0200;
-Integer tbl_qluma_sc_base       = 'h0300;
-Integer tbl_qchroma_sc_base     = 'h0400;
-Integer tbl_hbits_dc_l_base     = 'h0500;  // 16 × 4B
-Integer tbl_hbits_dc_c_base     = 'h0540;
-Integer tbl_hbits_ac_l_base     = 'h0580;
-Integer tbl_hbits_ac_c_base     = 'h05C0;
-Integer tbl_hval_dc_l_base      = 'h1000;  // 256 × 4B
-Integer tbl_hval_dc_c_base      = 'h1400;
-Integer tbl_hval_ac_l_base      = 'h1800;
-Integer tbl_hval_ac_c_base      = 'h1C00;
-
-// ================================================================
-// Table write command (FIFO element between config slave and TableStorage)
-// ================================================================
-
-typedef struct {
-    TableType_t table_type;
-    Bit#(8)     addr;
-    Bit#(32)    data;
-} TableWriteCmd_t deriving(Eq, Bits, FShow);
-
-// ================================================================
-// Internal config interface (device-facing side of AXI-Lite slave)
-// ================================================================
-
-interface BlueJPEGCfg_ifc;
-    method Action finish();
-    method Action set_status(Bool tables_ready, Bool codegen_busy);
-    method Action clear_codegen_trigger();
-
-    method Action perf_rst();
-    method Action perf_cycles_incr();
-    method Action perf_pixels_incr();
-
-    interface ReadOnly#(Bool) start;
-    interface ReadOnly#(Bit#(16)) img_width;
-    interface ReadOnly#(Bit#(16)) img_height;
-    interface ReadOnly#(SubsamplingMode_t) subsampling;
-    interface ReadOnly#(Bit#(32)) codegen;
-
-    interface Get#(TableWriteCmd_t) table_write;
-endinterface
-
-// ================================================================
-// Config module (ConfigCtx)
-// ================================================================
-
-module [ConfigCtx#(32, 32)] blueJPEGConfig(BlueJPEGCfg_ifc);
-
-    Reg#(Bit#(32)) rg_ctrl          <- mkReg(0);
-    Reg#(Bit#(32)) rg_status        <- mkReg(0);
-    Reg#(Bit#(32)) rg_img_size      <- mkReg(0);
-    Reg#(Bit#(32)) rg_subsampling   <- mkReg(0);
-    Reg#(Bit#(32)) rg_codegen       <- mkReg(0);
-    Reg#(Bit#(32)) rg_perfcycles    <- mkReg(0);
-    Reg#(Bit#(32)) rg_perfpixels    <- mkReg(0);
-
-    FIFO#(TableWriteCmd_t) f_tbl_wr <- mkFIFO;
-
-    // --- scalar registers ---
-    addReg(cfg_ctrl_offs, rg_ctrl);
-    addRegRO(cfg_status_offs, rg_status);
-    addReg(cfg_img_size_offs, rg_img_size);
-    addReg(cfg_subsampling_offs, rg_subsampling);
-    addReg(cfg_codegen_offs, rg_codegen);
-    addRegRO(cfg_perfcycles_offs, rg_perfcycles);
-    addRegRO(cfg_perfpixels_offs, rg_perfpixels);
-
-    // --- table write range (0x0100 – 0x1FFF) ---
-    // A single WriteRangeOperator covers the whole table space.
-    // The handler decodes the address into (TableType_t, index, data).
-
-    function Bool addr_in(Bit#(32) a, Integer base, Integer count);
-        return (a >= fromInteger(base)) && (a < fromInteger(base + count * 4));
-    endfunction
-
-    function Action tbl_write_handler(Bit#(32) a, Bit#(32) d, Bit#(4) s);
-        action
-            TableType_t tt = ?;
-            Bit#(8) idx = 0;
-            Bool valid = True;
-
-            if (addr_in(a, tbl_qluma_raw_base, 64)) begin
-                tt = QLuma;          idx = truncate((a - fromInteger(tbl_qluma_raw_base)) >> 2);
-            end else if (addr_in(a, tbl_qchroma_raw_base, 64)) begin
-                tt = QChroma;        idx = truncate((a - fromInteger(tbl_qchroma_raw_base)) >> 2);
-            end else if (addr_in(a, tbl_qluma_sc_base, 64)) begin
-                tt = QLumaScaled;    idx = truncate((a - fromInteger(tbl_qluma_sc_base)) >> 2);
-            end else if (addr_in(a, tbl_qchroma_sc_base, 64)) begin
-                tt = QChromaScaled;  idx = truncate((a - fromInteger(tbl_qchroma_sc_base)) >> 2);
-            end else if (addr_in(a, tbl_hbits_dc_l_base, 16)) begin
-                tt = HuffLumaDCBits;   idx = truncate((a - fromInteger(tbl_hbits_dc_l_base)) >> 2);
-            end else if (addr_in(a, tbl_hbits_dc_c_base, 16)) begin
-                tt = HuffChromaDCBits; idx = truncate((a - fromInteger(tbl_hbits_dc_c_base)) >> 2);
-            end else if (addr_in(a, tbl_hbits_ac_l_base, 16)) begin
-                tt = HuffLumaACBits;   idx = truncate((a - fromInteger(tbl_hbits_ac_l_base)) >> 2);
-            end else if (addr_in(a, tbl_hbits_ac_c_base, 16)) begin
-                tt = HuffChromaACBits; idx = truncate((a - fromInteger(tbl_hbits_ac_c_base)) >> 2);
-            end else if (addr_in(a, tbl_hval_dc_l_base, 256)) begin
-                tt = HuffLumaDCVal;    idx = truncate((a - fromInteger(tbl_hval_dc_l_base)) >> 2);
-            end else if (addr_in(a, tbl_hval_dc_c_base, 256)) begin
-                tt = HuffChromaDCVal;  idx = truncate((a - fromInteger(tbl_hval_dc_c_base)) >> 2);
-            end else if (addr_in(a, tbl_hval_ac_l_base, 256)) begin
-                tt = HuffLumaACVal;    idx = truncate((a - fromInteger(tbl_hval_ac_l_base)) >> 2);
-            end else if (addr_in(a, tbl_hval_ac_c_base, 256)) begin
-                tt = HuffChromaACVal;  idx = truncate((a - fromInteger(tbl_hval_ac_c_base)) >> 2);
-            end else
-                valid = False;
-
-            if (valid)
-                f_tbl_wr.enq(TableWriteCmd_t { table_type: tt, addr: idx, data: d });
-        endaction
-    endfunction
-
-    addToCollection(tagged WriteRangeOperator WriteRangeOperation {
-        offset:  fromInteger(tbl_range_base),
-        length:  fromInteger(tbl_range_end - tbl_range_base),
-        request: tbl_write_handler
-    });
-
-    // --- methods ---
-
-    method Action finish();
-        let v = rg_ctrl;
-        v[ctrl_start_bit] = 0;
-        v[ctrl_done_bit]  = 1;
-        rg_ctrl <= v;
-    endmethod
-
-    method Action set_status(Bool tables_ready, Bool codegen_busy);
-        Bit#(32) v = 0;
-        v[sts_ready_bit]   = pack(tables_ready);
-        v[sts_cg_busy_bit] = pack(codegen_busy);
-        rg_status <= v;
-    endmethod
-
-    method Action clear_codegen_trigger();
-        rg_codegen <= 0;
-    endmethod
-
-    method Action perf_rst  = action 
-        rg_perfcycles <= 0; 
-        rg_perfpixels <= 0;
-    endaction;
-
-    method Action perf_cycles_incr = action rg_perfcycles <= rg_perfcycles + 1; endaction;
-    method Action perf_pixels_incr = action rg_perfpixels <= rg_perfpixels + 1; endaction;
-
-    interface ReadOnly start;
-        method Bool _read();
-            return unpack(rg_ctrl[ctrl_start_bit]);
-        endmethod
-    endinterface
-
-    interface ReadOnly img_width;
-        method Bit#(16) _read();
-            return rg_img_size[15:0];
-        endmethod
-    endinterface
-
-    interface ReadOnly img_height;
-        method Bit#(16) _read();
-            return rg_img_size[31:16];
-        endmethod
-    endinterface
-
-    interface ReadOnly subsampling;
-        method SubsamplingMode_t _read();
-            return unpack(truncate(rg_subsampling));
-        endmethod
-    endinterface
-
-    interface ReadOnly codegen;
-        method Bit#(32) _read();
-            return rg_codegen;
-        endmethod
-    endinterface
-
-    interface table_write = toGet(f_tbl_wr);
-
-endmodule
+import BlueJPEGRegs :: *;
 
 // ================================================================
 // Top-level interface
@@ -337,8 +126,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     // ---- AXI-Lite config ----
 
-    IntExtConfig_ifc#(32, 32, BlueJPEGCfg_ifc) config_ <- axi4LiteConfigFromContext(blueJPEGConfig);
-
+    BlueCSRAccess_ifc#(32, 32, BlueJPEGCfg_ifc) csrs <- create_blue_csr(blue_jpeg_csrs, False);
+    RegMapDoc_t#(32) doc <- doc_blue_csr(blue_jpeg_csrs);
+    //wrap 
+    let axi_csrs <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
     // ---- sub-module instantiation ----
 
     TableStorage_ifc#(quant_scale)          tables   <- mkTableStorage(cfg._prx_qsc, True);
@@ -420,31 +211,27 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     // ---- table writes from AXI-Lite ----
 
     rule r_table_write (rg_state == S_IDLE);
-        let cmd <- config_.device_ifc.table_write.get();
+        let cmd <- csrs.internal.table_write.get();
         tables.write_table(cmd.table_type, cmd.addr, cmd.data);
     endrule
 
     // ---- codegen trigger ----
 
-    rule r_codegen_trigger (rg_state == S_IDLE
-            && unpack(config_.device_ifc.codegen._read()[cg_trigger_bit])
-            && !tables.codegen_busy());
-        let cg = config_.device_ifc.codegen._read();
-        HuffTableType_t htt = unpack(truncate(cg));
-        tables.generate_codes(htt);
-        config_.device_ifc.clear_codegen_trigger();
+    rule r_codegen_trigger (rg_state == S_IDLE && csrs.internal.codegen_trig() && !tables.codegen_busy());
+        tables.generate_codes(csrs.internal.codegen_type());
+        csrs.internal.clear_cg_trig();
     endrule
 
     // ---- status feedback ----
 
     rule r_update_status;
-        config_.device_ifc.set_status(tables.ready(), tables.codegen_busy());
+        csrs.internal.table_sts(tables.ready(), tables.codegen_busy());
     endrule
 
     // ---- AXI input -> tiler ----
 
     rule r_axis_to_tiler (rg_state == S_RUNNING);
-        config_.device_ifc.perf_pixels_incr(); //count ingested pixels
+        csrs.internal.perf_pixels.tick_up(); //count ingested pixels
         let pkg <- axis_rd.pkg.get();
         YCbCr_t pix = unpack(pkg.data);
         img_tiler.line_in.put(pix);
@@ -471,7 +258,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             user : 0,
             keep : 1,
             dest : 0,
-            last : fwriter.done()
+            last : fwriter.done(),
+            id   : ?
         };
         axis_wr.pkg.put(pkg);
     endrule
@@ -539,15 +327,15 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     endrule
 
     rule rperf (rg_state == S_RUNNING);
-        config_.device_ifc.perf_cycles_incr();
+        csrs.internal.perf_cycles.tick_up();
     endrule
 
     // ---- start handling (driven by CTRL register) ----
 
-    rule r_start (rg_state == S_IDLE && config_.device_ifc.start() && tables.ready() && !tables.codegen_busy());
-        let width  = config_.device_ifc.img_width();
-        let height = config_.device_ifc.img_height();
-        let mode   = config_.device_ifc.subsampling();
+    rule r_start (rg_state == S_IDLE && csrs.internal.start() && tables.ready() && !tables.codegen_busy());
+        let width  = csrs.internal.img_width();
+        let height = csrs.internal.img_height();
+        let mode   = csrs.internal.subsampling();
 
         rg_width  <= width;
         rg_height <= height;
@@ -583,13 +371,13 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         img_tiler.start();
         fwriter.start();
 
-        config_.device_ifc.perf_rst();
+        csrs.internal.perf_rst();
     endrule
 
     // ---- done handling ----
 
     rule r_done (rg_state == S_DONE && fwriter.done());
-        config_.device_ifc.finish();
+        csrs.internal.finish();
         rg_state <= S_IDLE;
     endrule
 
@@ -597,8 +385,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     interface s_axis       = axis_rd.fab;
     interface m_axis       = axis_wr.fab;
-    interface s_axi_cfg_rd = config_.bus_ifc.s_rd;
-    interface s_axi_cfg_wr = config_.bus_ifc.s_wr;
+    interface s_axi_cfg_rd = axi_csrs.s_rd;
+    interface s_axi_cfg_wr = axi_csrs.s_wr;
 
 endmodule
 

@@ -17,14 +17,14 @@ typedef enum {
     QChroma,
     QLumaScaled,
     QChromaScaled,
-    HuffLumaDCVal,
-    HuffLumaDCBits,
-    HuffLumaACVal,
-    HuffLumaACBits,
-    HuffChromaDCVal,
-    HuffChromaDCBits,
-    HuffChromaACVal,
-    HuffChromaACBits
+    HuffbitsLumaDC,
+    HuffbitsLumaAC,
+    HuffbitsChromaDC,
+    HuffbitsChromaAC,
+    HuffvalLumaDC,
+    HuffvalLumaAC,
+    HuffvalChromaDC,
+    HuffvalChromaAC
 } TableType_t deriving(Eq, Bits, FShow);
 
 //huff table to index (in case bit encoding is unexpected)
@@ -221,14 +221,14 @@ module mkTableStorage#(NumProxy#(qwidth) qp, Bool transposed)(TableStorage_ifc#(
             QChroma:            quant_chroma_raw.upd(truncate(addr), unpack(truncate(v)));
             QLumaScaled:        quant_luma_scaled.upd(truncate(addr), unpack(truncate(v)));
             QChromaScaled:      quant_chroma_scaled.upd(truncate(addr), unpack(truncate(v)));
-            HuffLumaDCBits:     huff_bits[0].upd(truncate(addr), unpack(truncate(v)));
-            HuffChromaDCBits:   huff_bits[1].upd(truncate(addr), unpack(truncate(v)));
-            HuffLumaACBits:     huff_bits[2].upd(truncate(addr), unpack(truncate(v)));
-            HuffChromaACBits:   huff_bits[3].upd(truncate(addr), unpack(truncate(v)));
-            HuffLumaDCVal:      huff_val[0].upd(addr, unpack(truncate(v)));
-            HuffChromaDCVal:    huff_val[1].upd(addr, unpack(truncate(v)));
-            HuffLumaACVal:      huff_val[2].upd(addr, unpack(truncate(v)));
-            HuffChromaACVal:    huff_val[3].upd(addr, unpack(truncate(v)));
+            HuffbitsLumaDC:     huff_bits[0].upd(truncate(addr), unpack(truncate(v)));
+            HuffbitsChromaDC:   huff_bits[1].upd(truncate(addr), unpack(truncate(v)));
+            HuffbitsLumaAC:     huff_bits[2].upd(truncate(addr), unpack(truncate(v)));
+            HuffbitsChromaAC:   huff_bits[3].upd(truncate(addr), unpack(truncate(v)));
+            HuffvalLumaDC:      huff_val[0].upd(addr, unpack(truncate(v)));
+            HuffvalChromaDC:    huff_val[1].upd(addr, unpack(truncate(v)));
+            HuffvalLumaAC:      huff_val[2].upd(addr, unpack(truncate(v)));
+            HuffvalChromaAC:    huff_val[3].upd(addr, unpack(truncate(v)));
         endcase
     endmethod
 

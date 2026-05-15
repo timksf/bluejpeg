@@ -6,6 +6,7 @@ import Connectable :: *;
 import Clocks :: *;
 
 import BlueAXI :: *;
+import BlueCSR :: *;
 import AXI4LiteTestHelper :: *;
 import BlueJPEGTestHelper :: *;
 
@@ -14,6 +15,7 @@ import Types :: *;
 import PrintUtil :: *;
 import TestHelper :: *;
 import BlueJPEG :: *;
+import BlueJPEGRegs :: *;
 import RGB2YCbCr :: *;
 
 String input_image_path = "../../../assets/sample_192x192.bmp";
@@ -77,6 +79,7 @@ module [Module] test(TestHandler)
             _prx_dpw   : ?
         };
     BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
+    let csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
 
     // ---- AXI-Lite master for DUT configuration ----
     AXI4_Lite_Master_Rd#(32, 32) cfg_rd <- mkAXI4_Lite_Master_Rd(1);
@@ -158,11 +161,11 @@ module [Module] test(TestHandler)
     endseq;
     FSM fsm_collect <- mkFSM(collect_output);
 
-    // Poll CTRL register for done bit
-    FSM fsm_poll_done <- mkFSM(bjpeg_poll_done(cfg_rd, rg_axil_rsp, rg_finished));
+    // Poll STATUS register for done bit
+    FSM fsm_poll_done <- mkFSM(bjpeg_poll_done(csr_defs, cfg_rd, rg_axil_rsp, rg_finished));
 
     // Wait for default table init
-    FSM fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(cfg_rd, rg_axil_rsp));
+    FSM fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(csr_defs, cfg_rd, rg_axil_rsp));
 
 
     // ---- comparison state ----
@@ -213,21 +216,21 @@ module [Module] test(TestHandler)
 
         // ---- phase 4: generate Huffman codes (4 tables) ----
         print_s("Generating Huffman codes...", YELLOW);
-        bjpeg_trigger_codegen(cfg_wr, cfg_rd, rg_axil_rsp, 0);  // DC_Luma
-        bjpeg_trigger_codegen(cfg_wr, cfg_rd, rg_axil_rsp, 1);  // DC_Chroma
-        bjpeg_trigger_codegen(cfg_wr, cfg_rd, rg_axil_rsp, 2);  // AC_Luma
-        bjpeg_trigger_codegen(cfg_wr, cfg_rd, rg_axil_rsp, 3);  // AC_Chroma
+        bjpeg_trigger_codegen(csr_defs, cfg_wr, cfg_rd, rg_axil_rsp, 0);  // DC_Luma
+        bjpeg_trigger_codegen(csr_defs, cfg_wr, cfg_rd, rg_axil_rsp, 1);  // DC_Chroma
+        bjpeg_trigger_codegen(csr_defs, cfg_wr, cfg_rd, rg_axil_rsp, 2);  // AC_Luma
+        bjpeg_trigger_codegen(csr_defs, cfg_wr, cfg_rd, rg_axil_rsp, 3);  // AC_Chroma
         print_s("Huffman code generation complete", GREEN);
 
         // ---- phase 5: configure BlueJPEG ----
         print_s("Configuring BlueJPEG...", YELLOW);
-        bjpeg_cfg_img_size(cfg_wr, fromInteger(valueof(InputWidth)), fromInteger(valueof(InputHeight)));
+        bjpeg_cfg_img_size(csr_defs, cfg_wr, fromInteger(valueof(InputWidth)), fromInteger(valueof(InputHeight)));
         // SUBSAMPLING: 4:2:2 = 1
-        axi4_lite_write(cfg_wr, fromInteger(cfg_subsampling_offs), 1);
+        bjpeg_cfg_subsampling(csr_defs, cfg_wr, 1);
 
         // ---- phase 6: start encoder ----
         print_s("Starting BlueJPEG encoder...", YELLOW);
-        axi4_lite_write(cfg_wr, fromInteger(cfg_ctrl_offs), 1 << ctrl_start_bit);
+        bjpeg_start(csr_defs, cfg_wr);
 
         // ---- phase 7: feed pixels + collect output + poll done ----
         par

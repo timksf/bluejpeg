@@ -10,6 +10,8 @@ import BDPI :: *;
 import Types :: *;
 import PrintUtil :: *;
 
+function ReadOnly#(t) reg_to_read_only(Reg#(t) r) = regToReadOnly(r);
+    
 interface ClearOnRead#(type t);
     method ActionValue#(t) _read();
 endinterface
