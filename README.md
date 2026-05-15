@@ -38,7 +38,7 @@ a ready-to-use core.
 - [x] DU dispatch - `mkDUDispatcher` (interleaves blocks per subsampling mode)
 - [x] Y block reorder - `mkYBlockReorder` (MCU pairing for 4:2:0)
 - [x] Chroma subsampling - `mkChromaSubsampler`
-  - **⚠ BUG:** encoded output is incorrect when subsampling is enabled (4:2:2 / 4:2:0). 4:4:4 mode works.
+- [x] Image Tiler optional (can be implemented with 2D DMA engines)
 
 #### DU processing (`mkDUProc`)
 
@@ -60,7 +60,7 @@ a ready-to-use core.
 #### Interfaces & configuration
 
 - [x] AXI4-Stream I/O - 24-bit RGB in, 8-bit JPEG out
-- [x] AXI4-Lite config register map - `blueJPEGConfig`
+- [x] AXI4-Lite config register map - `blue_jpeg_csrs`
 - [x] Standard quantization & Huffman tables - `DefaultTables` (ITU-T T.81 Annex K)
 
 #### Utilities
@@ -70,9 +70,9 @@ a ready-to-use core.
 
 #### Not yet completed
 
-- [ ] Make Image Tiler optional
+- [ ] Improve Image Tiler latency
+- [ ] Allow removal of scaled quantization table writes, auto scale quant values upon configuration
 - [ ] Working verilog simulation for all testbenches (VPI imports still fail)
-- [ ] Fix chroma subsampling (4:2:2 / 4:2:0)
 - [ ] Hardware verification on FPGA
 - [ ] Better configuration mechanism (presets / config package instead of raw `numeric type` parameters)
 - [ ] Grayscale-only mode (always 3-component)

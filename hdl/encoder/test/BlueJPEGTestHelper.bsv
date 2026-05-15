@@ -5,6 +5,16 @@ import PrintUtil :: *;
 
 import BlueCSR :: *;
 
+function Action bjpeg_expect_wr_ok(BlueCSRTbAccessor_ifc#(32) cfg_acc);
+    action
+        let r <- cfg_acc.write_reg_rsp();
+        if(r != CSR_OKAY) begin
+            $write("Expected CSR_OKAY but got "); $display(fshow(r));
+            $finish;
+        end
+    endaction
+endfunction
+
 //poll STATUS.ready until set (default table initialisation complete).
 function Stmt bjpeg_wait_tables_ready(
     BlueCSRTbAccessor_ifc#(32) cfg_acc,

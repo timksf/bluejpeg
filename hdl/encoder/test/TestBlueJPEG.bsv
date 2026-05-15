@@ -78,10 +78,11 @@ module [Module] test(TestHandler)
             _prx_miw   : ?,
             _prx_dsc   : ?,
             _prx_qsc   : ?,
-            _prx_dpw   : ?
+            _prx_dpw   : ?,
+            en_tiler   : True
         };
     BlueJPEG_ifc dut    <- mkBlueJPEG(jpeg_cfg);
-    let csr_defs      <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
+    let csr_defs        <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
 
     // ---- AXI-Lite master for DUT configuration ----
     AXI4_Lite_Master_Rd#(32, 32) cfg_rd <- mkAXI4_Lite_Master_Rd(1);
@@ -225,8 +226,11 @@ module [Module] test(TestHandler)
             Bit#(16) img_width  = fromInteger(valueof(InputWidth));
             i_cfg_acc.write_reg_req("IMSZ", {img_height, img_width});
         endaction
+        bjpeg_expect_wr_ok(i_cfg_acc);
+
         // SUBSAMPLING: 4:4:4 = 0
         i_cfg_acc.write_reg_req("SUBS", 0);
+        bjpeg_expect_wr_ok(i_cfg_acc);
 
         // ---- phase 5: start encoder ----
         print_s("Starting BlueJPEG encoder...", YELLOW);
@@ -235,6 +239,7 @@ module [Module] test(TestHandler)
             Bit#(32) start_mask = 1 << start_bit;
             i_cfg_acc.write_reg_req("CTRL", start_mask);
         endaction
+        bjpeg_expect_wr_ok(i_cfg_acc);
 
         // ---- phase 6: feed pixels + collect output + poll done ----
         par

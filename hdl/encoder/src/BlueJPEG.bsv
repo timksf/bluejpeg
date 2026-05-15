@@ -6,6 +6,7 @@ import GetPut :: *;
 import Connectable :: *;
 import ClientServer :: *;
 import SpecialFIFOs :: *;
+import DefaultValue :: *;
 import ModuleCollect :: *;
 
 import BlueAXI :: *;
@@ -50,6 +51,7 @@ typedef struct {
     NumProxy#(dct_scale)        _prx_dsc;
     NumProxy#(quant_scale)      _prx_qsc;
     NumProxy#(datapath_width)   _prx_dpw;
+    Bool en_tiler;
 } BlueJPEGCfg_t#(
     numeric type max_img_width,
     numeric type dct_scale,
@@ -127,7 +129,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     // ---- AXI-Lite config ----
 
     BlueCSRAccess_ifc#(32, 32, BlueJPEGCfg_ifc) csrs <- create_blue_csr(blue_jpeg_csrs, False);
+
     RegMapDoc_t#(32) doc <- doc_blue_csr(blue_jpeg_csrs);
+    messageM(doc.reg_defs);
+
     //wrap 
     let axi_csrs <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
     // ---- sub-module instantiation ----
@@ -169,7 +174,9 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     // ---- Data Path Wiring ----
 
-    mkConnection(img_tiler.block_out, ch_splt.pix);         //tiler blocks -> channel splitter
+    if(cfg.en_tiler) begin
+        mkConnection(img_tiler.block_out, ch_splt.pix);     //tiler blocks -> channel splitter
+    end
     mkConnection(ch_splt.y,  y_reord.pixel_in);             //Y -> block reorder
     mkConnection(ch_splt.cb, subs_cb.pixel_in);             //Cb -> chroma subsampler
     mkConnection(ch_splt.cr, subs_cr.pixel_in);             //Cr -> chroma subsampler
@@ -205,8 +212,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     Reg#(Bit#(16))              rg_height   <- mkRegU;
 
     // DU counting: tracks phase through interleaved MCU scan
-    Reg#(UInt#(32))             rg_du_cnt   <- mkReg(0);
-    Reg#(UInt#(32))             rg_du_total <- mkRegU;
+    Reg#(Bit#(16))              rg_mcu_w    <- mkRegU;
+    Reg#(Bit#(16))              rg_mcu_h    <- mkRegU;
+    Reg#(Bit#(16))              rg_mcu_x    <- mkReg(0);
+    Reg#(Bit#(16))              rg_mcu_y    <- mkReg(0);
 
     // ---- table writes from AXI-Lite ----
 
@@ -228,14 +237,23 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         csrs.internal.table_sts(tables.ready(), tables.codegen_busy());
     endrule
 
-    // ---- AXI input -> tiler ----
+    // ---- AXIS input -> tiler ----
 
-    rule r_axis_to_tiler (rg_state == S_RUNNING);
-        csrs.internal.perf_pixels.tick_up(); //count ingested pixels
-        let pkg <- axis_rd.pkg.get();
-        YCbCr_t pix = unpack(pkg.data);
-        img_tiler.line_in.put(pix);
-    endrule
+    if(cfg.en_tiler) begin
+        rule r_axis_to_tiler (rg_state == S_RUNNING);
+            csrs.internal.perf_pixels.tick_up(); //count ingested pixels
+            let pkg <- axis_rd.pkg.get();
+            YCbCr_t pix = unpack(pkg.data);
+            img_tiler.line_in.put(pix);
+        endrule
+    end else begin
+        rule r_axis_to_chsplt;
+            csrs.internal.perf_pixels.tick_up();
+            let pkg <- axis_rd.pkg.get();
+            YCbCr_t pix = unpack(pkg.data);
+            ch_splt.pix.put(pix);
+        endrule
+    end
 
     // ---- scan data bridge: stuffer -> framewriter ----
 
@@ -283,7 +301,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     endfunction
 
     Reg#(UInt#(3)) rg_mcu_phase <- mkReg(0);
-    Reg#(Bit#(6))  rg_du_pix    <- mkReg(0);  // pixel index within current DU (0-63)
+    Reg#(Bit#(6))  rg_du_pix    <- mkReg(0);  //pixel index within current DU (0-63)
 
     // Transfer pixels from dispatcher to DUProc, tracking DU boundaries.
     // DU counting and MCU phase advance happen here (synchronized with data flow).
@@ -292,35 +310,47 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         let p <- du_disp.pix.get();
         du_proc.data.request.put(unpack(extend(pack(p))));
 
-        if (rg_du_pix == 0) begin
+        let n_du = dus_per_mcu(rg_mode);
+        Bool is_last = (rg_mcu_phase == n_du-1 && rg_mcu_x == rg_mcu_w-1 && rg_mcu_y == rg_mcu_h-1);
+
+        if(rg_du_pix == 0) begin
             //compute per-DU metadata at DU start
             let n_y  = y_per_mcu(rg_mode);
             let n_du = dus_per_mcu(rg_mode);
             PixType_t pt = (rg_mcu_phase < n_y) ? Luma : Chroma;
 
             //component ID for separate DC prediction: 0=Y, 1=Cb, 2=Cr
-            Bit#(2) comp_id = (rg_mcu_phase < n_y) ? 0 :
-                              (rg_mcu_phase == n_du - 2) ? 1 : 2;
-
-            Bool is_last = (rg_du_cnt == rg_du_total - 1);
+            Bit#(2) comp_id = 
+                (rg_mcu_phase < n_y) ?        0 :
+                (rg_mcu_phase == n_du - 2) ?  1 : 2;
 
             du_proc.du_mode.put(pt);
             rle.du_comp.put(comp_id);
             huff.du_meta.put(HuffDUMeta_t { mode: pt, is_last: is_last });
         end
 
-        if (rg_du_pix == 63) begin
+        if(rg_du_pix == 63) begin
             // end of DU - advance MCU phase and DU count
             rg_du_pix <= 0;
-            let n_du = dus_per_mcu(rg_mode);
-            if (rg_mcu_phase == n_du - 1)
+            if(rg_mcu_phase == n_du-1)
                 rg_mcu_phase <= 0;
             else
                 rg_mcu_phase <= rg_mcu_phase + 1;
 
-            rg_du_cnt <= rg_du_cnt + 1;
+            //only advance MCU counter when all DUs in that MCU have been processed
+            if(rg_mcu_phase == n_du-1) begin
+                if(rg_mcu_x == rg_mcu_w-1) begin
+                    rg_mcu_x <= 0;
+                    if(rg_mcu_y == rg_mcu_h-1)
+                        rg_mcu_y <= 0;
+                    else 
+                        rg_mcu_y <= rg_mcu_y + 1;
+                end else begin
+                    rg_mcu_x <= rg_mcu_x + 1;
+                end
+            end
 
-            if (rg_du_cnt == rg_du_total - 1)
+            if(is_last)
                 rg_state <= S_FLUSH;
         end else
             rg_du_pix <= rg_du_pix + 1;
@@ -341,6 +371,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         rg_height <= height;
         rg_mode   <= mode;
 
+        //safe division
         Bit#(16) blk_cols = (width  + 7) >> 3;
         Bit#(16) blk_rows = (height + 7) >> 3;
 
@@ -352,8 +383,13 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             YCBCR_420: begin mcu_cols = (blk_cols + 1) >> 1;   mcu_rows = (blk_rows + 1) >> 1;   end
         endcase
 
-        UInt#(32) n_mcus = unpack(extend(mcu_cols)) * unpack(extend(mcu_rows));
-        rg_du_total <= n_mcus * extend(dus_per_mcu(mode));
+        rg_state        <= S_RUNNING;
+        rg_mcu_w        <= mcu_cols;
+        rg_mcu_h        <= mcu_rows;
+        rg_mcu_x        <= 0;
+        rg_mcu_y        <= 0;
+        rg_mcu_phase    <= 0;
+        rg_du_pix       <= 0;
 
         img_tiler.set_img_width(truncate(width));
         du_disp.set_mode(mode);
@@ -363,14 +399,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         cr_reord_cb.configure(mode, truncate(blk_cols));
         cr_reord_cr.configure(mode, truncate(blk_cols));
         fwriter.configure(width, height, mode);
-
-        rg_state     <= S_RUNNING;
-        rg_du_cnt    <= 0;
-        rg_mcu_phase <= 0;
-        rg_du_pix    <= 0;
         img_tiler.start();
         fwriter.start();
-
         csrs.internal.perf_rst();
     endrule
 
