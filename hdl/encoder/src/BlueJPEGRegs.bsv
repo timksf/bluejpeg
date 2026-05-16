@@ -33,6 +33,7 @@ endfunction
 interface BlueJPEGCfg_ifc;
     method Action finish();
     method Action error();
+    method Action invalid_cfg();
     method Action table_sts(Bool ready, Bool cg_active);
     method Action clear_cg_trig();
     method Action perf_rst();
@@ -56,6 +57,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     Reg#(Bool)              rg_start;
     Reg#(Bit#(1))           rg_done;
     Reg#(Bit#(1))           rg_error;
+    Reg#(Bool)              rg_inv_cfg;
 
     Reg#(Bool)              rg_ready;
     Reg#(Bool)              rg_cg_busy;
@@ -111,6 +113,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     rg_cg_busy  <- csr_reg_ro( 'h08, False,   1, "CGB",   "Codegen Busy",    "Indicates whether huffman table codegen is running.");
     rg_done     <- csr_reg_ro( 'h08, 'b0,     4, "DONE",  "Module Done",     "Indicates whether processing has finished for current image.");
     rg_error    <- csr_reg_w1c('h08, 'b0,    16, "ERR",   "Module Error",    "Indicates whether an error occurred processing the current image.");
+    rg_inv_cfg  <- csr_reg_w1c('h08, False,  17, "INV",   "Invalid Config",  "Indicates an invalid encoder configuration.");
 
 
     csr_reg_def('h0C, "IMSZ", "Image Size.");
@@ -159,6 +162,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
 
     method table_sts(r, c)  = action rg_ready <= r; rg_cg_busy <= c;    endaction;
     method error            = action rg_error       <= 1;               endaction;
+    method invalid_cfg      = action rg_inv_cfg     <= True;            endaction;
     method finish           = action rg_done        <= 1;               endaction;
     method clear_cg_trig    = action rg_cg_trigger  <= False;           endaction;
 
