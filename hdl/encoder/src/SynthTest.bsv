@@ -114,7 +114,9 @@ module mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_miw   : maximw,
         _prx_dsc   : fscale,
         _prx_qsc   : fscale,
-        _prx_dpw   : dpw
+        _prx_dpw   : dpw,
+        en_tiler   : True,
+        en_chroma  : True
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
@@ -141,7 +143,9 @@ module mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_miw   : maximw,
         _prx_dsc   : fscale,
         _prx_qsc   : fscale,
-        _prx_dpw   : dpw
+        _prx_dpw   : dpw,
+        en_tiler   : True,
+        en_chroma  : True
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);

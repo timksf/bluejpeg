@@ -62,6 +62,73 @@ typedef struct {
 
 typedef enum { S_IDLE, S_CONFIGURE, S_RUNNING, S_FLUSH, S_DONE } FrameState_t deriving(Eq, Bits, FShow);
 
+module mkChromaSubsamplerDrop(ChromaSubsampler_ifc);
+    FIFO#(UInt#(8)) f_in  <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_out <- mkPipelineFIFO;
+
+    rule r_drop;
+        f_in.deq;
+    endrule
+
+    method Action configure(SubsamplingMode_t mode);
+        f_in.clear();
+        f_out.clear();
+    endmethod
+
+    method Action rewind();
+        f_in.clear();
+        f_out.clear();
+    endmethod
+
+    interface pixel_in  = toPut(f_in);
+    interface pixel_out = toGet(f_out);
+endmodule
+
+module mkChromaBlockReorderDrop(ChromaBlockReorder_ifc);
+    FIFO#(UInt#(8)) f_in  <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_out <- mkPipelineFIFO;
+
+    rule r_drop;
+        f_in.deq;
+    endrule
+
+    method Action configure(SubsamplingMode_t mode, Bit#(13) blk_cols);
+        f_in.clear();
+        f_out.clear();
+    endmethod
+
+    method Action rewind();
+        f_in.clear();
+        f_out.clear();
+    endmethod
+
+    interface pixel_in  = toPut(f_in);
+    interface pixel_out = toGet(f_out);
+endmodule
+
+module mkDUDispatcherLumaOnly(DUDispatcher_ifc);
+    FIFO#(UInt#(8)) f_y  <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_cb <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_cr <- mkPipelineFIFO;
+
+    rule r_drop_cb;
+        f_cb.deq;
+    endrule
+
+    rule r_drop_cr;
+        f_cr.deq;
+    endrule
+
+    method Action set_mode(SubsamplingMode_t mode);
+        noAction;
+    endmethod
+
+    interface y   = toPut(f_y);
+    interface cb  = toPut(f_cb);
+    interface cr  = toPut(f_cr);
+    interface pix = toGet(f_y);
+endmodule
+
 // ================================================================
 // Module
 // ================================================================
@@ -142,23 +209,33 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     AXI4_Stream_Rd#(24, 0)                  axis_rd  <- mkAXI4_Stream_Rd(1);
     AXI4_Stream_Wr#(8, 0)                   axis_wr  <- mkAXI4_Stream_Wr(1);
 
-    if(cfg.en_tiler) begin
-        ImageTilingEngine_ifc#(YCbCr_t, 8, 8)   img_tiler <- mkImageTilingEngine(cfg._prx_miw);
-    end
+    ImageTilingEngine_ifc#(YCbCr_t, 8, 8)   img_tiler <- mkImageTilingEngine(cfg._prx_miw);
     ChannelSplitter_ifc                     ch_splt   <- mkChannelSplitter;
+    YBlockReorder_ifc                       y_reord   <- mkYBlockReorder(_prx_mbc, False);
 
     NumProxy#(8) _prx_bw = ?;
 
-    if(cfg.en_chroma) begin
-        YBlockReorder_ifc                   y_reord   <- mkYBlockReorder(_prx_mbc, False);
-        ChromaSubsampler_ifc                subs_cb   <- mkChromaSubsampler(_prx_bw);
-        ChromaSubsampler_ifc                subs_cr   <- mkChromaSubsampler(_prx_bw);
+    ChromaSubsampler_ifc                    subs_cb;
+    ChromaSubsampler_ifc                    subs_cr;
+    ChromaBlockReorder_ifc                  cr_reord_cb;
+    ChromaBlockReorder_ifc                  cr_reord_cr;
+    DUDispatcher_ifc                        du_disp;
 
-        ChromaBlockReorder_ifc              cr_reord_cb <- mkChromaBlockReorder(_prx_mbc);
-        ChromaBlockReorder_ifc              cr_reord_cr <- mkChromaBlockReorder(_prx_mbc);
-        
-        DUDispatcher_ifc                    du_disp   <- mkDUDispatcher;
+    if(cfg.en_chroma) begin
+        subs_cb     <- mkChromaSubsampler(_prx_bw);
+        subs_cr     <- mkChromaSubsampler(_prx_bw);
+        cr_reord_cb <- mkChromaBlockReorder(_prx_mbc);
+        cr_reord_cr <- mkChromaBlockReorder(_prx_mbc);
+        du_disp     <- mkDUDispatcher;
+    end else begin
+        subs_cb     <- mkChromaSubsamplerDrop;
+        subs_cr     <- mkChromaSubsamplerDrop;
+        cr_reord_cb <- mkChromaBlockReorderDrop;
+        cr_reord_cr <- mkChromaBlockReorderDrop;
+        du_disp     <- mkDUDispatcherLumaOnly;
     end
+
+    FIFO#(UInt#(8))                         f_du_pixels <- mkPipelineFIFO;
 
     DUProc_t#(dpw)                          du_proc   <- mkDUProc(du_proc_cfg);
 
@@ -166,7 +243,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     HuffEncoder_ifc#(dpw)                   huff      <- mkHuffEncoder;
     JPEGBitstream_ifc                       stuffer   <- mkJPEGBitstream(False);
 
-    JPEGFramewriter_ifc                     fwriter   <- mkJPEGFramewriter;
+    JPEGFramewriter_ifc                     fwriter   <- mkJPEGFramewriter(cfg.en_chroma);
 
     // ---- Table Client <-> Server connections ----
 
@@ -182,27 +259,23 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     if(cfg.en_tiler) begin
         mkConnection(img_tiler.block_out, ch_splt.pix);     //tiler blocks -> channel splitter
     end
-    if(cfg.en_chroma) begin
-        mkConnection(ch_splt.y,  y_reord.pixel_in);             //Y -> block reorder
-        mkConnection(ch_splt.cb, subs_cb.pixel_in);             //Cb -> chroma subsampler
-        mkConnection(ch_splt.cr, subs_cr.pixel_in);             //Cr -> chroma subsampler
+    mkConnection(ch_splt.y, y_reord.pixel_in);             //Y -> block reorder
+    mkConnection(ch_splt.cb, subs_cb.pixel_in);            //Cb -> chroma path (or sink in grayscale)
+    mkConnection(ch_splt.cr, subs_cr.pixel_in);            //Cr -> chroma path (or sink in grayscale)
 
-        //64 element deep fifos for delayed chroma processing
-        //without these buffers the pipeline would stall as the channel splitter could
-        //not accept enough pixels to finish luma processing before chroma processing
-        //could start
-        FIFO#(UInt#(8)) f_cb_du_buf <- mkSizedFIFO(64);
-        FIFO#(UInt#(8)) f_cr_du_buf <- mkSizedFIFO(64);
+    //64 element deep FIFOs absorb the skew between luma and chroma scheduling.
+    FIFO#(UInt#(8)) f_cb_du_buf <- mkSizedFIFO(64);
+    FIFO#(UInt#(8)) f_cr_du_buf <- mkSizedFIFO(64);
 
-        mkConnection(subs_cb.pixel_out, cr_reord_cb.pixel_in);  //subsampled Cb -> chroma reorder
-        mkConnection(subs_cr.pixel_out, cr_reord_cr.pixel_in);  //subsampled Cr -> chroma reorder
+    mkConnection(subs_cb.pixel_out, cr_reord_cb.pixel_in);   //subsampled Cb -> chroma reorder
+    mkConnection(subs_cr.pixel_out, cr_reord_cr.pixel_in);   //subsampled Cr -> chroma reorder
 
-        mkConnection(y_reord.pixel_out, du_disp.y);             //reordered Y -> dispatcher
-        mkConnection(cr_reord_cb.pixel_out, toPut(f_cb_du_buf)); //reordered Cb -> chroma DU buffer
-        mkConnection(cr_reord_cr.pixel_out, toPut(f_cr_du_buf)); //reordered Cr -> chroma DU buffer
-        mkConnection(toGet(f_cb_du_buf), du_disp.cb);           //chroma DU buffer -> dispatcher
-        mkConnection(toGet(f_cr_du_buf), du_disp.cr);           //chroma DU buffer -> dispatcher
-    end
+    mkConnection(y_reord.pixel_out, du_disp.y);              //reordered Y -> dispatcher
+    mkConnection(cr_reord_cb.pixel_out, toPut(f_cb_du_buf)); //reordered Cb -> chroma DU buffer
+    mkConnection(cr_reord_cr.pixel_out, toPut(f_cr_du_buf)); //reordered Cr -> chroma DU buffer
+    mkConnection(toGet(f_cb_du_buf), du_disp.cb);            //chroma DU buffer -> dispatcher
+    mkConnection(toGet(f_cr_du_buf), du_disp.cr);            //chroma DU buffer -> dispatcher
+    mkConnection(du_disp.pix, toPut(f_du_pixels));           //selected DU stream -> common DU FIFO
 
     // DU processing pipeline (Server chain)
     // dispatcher outputs UInt#(8), DUProc expects Int#(dpw) - convert
@@ -262,14 +335,6 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         endrule
     end
 
-    // ---- Channel Split Chroma Discard ----
-    if(!cfg.en_chroma) begin
-        rule r_discard_chroma (rg_state == S_RUNNING);
-            let _cb <- ch_splt.cb.get();
-            let _cr <- ch_splt.cr.get();
-        endrule
-    end
-
     // ---- scan data bridge: stuffer -> framewriter ----
 
     rule r_scan_bridge (rg_state == S_RUNNING || rg_state == S_FLUSH);
@@ -318,26 +383,29 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     Reg#(UInt#(3)) rg_mcu_phase <- mkReg(0);
     Reg#(Bit#(6))  rg_du_pix    <- mkReg(0);  //pixel index within current DU (0-63)
 
-    // Transfer pixels from dispatcher to DUProc, tracking DU boundaries.
-    // DU counting and MCU phase advance happen here (synchronized with data flow).
-    // At the start of each DU, per-DU metadata is enqueued to each pipeline stage.
+    // Transfer pixels from the configured DU source to DUProc.
+    // In grayscale mode, f_du_pixels carries reordered luma directly.
+    // In color mode, it carries the interleaved dispatcher output.
     rule r_disp_to_duproc (rg_state == S_RUNNING);
-        let p <- du_disp.pix.get();
+        let p = f_du_pixels.first;
+        f_du_pixels.deq;
         du_proc.data.request.put(unpack(extend(pack(p))));
 
-        let n_du = dus_per_mcu(rg_mode);
-        Bool is_last = (rg_mcu_phase == n_du-1 && rg_mcu_x == rg_mcu_w-1 && rg_mcu_y == rg_mcu_h-1);
+        let n_du = cfg.en_chroma ? dus_per_mcu(rg_mode) : fromInteger(1);
+        Bool end_of_mcu = !cfg.en_chroma || (rg_mcu_phase == n_du - 1);
+        Bool is_last = (end_of_mcu && rg_mcu_x == rg_mcu_w-1 && rg_mcu_y == rg_mcu_h-1);
 
         if(rg_du_pix == 0) begin
-            //compute per-DU metadata at DU start
-            let n_y  = y_per_mcu(rg_mode);
-            let n_du = dus_per_mcu(rg_mode);
-            PixType_t pt = (rg_mcu_phase < n_y) ? Luma : Chroma;
+            PixType_t pt = Luma;
+            Bit#(2) comp_id = 0;
 
-            //component ID for separate DC prediction: 0=Y, 1=Cb, 2=Cr
-            Bit#(2) comp_id = 
-                (rg_mcu_phase < n_y) ?        0 :
-                (rg_mcu_phase == n_du - 2) ?  1 : 2;
+            if(cfg.en_chroma) begin
+                let n_y = y_per_mcu(rg_mode);
+                pt = (rg_mcu_phase < n_y) ? Luma : Chroma;
+                comp_id =
+                    (rg_mcu_phase < n_y) ?        0 :
+                    (rg_mcu_phase == n_du - 2) ?  1 : 2;
+            end
 
             du_proc.du_mode.put(pt);
             rle.du_comp.put(comp_id);
@@ -345,20 +413,19 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         end
 
         if(rg_du_pix == 63) begin
-            // end of DU - advance MCU phase and DU count
             rg_du_pix <= 0;
-            if(rg_mcu_phase == n_du-1)
+
+            if(end_of_mcu)
                 rg_mcu_phase <= 0;
             else
                 rg_mcu_phase <= rg_mcu_phase + 1;
 
-            //only advance MCU counter when all DUs in that MCU have been processed
-            if(rg_mcu_phase == n_du-1) begin
+            if(end_of_mcu) begin
                 if(rg_mcu_x == rg_mcu_w-1) begin
                     rg_mcu_x <= 0;
                     if(rg_mcu_y == rg_mcu_h-1)
                         rg_mcu_y <= 0;
-                    else 
+                    else
                         rg_mcu_y <= rg_mcu_y + 1;
                 end else begin
                     rg_mcu_x <= rg_mcu_x + 1;
@@ -371,10 +438,6 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             rg_du_pix <= rg_du_pix + 1;
     endrule
 
-    rule rperf (rg_state == S_RUNNING);
-        csrs.internal.perf_cycles.tick_up();
-    endrule
-
     // ---- start handling (driven by CTRL register) ----
 
     rule r_start (rg_state == S_IDLE && csrs.internal.start() && tables.ready() && !tables.codegen_busy());
@@ -383,13 +446,14 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         let width  = csrs.internal.img_width();
         let height = csrs.internal.img_height();
         let mode   = csrs.internal.subsampling();
+        let eff_mode = cfg.en_chroma ? mode : YCBCR_444;
 
-        if(!cfg.en_chroma && csrs.subsampling != YCBCR_444)
+        if(!cfg.en_chroma && mode != YCBCR_444)
             cfg_valid = False;
 
         rg_width  <= width;
         rg_height <= height;
-        rg_mode   <= mode;
+        rg_mode   <= eff_mode;
 
         //safe division
         Bit#(16) blk_cols = (width  + 7) >> 3;
@@ -397,7 +461,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
         Bit#(16) mcu_cols = blk_cols;
         Bit#(16) mcu_rows = blk_rows;
-        case (mode)
+
+        case (eff_mode)
             YCBCR_444: begin mcu_cols = blk_cols;              mcu_rows = blk_rows;              end
             YCBCR_422: begin mcu_cols = (blk_cols + 1) >> 1;   mcu_rows = blk_rows;              end
             YCBCR_420: begin mcu_cols = (blk_cols + 1) >> 1;   mcu_rows = (blk_rows + 1) >> 1;   end
@@ -412,21 +477,28 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         rg_du_pix       <= 0;
 
         if(cfg_valid) begin
-            img_tiler.set_img_width(truncate(width));
-            du_disp.set_mode(mode);
-            y_reord.configure(mode, truncate(blk_cols));
-            subs_cb.configure(mode);
-            subs_cr.configure(mode);
-            cr_reord_cb.configure(mode, truncate(blk_cols));
-            cr_reord_cr.configure(mode, truncate(blk_cols));
-            fwriter.configure(width, height, mode);
-            img_tiler.start();
+            if(cfg.en_tiler) begin
+                img_tiler.set_img_width(truncate(width));
+                img_tiler.start();
+            end
+
+            du_disp.set_mode(eff_mode);
+            y_reord.configure(eff_mode, truncate(blk_cols));
+            subs_cb.configure(eff_mode);
+            subs_cr.configure(eff_mode);
+            cr_reord_cb.configure(eff_mode, truncate(blk_cols));
+            cr_reord_cr.configure(eff_mode, truncate(blk_cols));
+            fwriter.configure(width, height, eff_mode);
+
             fwriter.start();
             csrs.internal.perf_rst();
         end else begin
             csrs.internal.invalid_cfg();
         end
+    endrule
 
+    rule rperf (rg_state == S_RUNNING);
+        csrs.internal.perf_cycles.tick_up();
     endrule
 
     // ---- done handling ----

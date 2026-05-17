@@ -12,7 +12,7 @@ import ZigZag :: *;
 
 //Complements encoded scan data with all markers and tables required for a
 //JPEG/JFIF compliant image:
-//  SOI -> APP0 -> DQT×2 -> SOF0 -> DHT×4 -> SOS -> scan data -> EOI
+//  SOI -> APP0 -> DQT×(1|2) -> SOF0 -> DHT×(2|4) -> SOS -> scan data -> EOI
 //
 //Scan data arrives via scan_data Put as Maybe#(Bit#(8)):
 //  tagged Valid byte  -  scan data byte (already byte-stuffed)
@@ -59,7 +59,7 @@ interface JPEGFramewriter_ifc;
     interface Get#(Bit#(8)) byte_out;
 endinterface
 
-module mkJPEGFramewriter(JPEGFramewriter_ifc);
+module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     FIFO#(Maybe#(Bit#(8))) f_scan <- mkPipelineFIFO;
     FIFO#(Bit#(8))         f_out  <- mkPipelineFIFO;
@@ -77,7 +77,7 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
     //DQT table selector: 0=luma, 1=chroma
     Reg#(Bit#(1)) rg_dqt <- mkReg(0);
 
-    //DHT table selector: 0=DC_Luma, 1=DC_Chroma, 2=AC_Luma, 3=AC_Chroma
+    //DHT table selector: 0=DC_Luma, 1=AC_Luma, 2=DC_Chroma, 3=AC_Chroma
     Reg#(Bit#(2)) rg_dht <- mkReg(0);
 
     //pre-computed sum(BITS) for current DHT table
@@ -125,25 +125,38 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
         endcase;
     endfunction
 
-    //SOF0: 19 bytes
+    //SOF0: grayscale uses 1 component, color uses 3 components.
     function Bit#(8) sof0_byte(UInt#(9) idx);
         Bit#(8) sampfac = case (rg_mode)
             YCBCR_444: 'h11;
             YCBCR_422: 'h21;
             YCBCR_420: 'h22;
         endcase;
-        return case (idx)
-            0:  'hFF; 1:  'hC0;                     //SOF0 marker
-            2:  'h00; 3:  'h11;                     //Lf = 8 + 3*Nf = 17
-            4:  'h08;                               //P = 8 bits
-            5:  rg_height[15:8]; 6: rg_height[7:0];
-            7:  rg_width[15:8];  8: rg_width[7:0];
-            9:  'h03;                               //Nf = 3
-            10: 'h01; 11: sampfac; 12: 'h00;        //Y:  Hi/Vi per mode, Tqi=0
-            13: 'h02; 14: 'h11;    15: 'h01;        //Cb: 1×1, Tqi=1
-            16: 'h03; 17: 'h11;    18: 'h01;        //Cr: 1×1, Tqi=1
-            default: 0;
-        endcase;
+        if(!en_chroma) begin
+            return case (idx)
+                0:  'hFF; 1:  'hC0;                     //SOF0 marker
+                2:  'h00; 3:  'h0B;                     //Lf = 8 + 3*Nf = 11
+                4:  'h08;                               //P = 8 bits
+                5:  rg_height[15:8]; 6: rg_height[7:0];
+                7:  rg_width[15:8];  8: rg_width[7:0];
+                9:  'h01;                               //Nf = 1
+                10: 'h01; 11: 'h11;    12: 'h00;        //Y: 1x1, Tqi=0
+                default: 0;
+            endcase;
+        end else begin
+            return case (idx)
+                0:  'hFF; 1:  'hC0;                     //SOF0 marker
+                2:  'h00; 3:  'h11;                     //Lf = 8 + 3*Nf = 17
+                4:  'h08;                               //P = 8 bits
+                5:  rg_height[15:8]; 6: rg_height[7:0];
+                7:  rg_width[15:8];  8: rg_width[7:0];
+                9:  'h03;                               //Nf = 3
+                10: 'h01; 11: sampfac; 12: 'h00;        //Y:  Hi/Vi per mode, Tqi=0
+                13: 'h02; 14: 'h11;    15: 'h01;        //Cb: 1×1, Tqi=1
+                16: 'h03; 17: 'h11;    18: 'h01;        //Cr: 1×1, Tqi=1
+                default: 0;
+            endcase;
+        end
     endfunction
 
     //Tc|Th byte for DHT marker
@@ -167,20 +180,37 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
         endcase;
     endfunction
 
-    //SOS (interleaved, 3 components): 14 bytes
+    //SOS: grayscale uses Ns=1, color uses Ns=3.
     function Bit#(8) sos_byte(UInt#(9) idx);
-        return case (idx)
-            0:  'hFF; 1:  'hDA;                //SOS marker
-            2:  'h00; 3:  'h0C;                //Ls = 6 + 2*Ns = 12
-            4:  'h03;                          //Ns = 3
-            5:  'h01; 6:  'h00;                //Y:  Csj=1, Tdj=0, Taj=0
-            7:  'h02; 8:  'h11;                //Cb: Csj=2, Tdj=1, Taj=1
-            9:  'h03; 10: 'h11;                //Cr: Csj=3, Tdj=1, Taj=1
-            11: 'h00;                          //Ss = 0
-            12: 'h3F;                          //Se = 63
-            13: 'h00;                          //Ah = 0, Al = 0
-            default: 0;
-        endcase;
+        if(!en_chroma) begin
+            return case (idx)
+                0: 'hFF; 1: 'hDA;                 //SOS marker
+                2: 'h00; 3: 'h08;                 //Ls = 6 + 2*Ns = 8
+                4: 'h01;                          //Ns = 1
+                5: 'h01; 6: 'h00;                 //Y: Csj=1, Tdj=0, Taj=0
+                7: 'h00;                          //Ss = 0
+                8: 'h3F;                          //Se = 63
+                9: 'h00;                          //Ah = 0, Al = 0
+                default: 0;
+            endcase;
+        end else begin
+            return case (idx)
+                0:  'hFF; 1:  'hDA;                //SOS marker
+                2:  'h00; 3:  'h0C;                //Ls = 6 + 2*Ns = 12
+                4:  'h03;                          //Ns = 3
+                5:  'h01; 6:  'h00;                //Y:  Csj=1, Tdj=0, Taj=0
+                7:  'h02; 8:  'h11;                //Cb: Csj=2, Tdj=1, Taj=1
+                9:  'h03; 10: 'h11;                //Cr: Csj=3, Tdj=1, Taj=1
+                11: 'h00;                          //Ss = 0
+                12: 'h3F;                          //Se = 63
+                13: 'h00;                          //Ah = 0, Al = 0
+                default: 0;
+            endcase;
+        end
+    endfunction
+
+    function Bool last_dht_table(Bit#(2) tbl);
+        return en_chroma ? (tbl == 3) : (tbl == 1);
     endfunction
 
 
@@ -222,7 +252,7 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
         f_out.enq(pack(w_qraw_resp));
         if (rg_cnt == 63) begin
             rg_cnt <= 0;
-            if (rg_dqt == 0) begin
+            if (en_chroma && rg_dqt == 0) begin
                 rg_dqt   <= 1;
                 rg_state <= DQT_HEAD;
             end else
@@ -265,9 +295,11 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
         if (rg_cnt == 15) begin
             rg_cnt <= 0;
             if (rg_huffval_total == 0) begin
-                //no HUFFVAL entries - advance to next table or to SOS
-                if (rg_dht == 3)
-                    rg_state <= SCAN_HEAD;
+                //no HUFFVAL entries - advance to next table or to SOF0
+                if (last_dht_table(rg_dht)) begin
+                    rg_huffval_total <= 0;
+                    rg_state         <= SOF0;
+                end
                 else begin
                     rg_dht   <= rg_dht + 1;
                     rg_state <= DHT_SUM;
@@ -289,7 +321,7 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
         if (rg_cnt == rg_huffval_total - 1) begin
             rg_cnt           <= 0;
             rg_huffval_total <= 0;
-            if (rg_dht == 3)
+            if (last_dht_table(rg_dht))
                 rg_state <= SOF0;
             else begin
                 rg_dht   <= rg_dht + 1;
@@ -302,7 +334,7 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
     //emit SOF0 frame header (19 bytes)
     rule r_sof0 (rg_state == SOF0);
         f_out.enq(sof0_byte(rg_cnt));
-        if (rg_cnt == 18) begin
+        if (rg_cnt == (en_chroma ? 18 : 12)) begin
             rg_cnt           <= 0;
             rg_dht           <= 0;
             rg_huffval_total <= 0;
@@ -314,7 +346,7 @@ module mkJPEGFramewriter(JPEGFramewriter_ifc);
     //emit SOS header (14 bytes)
     rule r_scan_header (rg_state == SCAN_HEAD);
         f_out.enq(sos_byte(rg_cnt));
-        if (rg_cnt == 13) begin
+        if (rg_cnt == (en_chroma ? 13 : 9)) begin
             rg_cnt   <= 0;
             rg_state <= SCAN;
         end else

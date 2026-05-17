@@ -79,7 +79,8 @@ module [Module] test(TestHandler)
             _prx_dsc   : ?,
             _prx_qsc   : ?,
             _prx_dpw   : ?,
-            en_tiler   : True
+            en_tiler   : True,
+            en_chroma  : True
         };
     BlueJPEG_ifc dut    <- mkBlueJPEG(jpeg_cfg);
     let csr_defs        <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
