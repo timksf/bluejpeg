@@ -62,73 +62,6 @@ typedef struct {
 
 typedef enum { S_IDLE, S_CONFIGURE, S_RUNNING, S_FLUSH, S_DONE } FrameState_t deriving(Eq, Bits, FShow);
 
-module mkChromaSubsamplerDrop(ChromaSubsampler_ifc);
-    FIFO#(UInt#(8)) f_in  <- mkPipelineFIFO;
-    FIFO#(UInt#(8)) f_out <- mkPipelineFIFO;
-
-    rule r_drop;
-        f_in.deq;
-    endrule
-
-    method Action configure(SubsamplingMode_t mode);
-        f_in.clear();
-        f_out.clear();
-    endmethod
-
-    method Action rewind();
-        f_in.clear();
-        f_out.clear();
-    endmethod
-
-    interface pixel_in  = toPut(f_in);
-    interface pixel_out = toGet(f_out);
-endmodule
-
-module mkChromaBlockReorderDrop(ChromaBlockReorder_ifc);
-    FIFO#(UInt#(8)) f_in  <- mkPipelineFIFO;
-    FIFO#(UInt#(8)) f_out <- mkPipelineFIFO;
-
-    rule r_drop;
-        f_in.deq;
-    endrule
-
-    method Action configure(SubsamplingMode_t mode, Bit#(13) blk_cols);
-        f_in.clear();
-        f_out.clear();
-    endmethod
-
-    method Action rewind();
-        f_in.clear();
-        f_out.clear();
-    endmethod
-
-    interface pixel_in  = toPut(f_in);
-    interface pixel_out = toGet(f_out);
-endmodule
-
-module mkDUDispatcherLumaOnly(DUDispatcher_ifc);
-    FIFO#(UInt#(8)) f_y  <- mkPipelineFIFO;
-    FIFO#(UInt#(8)) f_cb <- mkPipelineFIFO;
-    FIFO#(UInt#(8)) f_cr <- mkPipelineFIFO;
-
-    rule r_drop_cb;
-        f_cb.deq;
-    endrule
-
-    rule r_drop_cr;
-        f_cr.deq;
-    endrule
-
-    method Action set_mode(SubsamplingMode_t mode);
-        noAction;
-    endmethod
-
-    interface y   = toPut(f_y);
-    interface cb  = toPut(f_cb);
-    interface cr  = toPut(f_cr);
-    interface pix = toGet(f_y);
-endmodule
-
 // ================================================================
 // Module
 // ================================================================
@@ -200,39 +133,35 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     RegMapDoc_t#(32) doc <- doc_blue_csr(blue_jpeg_csrs);
     messageM(doc.reg_defs);
 
-    //wrap 
+    //wrap csrs into axi4l slave
     let axi_csrs <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
+
     // ---- sub-module instantiation ----
+    TableStorage_ifc#(quant_scale)          tables      <- mkTableStorage(cfg._prx_qsc, True);
 
-    TableStorage_ifc#(quant_scale)          tables   <- mkTableStorage(cfg._prx_qsc, True);
+    AXI4_Stream_Rd#(24, 0)                  axis_rd     <- mkAXI4_Stream_Rd(1);
+    AXI4_Stream_Wr#(8, 0)                   axis_wr     <- mkAXI4_Stream_Wr(1);
 
-    AXI4_Stream_Rd#(24, 0)                  axis_rd  <- mkAXI4_Stream_Rd(1);
-    AXI4_Stream_Wr#(8, 0)                   axis_wr  <- mkAXI4_Stream_Wr(1);
-
-    ImageTilingEngine_ifc#(YCbCr_t, 8, 8)   img_tiler <- mkImageTilingEngine(cfg._prx_miw);
-    ChannelSplitter_ifc                     ch_splt   <- mkChannelSplitter;
-    YBlockReorder_ifc                       y_reord   <- mkYBlockReorder(_prx_mbc, False);
+    ImageTilingEngine_ifc#(YCbCr_t, 8, 8)   img_tiler = ?;
+    if(cfg.en_tiler) begin
+        img_tiler   <- mkImageTilingEngine(cfg._prx_miw);
+    end
+    ChannelSplitter_ifc                     ch_splt     <- mkChannelSplitter;
+    YBlockReorder_ifc                       y_reord     <- mkYBlockReorder(_prx_mbc, False);
 
     NumProxy#(8) _prx_bw = ?;
 
-    ChromaSubsampler_ifc                    subs_cb;
-    ChromaSubsampler_ifc                    subs_cr;
-    ChromaBlockReorder_ifc                  cr_reord_cb;
-    ChromaBlockReorder_ifc                  cr_reord_cr;
-    DUDispatcher_ifc                        du_disp;
-
+    ChromaSubsampler_ifc                    subs_cb     = ?;
+    ChromaSubsampler_ifc                    subs_cr     = ?;
+    ChromaBlockReorder_ifc                  cr_reord_cb = ?;
+    ChromaBlockReorder_ifc                  cr_reord_cr = ?;
+    DUDispatcher_ifc                        du_disp     = ?;
     if(cfg.en_chroma) begin
         subs_cb     <- mkChromaSubsampler(_prx_bw);
         subs_cr     <- mkChromaSubsampler(_prx_bw);
         cr_reord_cb <- mkChromaBlockReorder(_prx_mbc);
         cr_reord_cr <- mkChromaBlockReorder(_prx_mbc);
         du_disp     <- mkDUDispatcher;
-    end else begin
-        subs_cb     <- mkChromaSubsamplerDrop;
-        subs_cr     <- mkChromaSubsamplerDrop;
-        cr_reord_cb <- mkChromaBlockReorderDrop;
-        cr_reord_cr <- mkChromaBlockReorderDrop;
-        du_disp     <- mkDUDispatcherLumaOnly;
     end
 
     FIFO#(UInt#(8))                         f_du_pixels <- mkPipelineFIFO;
@@ -259,23 +188,29 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     if(cfg.en_tiler) begin
         mkConnection(img_tiler.block_out, ch_splt.pix);     //tiler blocks -> channel splitter
     end
-    mkConnection(ch_splt.y, y_reord.pixel_in);             //Y -> block reorder
+    if(cfg.en_chroma) begin
+        mkConnection(ch_splt.y, y_reord.pixel_in);             //Y -> block reorder
+    end
     mkConnection(ch_splt.cb, subs_cb.pixel_in);            //Cb -> chroma path (or sink in grayscale)
     mkConnection(ch_splt.cr, subs_cr.pixel_in);            //Cr -> chroma path (or sink in grayscale)
 
-    //64 element deep FIFOs absorb the skew between luma and chroma scheduling.
-    FIFO#(UInt#(8)) f_cb_du_buf <- mkSizedFIFO(64);
-    FIFO#(UInt#(8)) f_cr_du_buf <- mkSizedFIFO(64);
+    if(cfg.en_chroma) begin
+        //64 element deep FIFOs absorb the skew between luma and chroma scheduling.
+        FIFO#(UInt#(8)) f_cb_du_buf <- mkSizedFIFO(64);
+        FIFO#(UInt#(8)) f_cr_du_buf <- mkSizedFIFO(64);
 
-    mkConnection(subs_cb.pixel_out, cr_reord_cb.pixel_in);   //subsampled Cb -> chroma reorder
-    mkConnection(subs_cr.pixel_out, cr_reord_cr.pixel_in);   //subsampled Cr -> chroma reorder
+        mkConnection(subs_cb.pixel_out, cr_reord_cb.pixel_in);   //subsampled Cb -> chroma reorder
+        mkConnection(subs_cr.pixel_out, cr_reord_cr.pixel_in);   //subsampled Cr -> chroma reorder
 
-    mkConnection(y_reord.pixel_out, du_disp.y);              //reordered Y -> dispatcher
-    mkConnection(cr_reord_cb.pixel_out, toPut(f_cb_du_buf)); //reordered Cb -> chroma DU buffer
-    mkConnection(cr_reord_cr.pixel_out, toPut(f_cr_du_buf)); //reordered Cr -> chroma DU buffer
-    mkConnection(toGet(f_cb_du_buf), du_disp.cb);            //chroma DU buffer -> dispatcher
-    mkConnection(toGet(f_cr_du_buf), du_disp.cr);            //chroma DU buffer -> dispatcher
-    mkConnection(du_disp.pix, toPut(f_du_pixels));           //selected DU stream -> common DU FIFO
+        mkConnection(y_reord.pixel_out, du_disp.y);              //reordered Y -> dispatcher
+        mkConnection(cr_reord_cb.pixel_out, toPut(f_cb_du_buf)); //reordered Cb -> chroma DU buffer
+        mkConnection(cr_reord_cr.pixel_out, toPut(f_cr_du_buf)); //reordered Cr -> chroma DU buffer
+        mkConnection(toGet(f_cb_du_buf), du_disp.cb);            //chroma DU buffer -> dispatcher
+        mkConnection(toGet(f_cr_du_buf), du_disp.cr);            //chroma DU buffer -> dispatcher
+        mkConnection(du_disp.pix, toPut(f_du_pixels));           //selected DU stream -> common DU FIFO
+    end else begin
+        mkConnection(ch_splt.y, toPut(f_du_pixels));
+    end
 
     // DU processing pipeline (Server chain)
     // dispatcher outputs UInt#(8), DUProc expects Int#(dpw) - convert

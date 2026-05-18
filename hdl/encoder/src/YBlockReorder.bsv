@@ -7,7 +7,7 @@ import SpecialFIFOs :: *;
 
 import Types :: *;
 
-//Reorders Y blocks from raster order to 4:2:0 MCU order for interleaved ordering to A.2.3.
+//Reorders Y blocks from raster order to 4:2:0 MCU order for interleaved ordering according to A.2.3.
 //
 //Input (raster):  row0[0] row0[1] row0[2] ... row1[0] row1[1] row1[2] ...
 //Output (MCU):    row0[0] row0[1] row1[0] row1[1] row0[2] row0[3] row1[2] row1[3] ...
