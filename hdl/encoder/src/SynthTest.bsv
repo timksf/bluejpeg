@@ -154,4 +154,34 @@ module mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 endmodule
 
 
+(* synthesize, default_clock_osc="aclk", default_reset="aresetn" *)
+module mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+
+    //fast clock and associated reset
+    let aclk    <- exposeCurrentClock;
+    let aresetn <- exposeCurrentReset;
+
+    let dct_reset <- mkResetSync(2, True, dct_clock);
+
+    NumProxy#(1920) maximw = ?;
+    NumProxy#(12)   fscale = ?;
+    NumProxy#(16)   dpw = ?;
+
+    let jpeg_cfg = BlueJPEGCfg_t {
+        slow_clock : dct_clock,
+        slow_reset : dct_reset.new_rst,
+        _prx_miw   : maximw,
+        _prx_dsc   : fscale,
+        _prx_qsc   : fscale,
+        _prx_dpw   : dpw,
+        en_tiler   : True,
+        en_chroma  : False
+    };
+    BlueJPEG_ifc ifc();
+    mkBlueJPEG#(jpeg_cfg) __internal(ifc);
+
+    return ifc;
+endmodule
+
+
 endpackage
