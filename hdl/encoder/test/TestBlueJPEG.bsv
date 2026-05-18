@@ -17,11 +17,11 @@ import BlueJPEG :: *;
 import BlueJPEGRegs :: *;
 import RGB2YCbCr :: *;
 
-String input_image_path = "../../../assets/sample_192x192.bmp";
+String input_image_path = "../../../assets/sample_1920x1280.bmp";
 String output_jpeg_path = "../result.jpg";
 
-typedef 192 InputWidth;
-typedef 192 InputHeight;
+typedef 1920 InputWidth;
+typedef 1280 InputHeight;
 
 //SimRAM definitions
 typedef 32 WordWidth;
