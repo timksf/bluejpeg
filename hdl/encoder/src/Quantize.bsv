@@ -63,7 +63,8 @@ endinterface
 
 module mkQuantize#(NumProxy#(bits_frac) f_scale, Bool buffer_in, Bool aan_scaling, Bool transposed)(Quant_ifc#(bits)) 
     provisos(
-        Add#(bits, bits_frac, bits_mul),
+        Add#(bits_frac, 2, coeff_bits),
+        Add#(bits, coeff_bits, bits_mul),
         Add#(a__, bits_frac, 32)         //bits_frac <= 32
     );
 
@@ -88,7 +89,7 @@ module mkQuantize#(NumProxy#(bits_frac) f_scale, Bool buffer_in, Bool aan_scalin
         chroma_mult = std_CHROMA_QUANT_c;
     end
 
-    function mul = scaled_mul_s(f_scale);
+    function mul = scaled_mul_s(True, f_scale);
 
     rule rquant;
         let val = f_i.first;
@@ -117,7 +118,8 @@ endmodule
 //should have combinational table connection
 module mkQuantize_RT#(NumProxy#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#(bits))
     provisos(
-        Add#(bits, bits_frac, bits_mul),
+        Add#(bits_frac, 2, coeff_bits),
+        Add#(bits, coeff_bits, bits_mul),
         Add#(a__, bits_frac, 32)         //bits_frac <= 32
     );
 

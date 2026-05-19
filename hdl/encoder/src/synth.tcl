@@ -2,9 +2,11 @@
 # synth_design -top mkDCT2D_Optimized_12b -mode out_of_context
 # synth_design -top mkDCT2D_12b -mode out_of_context
 # synth_design -top mkDCT2D_Optimized_14b -mode out_of_context
-# synth_design -top mkMCUProc_14b -mode out_of_context
+# synth_design -top mkDUProc_16b -mode out_of_context
 # synth_design -top mkImageTilingEngine_1920 -mode out_of_context
-synth_design -top mkBlueJPEGTop_1920_12_12_16 -mode out_of_context
+# synth_design -top mkBlueJPEGGrayTop_1920_12_12_16 -mode out_of_context
+read_xdc [file dirname $script_path]/constr.xdc
+synth_design -top mkDCT1D_16b -mode out_of_context
 puts "Finished synth_design"
 
 # implement
@@ -20,6 +22,7 @@ report_utilization -file $project_dir/${project_name}_util1.rpt
 report_drc -file $project_dir/${project_name}_drc1.rpt
 puts "Finished opt_design"
 
+write_checkpoint -force $project_dir/${project_name}_drc.dcp
 # place_design
 
 # report_timing_summary -file $project_dir/${project_name}_tim2.rpt

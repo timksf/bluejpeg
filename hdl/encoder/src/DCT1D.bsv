@@ -20,19 +20,24 @@ endinterface
 
 module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bits))
     provisos(
-        Add#(bits, bits_frac, bits_mul)
+        Add#(bits_frac, 2, coeff_bits), //required for multiplication coefficients > a4, s7
+        Add#(bits, coeff_bits, bits_mul)
     );
     //TODO maybe add overflow detection
 
     //AAN algorithm, without scaling the output there are 5 multiplications total
 
     //maybe revise this later? but implicit control flow logic is nice...
-    FIFO#(Vector#(8, Int#(bits))) f_stage0 <- mkPipelineFIFO;
-    FIFO#(Vector#(8, Int#(bits))) f_stage1 <- mkPipelineFIFO;
-    FIFO#(Vector#(8, Int#(bits))) f_stage2 <- mkPipelineFIFO;
-    FIFO#(Vector#(8, Int#(bits))) f_stage3 <- mkPipelineFIFO;
-    FIFO#(Vector#(8, Int#(bits))) f_stage4 <- mkPipelineFIFO;
-    FIFO#(Vector#(8, Int#(bits))) f_stage5 <- mkPipelineFIFO;
+    Vector#(7, FIFO#(Vector#(8, Int#(bits)))) f_stages <- replicateM(mkPipelineFIFO);
+    FIFO#(Int#(bits)) f_helper2 <- mkPipelineFIFO;
+    FIFO#(Int#(bits)) f_helper3 <- mkPipelineFIFO;
+
+    // FIFO#(Vector#(8, Int#(bits))) f_stage0 <- mkPipelineFIFO;
+    // FIFO#(Vector#(8, Int#(bits))) f_stage1 <- mkPipelineFIFO;
+    // FIFO#(Vector#(8, Int#(bits))) f_stage2 <- mkPipelineFIFO;
+    // FIFO#(Vector#(8, Int#(bits))) f_stage3 <- mkPipelineFIFO;
+    // FIFO#(Vector#(8, Int#(bits))) f_stage4 <- mkPipelineFIFO;
+    // FIFO#(Vector#(8, Int#(bits))) f_stage5 <- mkPipelineFIFO;
     FIFO#(Vector#(8, Int#(bits))) f_out;
 
     Reg#(SaturationMode) rg_sat_mode <- mkReg(Sat_Bound);
@@ -44,11 +49,13 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
 
     Real scale = 2 ** fromInteger(valueof(bits_frac));
 
+    //constants typically get narrowed before multiplication during synthesis
+
     //coefficients from AAN algorithm
     Integer a1_i = round(0.70710678 * scale); //cos(pi/4)
     Integer a2_i = round(0.54119610 * scale); //0.541
     Integer a3_i = round(0.70710678 * scale); //cos(pi/4)
-    Integer a4_i = round(1.30656296 * scale); //1.307
+    Integer a4_i = round(1.30656296 * scale); //1.307 (this breaks scaling with bits_frac as its >1)
     Integer a5_i = round(0.38268343 * scale); //0.383
 
     //output scaling (can be absorbed into quantization)
@@ -61,16 +68,17 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
     Integer s6_i = round(0.65328148 * scale);
     Integer s7_i = round(1.28145772 * scale);
 
-    function mul = scaled_mul_s(_scale_proxy);
+    function mul = scaled_mul_s(False, _scale_proxy);
 
     //butterfly add with saturation
     function Int#(bits) bf_add(Int#(bits) a, Int#(bits) b);
-        return satPlus(rg_sat_mode, a, b);
+        // return satPlus(rg_sat_mode, a, b);
+        return a + b;
     endfunction
 
     //stage0
     rule rstage0;
-        let in = f_stage0.first; f_stage0.deq;
+        let in = f_stages[0].first; f_stages[0].deq;
         Vector#(8, Int#(bits)) b = newVector;
         b[0] = bf_add( in[0], in[7]);
         b[1] = bf_add( in[1], in[6]);
@@ -80,12 +88,12 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
         b[5] = bf_add(-in[5], in[2]);
         b[6] = bf_add(-in[6], in[1]);
         b[7] = bf_add(-in[7], in[0]);
-        f_stage1.enq(b);
+        f_stages[1].enq(b);
     endrule
 
     //stage1
     rule rstage1;
-        let b = f_stage1.first; f_stage1.deq;
+        let b = f_stages[1].first; f_stages[1].deq;
         Vector#(8, Int#(bits)) c = newVector;
         c[0] = bf_add( b[0],  b[3]);
         c[1] = bf_add( b[1],  b[2]);
@@ -95,12 +103,12 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
         c[5] = bf_add( b[5],  b[6]);
         c[6] = bf_add( b[6],  b[7]);
         c[7] = b[7];
-        f_stage2.enq(c);
+        f_stages[2].enq(c);
     endrule
 
     //stage2
     rule rstage2;
-        let c = f_stage2.first; f_stage2.deq;
+        let c = f_stages[2].first; f_stages[2].deq;
         Vector#(8, Int#(bits)) d = newVector;
         d[0] = bf_add( c[0], c[1]);
         d[1] = bf_add(-c[1], c[0]);
@@ -110,30 +118,54 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
         d[5] = c[5];
         d[6] = c[6];
         d[7] = c[7];
-        f_stage3.enq(d);
+
+        Int#(bits) helper2 = bf_add(c[4], c[6]);
+
+        f_helper2.enq(helper2);
+        f_stages[3].enq(d);
     endrule
 
-    //stage3
-    rule rstage4;
-        let d = f_stage3.first; f_stage3.deq;
-        Vector#(8, Int#(bits)) e = newVector;
-        
-        Int#(bits) helper = mul(bf_add(d[4], d[6]), a5_i);
+    //stage3 - multiplications
+    rule rstage3;
+        //helper stage to separate multiplications from additions
+        let d = f_stages[3].first; f_stages[3].deq;
+        let helper2 = f_helper2.first; f_helper2.deq;
+        Vector#(8, Int#(bits)) m = newVector;
+        Int#(bits) helper3 = mul(helper2, a5_i);
 
-        e[0] = d[0];
-        e[1] = d[1];
-        e[2] = mul(d[2], a1_i);
-        e[3] = d[3];
-        e[4] = bf_add(-mul(d[4], a2_i), -helper);
-        e[5] = mul(d[5], a3_i);
-        e[6] = bf_add(mul(d[6], a4_i), -helper);
-        e[7] = d[7];
-        f_stage4.enq(e);
+        m[0] = d[0];
+        m[1] = d[1];
+        m[2] = mul(d[2], a1_i);
+        m[3] = d[3];
+        m[4] = mul(d[4], a2_i);
+        m[5] = mul(d[5], a3_i);
+        m[6] = mul(d[6], a4_i);
+        m[7] = d[7];
+
+        f_helper3.enq(helper3);
+        f_stages[4].enq(m);
+    endrule
+
+    //stage4
+    rule rstage4;
+        let m = f_stages[4].first; f_stages[4].deq;
+        let helper3 = f_helper3.first; f_helper3.deq;
+        Vector#(8, Int#(bits)) e = newVector;
+
+        e[0] = m[0];
+        e[1] = m[1];
+        e[2] = m[2];
+        e[3] = m[3];
+        e[4] = bf_add(-m[4], -helper3);
+        e[5] = m[5];
+        e[6] = bf_add(m[6], -helper3);
+        e[7] = m[7];
+        f_stages[5].enq(e);
     endrule
 
     //stage5
     rule rstage5;
-        let e = f_stage4.first; f_stage4.deq;
+        let e = f_stages[5].first; f_stages[5].deq;
         Vector#(8, Int#(bits)) f = newVector;
         f[0] = e[0];
         f[1] = e[1];
@@ -143,12 +175,12 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
         f[5] = bf_add(e[5], e[7]);
         f[6] = e[6];
         f[7] = bf_add(e[7], -e[5]);
-        f_stage5.enq(f);
+        f_stages[6].enq(f);
     endrule
 
     //stage6
     rule rstage6;
-        let f = f_stage5.first; f_stage5.deq;
+        let f = f_stages[6].first; f_stages[6].deq;
         Vector#(8, Int#(bits)) g = newVector;
         g[0] = f[0];
         g[1] = f[1];
@@ -161,6 +193,7 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
 
         Vector#(8, Int#(bits)) out = newVector;
 
+        //TODO: move scaling into dedicated stage
         if(scale_out) begin
             Vector#(8, Int#(bits)) t = newVector;
             t[0] = mul(g[0], s0_i);
@@ -195,7 +228,7 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
 
     method overflow = False;
 
-    interface data = toGPServer(f_stage0, f_out);
+    interface data = toGPServer(f_stages[0], f_out);
 
 endmodule
 

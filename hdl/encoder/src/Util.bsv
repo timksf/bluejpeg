@@ -79,20 +79,26 @@ function DU_t#(t, h, w) transpose_mcu(DU_t#(t, w, h) mcu);
 endfunction
 
 /*
-* This function multiplies an integer of `bits` length with a compile-time 
-* constant Integer that was scaled by 2^`bits_frac`. The function safely rounds the result
-* and removes the scaling factor with a shift.
+* This function multiplies an integer of `bits` length with a compile-time
+* constant Integer that was scaled by 2^`bits_frac`. The constant is stored as
+* signed Q1.bits_frac, so values in [-2, 2) keep their integer bit instead of
+* truncating into the fractional field.
 */
-function Int#(bits) scaled_mul_s(NumProxy#(bits_frac) _proxy, Int#(bits) val, Integer f) 
+function Int#(bits) scaled_mul_s(Bool sat, NumProxy#(bits_frac) _proxy, Int#(bits) val, Integer f)
     provisos(
-        Add#(bits, bits_frac, bits_mul)
+        Add#(bits_frac, 2, coeff_bits),
+        Add#(bits, coeff_bits, bits_mul)
     );
-    Int#(bits_mul) wide_val     = signExtend(val);
-    Int#(bits_mul) wide_const   = fromInteger(f);
-    Int#(bits_mul) prod         = wide_val * wide_const;
+    Int#(coeff_bits) f_const    = fromInteger(f);
+    Int#(bits_mul)   prod       = signedMul(val, f_const);
 
     //rounding: add 2^(bits_frac-1) before shifting
-    Int#(bits_mul) prod_m       = satPlus(Sat_Bound, prod, (1 << fromInteger(valueOf(bits_frac) - 1)));
+    Int#(bits_mul) prod_m       = ?;
+    if(sat) begin
+        prod_m = satPlus(Sat_Bound, prod, (1 << fromInteger(valueOf(bits_frac) - 1)));
+    end else begin
+        prod_m = prod + (1 << fromInteger(valueOf(bits_frac) - 1));
+    end
 
     return truncate(prod_m >> valueOf(bits_frac));
 endfunction

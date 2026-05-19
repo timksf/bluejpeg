@@ -12,9 +12,9 @@ import DCT2D_Optimized :: *;
 import ImageTilingEngine :: *;
 
 (* synthesize *)
-module mkDCT1D_12b(DCT1D_ifc#(12));
-    NumProxy#(8) f_scale = ?;
-    DCT1D_ifc#(12) ifc();
+module mkDCT1D_16b(DCT1D_ifc#(16));
+    NumProxy#(12) f_scale = ?;
+    DCT1D_ifc#(16) ifc();
     mkDCT1D#(f_scale, False) __int(ifc);
     return ifc;
 endmodule
@@ -44,7 +44,7 @@ module mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
 endmodule
 
 (* synthesize *)
-module mkMCUProc_14b(DUProc_t#(14));
+module mkDUProc_16b(DUProc_t#(16));
 
     //this module is used for utilization analysis
     //for simplicity, use the same clock for the DCT
@@ -66,7 +66,7 @@ module mkMCUProc_14b(DUProc_t#(14));
         debug            : False
     };
 
-    DUProc_t#(14) ifc();
+    DUProc_t#(16) ifc();
     mkDUProc#(mcuproc_cfg) __int(ifc);
     return ifc;
 endmodule
