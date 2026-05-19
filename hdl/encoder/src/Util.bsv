@@ -84,7 +84,7 @@ endfunction
 * signed Q1.bits_frac, so values in [-2, 2) keep their integer bit instead of
 * truncating into the fractional field.
 */
-function Int#(bits) scaled_mul_s(Bool sat, NumProxy#(bits_frac) _proxy, Int#(bits) val, Integer f)
+function Int#(bits) scaled_mul_s(Bool sat, Bool round, NumProxy#(bits_frac) _proxy, Int#(bits) val, Integer f)
     provisos(
         Add#(bits_frac, 2, coeff_bits),
         Add#(bits, coeff_bits, bits_mul)
@@ -94,10 +94,14 @@ function Int#(bits) scaled_mul_s(Bool sat, NumProxy#(bits_frac) _proxy, Int#(bit
 
     //rounding: add 2^(bits_frac-1) before shifting
     Int#(bits_mul) prod_m       = ?;
-    if(sat) begin
-        prod_m = satPlus(Sat_Bound, prod, (1 << fromInteger(valueOf(bits_frac) - 1)));
+    if(round) begin
+        //saturation only important when rounding is applied
+        if(sat)
+            prod_m = satPlus(Sat_Bound, prod, (1 << fromInteger(valueOf(bits_frac) - 1)));
+        else
+            prod_m = prod + (1 << fromInteger(valueOf(bits_frac) - 1));
     end else begin
-        prod_m = prod + (1 << fromInteger(valueOf(bits_frac) - 1));
+        prod_m = prod;
     end
 
     return truncate(prod_m >> valueOf(bits_frac));

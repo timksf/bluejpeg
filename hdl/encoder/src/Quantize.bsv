@@ -89,7 +89,7 @@ module mkQuantize#(NumProxy#(bits_frac) f_scale, Bool buffer_in, Bool aan_scalin
         chroma_mult = std_CHROMA_QUANT_c;
     end
 
-    function mul = scaled_mul_s(True, f_scale);
+    function mul = scaled_mul_s(True, True, f_scale);
 
     rule rquant;
         let val = f_i.first;

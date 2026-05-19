@@ -96,6 +96,23 @@
 | LUT3     |   86 |                 LUT |
 | LUT1     |   50 |                 LUT |
 +----------+------+---------------------+
+```
+
+#### 16bit datapath - adjusted multiplication for DSP inference
+```
++-------------------------+------+-------+------------+-----------+-------+
+|        Site Type        | Used | Fixed | Prohibited | Available | Util% |
++-------------------------+------+-------+------------+-----------+-------+
+| Slice LUTs*             | 1803 |     0 |          0 |     20800 |  8.67 |
+|   LUT as Logic          | 1803 |     0 |          0 |     20800 |  8.67 |
+|   LUT as Memory         |    0 |     0 |          0 |      9600 |  0.00 |
+| Slice Registers         | 1074 |     0 |          0 |     41600 |  2.58 |
+|   Register as Flip Flop | 1074 |     0 |          0 |     41600 |  2.58 |
+|   Register as Latch     |    0 |     0 |          0 |     41600 |  0.00 |
+| F7 Muxes                |    0 |     0 |          0 |     16300 |  0.00 |
+| F8 Muxes                |    0 |     0 |          0 |      8150 |  0.00 |
+| Unique Control Sets     |    3 |       |          0 |      8150 |  0.04 |
++-------------------------+------+-------+------------+-----------+-------+
 +----------+------+---------------------+
 | Ref Name | Used | Functional Category |
 +----------+------+---------------------+
@@ -117,22 +134,8 @@
 |   DSP48E1 only |    5 |       |            |           |       |
 +----------------+------+-------+------------+-----------+-------+
 ```
-
-#### 16bit datapath - adjusted multiplication for DSP inference
+#### 16bit datapath - adjusted multiplication for DSP inference and removed safe rounding for scaling down
 ```
-+-------------------------+------+-------+------------+-----------+-------+
-|        Site Type        | Used | Fixed | Prohibited | Available | Util% |
-+-------------------------+------+-------+------------+-----------+-------+
-| Slice LUTs*             | 1803 |     0 |          0 |     20800 |  8.67 |
-|   LUT as Logic          | 1803 |     0 |          0 |     20800 |  8.67 |
-|   LUT as Memory         |    0 |     0 |          0 |      9600 |  0.00 |
-| Slice Registers         | 1074 |     0 |          0 |     41600 |  2.58 |
-|   Register as Flip Flop | 1074 |     0 |          0 |     41600 |  2.58 |
-|   Register as Latch     |    0 |     0 |          0 |     41600 |  0.00 |
-| F7 Muxes                |    0 |     0 |          0 |     16300 |  0.00 |
-| F8 Muxes                |    0 |     0 |          0 |      8150 |  0.00 |
-| Unique Control Sets     |    3 |       |          0 |      8150 |  0.04 |
-+-------------------------+------+-------+------------+-----------+-------+
 ```
 
 ### DCT2D

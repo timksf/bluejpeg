@@ -68,7 +68,7 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
     Integer s6_i = round(0.65328148 * scale);
     Integer s7_i = round(1.28145772 * scale);
 
-    function mul = scaled_mul_s(False, _scale_proxy);
+    function mul = scaled_mul_s(False, False, _scale_proxy);
 
     //butterfly add with saturation
     function Int#(bits) bf_add(Int#(bits) a, Int#(bits) b);

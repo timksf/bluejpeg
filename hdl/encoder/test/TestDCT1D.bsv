@@ -27,17 +27,17 @@ module [Module] mkTestDCT1D(TestHandler);
     function print_fmt = print_mod_pre_color_t_f;
 
     NumProxy#(8) f_scale = ?;
-    DCT1D_ifc#(12) dut <- mkDCT1D(f_scale, True);
+    DCT1D_ifc#(16) dut <- mkDCT1D(f_scale, True);
 
     Reg#(Bit#(32)) rg_counter <- mkReg(0);
     Reg#(Bit#(32)) rg_errors <- mkReg(0);
 
-    FIFO#(Vector#(8, Int#(12))) f_tv <- mkFIFO;
+    FIFO#(Vector#(8, Int#(16))) f_tv <- mkFIFO;
 
     Stmt test_seq = seq
         while(rg_counter < 5) seq
             action
-                Vector#(8, Int#(12)) row = newVector;
+                Vector#(8, Int#(16)) row = newVector;
 
                 for(Integer i=0; i<8; i=i+1) begin
                     let pix <- rand_pix();
@@ -55,7 +55,7 @@ module [Module] mkTestDCT1D(TestHandler);
                 Vector#(8, Int#(16)) ext_row = map(signExtend, input_row);
                 let ref_out_packed <- dct_1d_i16_ref(pack(ext_row), True);
                 Vector#(8, Int#(16)) ref_wide = unpack(ref_out_packed);
-                Vector#(8, Int#(12)) ref_out = map(truncate, ref_wide);
+                Vector#(8, Int#(16)) ref_out = map(truncate, ref_wide);
                 
                 let res <- dut.data.response.get();
 
