@@ -4,9 +4,9 @@
 # synth_design -top mkDCT2D_Optimized_14b -mode out_of_context
 # synth_design -top mkDUProc_16b -mode out_of_context
 # synth_design -top mkImageTilingEngine_1920 -mode out_of_context
-# synth_design -top mkBlueJPEGGrayTop_1920_12_12_16 -mode out_of_context
 read_xdc [file dirname $script_path]/constr.xdc
-synth_design -top mkDCT1D_16b -mode out_of_context
+synth_design -top mkBlueJPEGGrayTop_720_12_12_16 -mode out_of_context
+# synth_design -top mkDCT1D_16b -mode out_of_context
 puts "Finished synth_design"
 
 # implement

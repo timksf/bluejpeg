@@ -3,3 +3,4 @@ build/
 .direnv/
 .github/
 vivado*
+.deps

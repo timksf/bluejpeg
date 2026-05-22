@@ -23,8 +23,6 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_ari
         Add#(bits_frac, 2, coeff_bits), //required for multiplication coefficients > a4, s7
         Add#(bits, coeff_bits, bits_mul)
     );
-    //TODO maybe add overflow detection
-
     //AAN algorithm, without scaling the output there are 5 multiplications total
 
     //maybe revise this later? but implicit control flow logic is nice...
