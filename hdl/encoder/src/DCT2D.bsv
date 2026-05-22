@@ -23,8 +23,8 @@ module mkDCT2D#(NumProxy#(frac_bits) f_scale, Bool transpose_output)(DCT2D_ifc#(
     FIFO#(DU_t#(Int#(bits), 8, 8)) f_in <- mkPipelineFIFO;
     FIFO#(DU_t#(Int#(bits), 8, 8)) f_out <- mkPipelineFIFO;
 
-    DCT1D_ifc#(bits) dct_row <- mkDCT1D(f_scale, False);
-    DCT1D_ifc#(bits) dct_col <- mkDCT1D(f_scale, False);
+    DCT1D_ifc#(bits) dct_row <- mkDCT1D(f_scale, False, True);
+    DCT1D_ifc#(bits) dct_col <- mkDCT1D(f_scale, False, True);
     
     TransposeBuffer_ifc#(Int#(bits), 8, 8) tp0 <- mkTransposeBuffer(False);
     TransposeBuffer_ifc#(Int#(bits), 8, 8) tp1 = ?;

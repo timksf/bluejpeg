@@ -83,6 +83,15 @@ namespace jpeg_fixedpoint {
     }
 
     //
+    // Wrapping signed add - mirrors BSV Int#(bits) addition without satPlus.
+    //
+    template<int bits = 16>
+    inline coeff_t<bits> wrap_add(coeff_t<bits> a, coeff_t<bits> b) {
+        wide_t<bits> sum = static_cast<wide_t<bits>>(a) + static_cast<wide_t<bits>>(b);
+        return truncate_to<bits>(sum);
+    }
+
+    //
     // Fixed-point multiply with rounding - mirrors BSV scaled_mul_s exactly.
     //   Multiply, add rounding bit, shift right, truncate to bits width.
     //
@@ -91,6 +100,15 @@ namespace jpeg_fixedpoint {
         wide_t<bits> prod = val * f;
         wide_t<bits> prod_m = prod + (wide_t<bits>{1} << (bits_frac - 1));
         return truncate_to<bits>(prod_m >> bits_frac);
+    }
+
+    //
+    // Fixed-point multiply without rounding - mirrors the optimized BSV DCT path.
+    //
+    template<int bits_frac, int bits = 16>
+    inline coeff_t<bits> scaled_mul_trunc(wide_t<bits> val, wide_t<bits> f) {
+        wide_t<bits> prod = val * f;
+        return truncate_to<bits>(prod >> bits_frac);
     }
 
     //
@@ -192,6 +210,81 @@ namespace jpeg_fixedpoint {
     }
 
     //
+    // Optimized 1D AAN DCT variant - matches DCT1D safe_arith=False.
+    // Additions wrap and fixed-point multiplies truncate instead of rounding.
+    //
+    template<int f_scale, int bits = 16>
+    void dct1d_aan_fixed_optimized(std::span<coeff_t<bits>, 8> block, std::span<coeff_t<bits>, 8> freqs) {
+        using C = coeff_t<bits>;
+        using W = wide_t<bits>;
+        constexpr W a1 = static_cast<W>(0.707106781 * (1 << f_scale) + 0.5);
+        constexpr W a2 = static_cast<W>(0.541196100 * (1 << f_scale) + 0.5);
+        constexpr W a3 = a1;
+        constexpr W a4 = static_cast<W>(1.306562964 * (1 << f_scale) + 0.5);
+        constexpr W a5 = static_cast<W>(0.382683432 * (1 << f_scale) + 0.5);
+
+        auto mul = [](C val, W mult) -> C {
+            return scaled_mul_trunc<f_scale, bits>(static_cast<W>(val), mult);
+        };
+
+        C b0 = wrap_add<bits>(block[0], block[7]);
+        C b1 = wrap_add<bits>(block[1], block[6]);
+        C b2 = wrap_add<bits>(block[2], block[5]);
+        C b3 = wrap_add<bits>(block[3], block[4]);
+        C b4 = wrap_add<bits>(neg<bits>(block[4]), block[3]);
+        C b5 = wrap_add<bits>(neg<bits>(block[5]), block[2]);
+        C b6 = wrap_add<bits>(neg<bits>(block[6]), block[1]);
+        C b7 = wrap_add<bits>(neg<bits>(block[7]), block[0]);
+
+        C c0 = wrap_add<bits>(b0, b3);
+        C c1 = wrap_add<bits>(b1, b2);
+        C c2 = wrap_add<bits>(neg<bits>(b2), b1);
+        C c3 = wrap_add<bits>(neg<bits>(b3), b0);
+        C c4 = wrap_add<bits>(neg<bits>(b4), neg<bits>(b5));
+        C c5 = wrap_add<bits>(b5, b6);
+        C c6 = wrap_add<bits>(b6, b7);
+        C c7 = b7;
+
+        C d0 = wrap_add<bits>(c0, c1);
+        C d1 = wrap_add<bits>(neg<bits>(c1), c0);
+        C d2 = wrap_add<bits>(c2, c3);
+        C d3 = c3;
+        C d4 = c4;
+        C d5 = c5;
+        C d6 = c6;
+        C d7 = c7;
+
+        C helper = mul(wrap_add<bits>(d4, d6), a5);
+
+        C e0 = d0;
+        C e1 = d1;
+        C e2 = mul(d2, a1);
+        C e3 = d3;
+        C e4 = wrap_add<bits>(neg<bits>(mul(d4, a2)), neg<bits>(helper));
+        C e5 = mul(d5, a3);
+        C e6 = wrap_add<bits>(mul(d6, a4), neg<bits>(helper));
+        C e7 = d7;
+
+        C f0 = e0;
+        C f1 = e1;
+        C f2 = wrap_add<bits>(e2, e3);
+        C f3 = wrap_add<bits>(e3, neg<bits>(e2));
+        C f4 = e4;
+        C f5 = wrap_add<bits>(e5, e7);
+        C f6 = e6;
+        C f7 = wrap_add<bits>(e7, neg<bits>(e5));
+
+        freqs[0] = f0;
+        freqs[4] = f1;
+        freqs[2] = f2;
+        freqs[6] = f3;
+        freqs[5] = wrap_add<bits>(f4, f7);
+        freqs[1] = wrap_add<bits>(f5, f6);
+        freqs[7] = wrap_add<bits>(neg<bits>(f6), f5);
+        freqs[3] = wrap_add<bits>(f7, neg<bits>(f4));
+    }
+
+    //
     // 2D DCT via separable 1D transforms (row then column) - matches DCT2D_Optimized.
     // Uses coeff_t<bits> temp storage matching BSV Int#(bits) pipeline FIFOs.
     //
@@ -211,6 +304,27 @@ namespace jpeg_fixedpoint {
             coeff_t<bits> col_in[8], col_out[8];
             for (int row = 0; row < 8; ++row) col_in[row] = temp[row * 8 + x];
             dct1d_aan_fixed<dct_scale, bits>(std::span<coeff_t<bits>, 8>{ col_in }, std::span<coeff_t<bits>, 8>{ col_out });
+            for (int row = 0; row < 8; ++row) freqs[row * 8 + x] = col_out[row];
+        }
+    }
+
+    //
+    // 2D DCT variant for the optimized DCT path.
+    //
+    template<int dct_scale, int bits = 16>
+    void dct2d_fixed_optimized(std::span<coeff_t<bits>, 64> block, std::span<coeff_t<bits>, 64> freqs) {
+        coeff_t<bits> temp[64];
+
+        for (int y = 0; y < 8; ++y) {
+            std::span<coeff_t<bits>, 8> row_in  { &block[y * 8], 8 };
+            std::span<coeff_t<bits>, 8> row_out { &temp[y * 8], 8 };
+            dct1d_aan_fixed_optimized<dct_scale, bits>(row_in, row_out);
+        }
+
+        for (int x = 0; x < 8; ++x) {
+            coeff_t<bits> col_in[8], col_out[8];
+            for (int row = 0; row < 8; ++row) col_in[row] = temp[row * 8 + x];
+            dct1d_aan_fixed_optimized<dct_scale, bits>(std::span<coeff_t<bits>, 8>{ col_in }, std::span<coeff_t<bits>, 8>{ col_out });
             for (int row = 0; row < 8; ++row) freqs[row * 8 + x] = col_out[row];
         }
     }

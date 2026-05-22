@@ -18,7 +18,7 @@ interface DCT1D_ifc#(numeric type bits);
     interface Server#(Vector#(8, Int#(bits)), Vector#(8, Int#(bits))) data;
 endinterface
 
-module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bits))
+module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_arith)(DCT1D_ifc#(bits))
     provisos(
         Add#(bits_frac, 2, coeff_bits), //required for multiplication coefficients > a4, s7
         Add#(bits, coeff_bits, bits_mul)
@@ -32,12 +32,6 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
     FIFO#(Int#(bits)) f_helper2 <- mkPipelineFIFO;
     FIFO#(Int#(bits)) f_helper3 <- mkPipelineFIFO;
 
-    // FIFO#(Vector#(8, Int#(bits))) f_stage0 <- mkPipelineFIFO;
-    // FIFO#(Vector#(8, Int#(bits))) f_stage1 <- mkPipelineFIFO;
-    // FIFO#(Vector#(8, Int#(bits))) f_stage2 <- mkPipelineFIFO;
-    // FIFO#(Vector#(8, Int#(bits))) f_stage3 <- mkPipelineFIFO;
-    // FIFO#(Vector#(8, Int#(bits))) f_stage4 <- mkPipelineFIFO;
-    // FIFO#(Vector#(8, Int#(bits))) f_stage5 <- mkPipelineFIFO;
     FIFO#(Vector#(8, Int#(bits))) f_out;
 
     Reg#(SaturationMode) rg_sat_mode <- mkReg(Sat_Bound);
@@ -68,12 +62,17 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out)(DCT1D_ifc#(bi
     Integer s6_i = round(0.65328148 * scale);
     Integer s7_i = round(1.28145772 * scale);
 
-    function mul = scaled_mul_s(False, False, _scale_proxy);
+    function mul = scaled_mul_s(safe_arith, safe_arith, _scale_proxy);
 
     //butterfly add with saturation
     function Int#(bits) bf_add(Int#(bits) a, Int#(bits) b);
-        // return satPlus(rg_sat_mode, a, b);
-        return a + b;
+        Int#(bits) res = ?;
+        if(safe_arith) begin
+            res = satPlus(rg_sat_mode, a, b);
+        end else begin
+            res = a + b;
+        end
+        return res;
     endfunction
 
     //stage0

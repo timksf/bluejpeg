@@ -16,7 +16,7 @@ import PrintUtil :: *;
 import TestHelper :: *;
 import TableStorage :: *;
 
-import "BDPI" function ActionValue#(Bit#(1024)) mcu_proc_ref(Bit#(1024) input_flat, Bool luma_not_chroma);
+import "BDPI" function ActionValue#(Bit#(1024)) mcu_proc_ref(Bit#(1024) input_flat, Bool luma_not_chroma, Bool optimized_dct);
 
 typedef 16 DPw;
 
@@ -54,7 +54,8 @@ module [Module] mkTestBitAccuracy(TestHandler);
         scale_in_dct     : False,
         transpose_in_dct : False,
         _q_scale         : quant_scale,
-        debug            : False
+        debug            : False,
+        dct_safe_arith   : False
     };
 
     DUProc_t#(DPw) dut <- mkDUProc(dut_cfg, clocked_by fast_clock, reset_by fast_reset);
@@ -122,7 +123,7 @@ module [Module] mkTestBitAccuracy(TestHandler);
 
             // Compare HW output vs C++ reference (bitwise exact)
             action
-                let ref_packed <- mcu_proc_ref(rg_input_flat, rg_is_luma);
+                let ref_packed <- mcu_proc_ref(rg_input_flat, rg_is_luma, !dut_cfg.dct_safe_arith);
                 Vector#(64, Int#(16)) ref_out = unpack(ref_packed);
 
                 // Compute max absolute difference

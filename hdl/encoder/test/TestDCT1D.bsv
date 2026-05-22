@@ -27,7 +27,7 @@ module [Module] mkTestDCT1D(TestHandler);
     function print_fmt = print_mod_pre_color_t_f;
 
     NumProxy#(8) f_scale = ?;
-    DCT1D_ifc#(16) dut <- mkDCT1D(f_scale, True);
+    DCT1D_ifc#(16) dut <- mkDCT1D(f_scale, True, False);
 
     Reg#(Bit#(32)) rg_counter <- mkReg(0);
     Reg#(Bit#(32)) rg_errors <- mkReg(0);

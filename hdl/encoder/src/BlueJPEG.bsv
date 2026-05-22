@@ -121,7 +121,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         scale_in_dct     : False,
         transpose_in_dct : False,
         _q_scale         : cfg._prx_qsc,
-        debug            : False
+        debug            : False,
+        dct_safe_arith   : True
     };
 
     NumProxy#(max_blk_cols) _prx_mbc = ?;

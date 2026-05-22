@@ -15,7 +15,7 @@ import ImageTilingEngine :: *;
 module mkDCT1D_16b(DCT1D_ifc#(16));
     NumProxy#(12) f_scale = ?;
     DCT1D_ifc#(16) ifc();
-    mkDCT1D#(f_scale, False) __int(ifc);
+    mkDCT1D#(f_scale, False, False) __int(ifc);
     return ifc;
 endmodule
 
@@ -63,7 +63,8 @@ module mkDUProc_16b(DUProc_t#(16));
         scale_in_dct     : False,
         transpose_in_dct : False,
         _q_scale         : quant_scale,
-        debug            : False
+        debug            : False,
+        dct_safe_arith   : False
     };
 
     DUProc_t#(16) ifc();

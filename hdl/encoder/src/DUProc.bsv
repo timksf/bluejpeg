@@ -33,6 +33,7 @@ typedef struct {
     Bool                    scale_in_dct;
     Bool                    transpose_in_dct;
     NumProxy#(q_scale)      _q_scale;
+    Bool                    dct_safe_arith;
     Bool                    debug;
 } DUProcCfg#(numeric type dct_scale, numeric type q_scale);
 
@@ -63,7 +64,7 @@ module mkDUProc#(DUProcCfg#(dct_scale, q_scale) cfg)(DUProc_t#(bits))
     Gearbox#(8, 1, Int#(bits)) gear_o <- mkNto1Gearbox(cfg.slow_clock,  cfg.slow_reset, fast_clock,     fast_reset);
 
     //processing submodules
-    DCT2DOpt_ifc#(bits)         i_dct   <- mkDCT2D_Opt(cfg._dct_scale, False, !cfg.scale_in_dct, cfg.transpose_in_dct, clocked_by cfg.slow_clock, reset_by cfg.slow_reset);
+    DCT2DOpt_ifc#(bits)         i_dct   <- mkDCT2D_Opt(cfg._dct_scale, False, !cfg.scale_in_dct, cfg.transpose_in_dct, cfg.dct_safe_arith, clocked_by cfg.slow_clock, reset_by cfg.slow_reset);
     Quant_ifc#(bits)            i_quant <- mkQuantize_RT(cfg._q_scale, False);
     Zigzag_ifc#(bits)           i_zz    <- mkZigZag_Opt(False, !cfg.transpose_in_dct);
 

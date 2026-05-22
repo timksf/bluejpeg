@@ -340,7 +340,7 @@ extern "C" {
         }
     }
 
-    void mcu_proc_ref(uint32_t *output_packed, const uint32_t *input_packed, uint8_t luma_not_chroma) {
+    void mcu_proc_ref(uint32_t *output_packed, const uint32_t *input_packed, uint8_t luma_not_chroma, uint8_t optimized_dct) {
         using namespace jpegencode;
         int16_t input[64];
         int16_t shifted[64];
@@ -361,10 +361,17 @@ extern "C" {
         }
 
         //dct - use shared fixed-point implementation
-        jpeg_fixedpoint::dct2d_fixed<12>(
-            std::span<int16_t, 64>(shifted, 64),
-            std::span<int16_t, 64>(dct_out, 64)
-        );
+        if (optimized_dct) {
+            jpeg_fixedpoint::dct2d_fixed_optimized<12>(
+                std::span<int16_t, 64>(shifted, 64),
+                std::span<int16_t, 64>(dct_out, 64)
+            );
+        } else {
+            jpeg_fixedpoint::dct2d_fixed<12>(
+                std::span<int16_t, 64>(shifted, 64),
+                std::span<int16_t, 64>(dct_out, 64)
+            );
+        }
 
         //quantization - use shared fixed-point quantization
         std::array<int16_t, 64> scaled_mults;

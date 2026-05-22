@@ -17,7 +17,7 @@ import PrintUtil :: *;
 import TestHelper :: *;
 import TableStorage :: *;
 
-import "BDPI" function ActionValue#(Bit#(1024)) mcu_proc_ref(Bit#(1024) input_flat, Bool luma_not_chroma);
+import "BDPI" function ActionValue#(Bit#(1024)) mcu_proc_ref(Bit#(1024) input_flat, Bool luma_not_chroma, Bool optimized_dct);
 
 //datapath width
 typedef 14 DPw;
@@ -44,7 +44,8 @@ module [Module] mkTestDUProc(TestHandler);
         scale_in_dct     : False,
         transpose_in_dct : False,
         _q_scale         : quant_scale,
-        debug            : True
+        debug            : True,
+        dct_safe_arith   : False
     };
 
     DUProc_t#(DPw) dut <- mkDUProc(dut_cfg, clocked_by fast_clock, reset_by fast_reset);
@@ -130,7 +131,7 @@ module [Module] mkTestDUProc(TestHandler);
             
             //calculate reference and compare
             action
-                let ref_out_packed <- mcu_proc_ref(input_flat, True);
+                let ref_out_packed <- mcu_proc_ref(input_flat, True, !dut_cfg.dct_safe_arith);
                 Vector#(64, Int#(16)) ref_out = unpack(ref_out_packed);
                 
                 function Int#(DPw) calc_diff(Integer i);

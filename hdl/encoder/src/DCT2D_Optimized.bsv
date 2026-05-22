@@ -20,7 +20,7 @@ interface DCT2DOpt_ifc#(numeric type bits);
     interface Server#(Vector#(8, Int#(bits)), Vector#(8, Int#(bits))) data;
 endinterface
 
-module mkDCT2D_Opt#(NumProxy#(frac_bits) f_scale, Bool buffer_in, Bool omit_scaling, Bool transpose_output)(DCT2DOpt_ifc#(bits));
+module mkDCT2D_Opt#(NumProxy#(frac_bits) f_scale, Bool buffer_in, Bool omit_scaling, Bool transpose_output, Bool dct_safe_arith)(DCT2DOpt_ifc#(bits));
 
     FIFO#(Vector#(8, Int#(bits))) f_in;
     FIFO#(Vector#(8, Int#(bits))) f_out <- mkPipelineFIFO;
@@ -30,8 +30,8 @@ module mkDCT2D_Opt#(NumProxy#(frac_bits) f_scale, Bool buffer_in, Bool omit_scal
     else
         f_in <- mkBypassFIFO;
 
-    DCT1D_ifc#(bits) dct_row <- mkDCT1D(f_scale, !omit_scaling);
-    DCT1D_ifc#(bits) dct_col <- mkDCT1D(f_scale, !omit_scaling);
+    DCT1D_ifc#(bits) dct_row <- mkDCT1D(f_scale, !omit_scaling, dct_safe_arith);
+    DCT1D_ifc#(bits) dct_col <- mkDCT1D(f_scale, !omit_scaling, dct_safe_arith);
 
     TransposeBufferOpt_ifc#(Int#(bits)) tp0 <- mkTransposeBufferOpt;
     TransposeBufferOpt_ifc#(Int#(bits)) tp1 = ?;
