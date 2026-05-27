@@ -2,6 +2,7 @@
 
 module cmod_jpeg_core(
     input wire clk,
+    input wire clk_dct,
     input wire rst,
     input wire [23:0] s_axis_tdata,
     input wire s_axis_tvalid,
@@ -88,7 +89,7 @@ module cmod_jpeg_core(
     assign m_axis_tlast = encoder_m_axis_tlast;
 
     mkMiniJPEGEncoder encoder_inst (
-        .clk_dct(clk),
+        .clk_dct(clk_dct),
         .aclk(clk),
         .aresetn(rstn),
         .S_AXIS_tready(encoder_s_axis_tready),
