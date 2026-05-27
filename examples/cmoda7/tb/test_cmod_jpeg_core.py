@@ -133,6 +133,7 @@ async def test_cmod_jpeg_core(dut):
         raise AssertionError("Packed AXI payload size does not match the BMP dimensions")
 
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+    cocotb.start_soon(Clock(dut.clk_dct, 80, unit="ns").start())
 
     dut.rst.setimmediatevalue(1)
     dut.s_axis_tdata.setimmediatevalue(0)
