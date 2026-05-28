@@ -13,6 +13,10 @@ PROJECT_NAME := MiniJPEGEncoder
 SRCDIR := $(CURDIR)/lib
 BUILDDIR := $(CURDIR)/build
 EXTRA_BSV_LIBS += $(ENCODER_DIR)/src
+VERILOGDIR_EXTRAS += $(CURDIR)/rtl
+PART := xc7a35tcpg236-1
+CONSTRAINTS := $(CURDIR)/cmoda7.xdc
+SCRIPT := $(CURDIR)/synth.tcl
 
 include $(ENCODER_DIR)/Makefile
 

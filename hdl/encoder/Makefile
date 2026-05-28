@@ -82,7 +82,7 @@ VERILOG_SIM:=iverilog
 # PART=xcku3p-ffvb676-2-e
 PART ?= xc7a35tcpg236-1
 SCRIPT ?= $(ENCODER_DIR)/src/synth.tcl
-CONSTRAINTS ?= $(ENCODER_DIR)/src/constr.tcl
+CONSTRAINTS ?= $(ENCODER_DIR)/src/constr.xdc
 
 
 # Do not change: Load libraries such as BlueAXI or BlueLib

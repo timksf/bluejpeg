@@ -1,4 +1,4 @@
-read_xdc [file dirname $script_path]/constr.xdc
+read_xdc [file dirname $script_path]/cmoda7.xdc
 synth_design -top cmod_jpeg_top
 puts "Finished synth_design"
 
@@ -15,4 +15,6 @@ place_design
 
 report_timing_summary -file $project_dir/${project_name}_tim2.rpt
 report_utilization -file $project_dir/${project_name}_util2.rpt
+
+write_checkpoint -force $project_dir/${project_name}_pnr.dcp
 puts "Finished place_design"
