@@ -4,3 +4,6 @@ build/
 .github/
 vivado*
 .deps
+__pycache__
+sim_build
+results.xml

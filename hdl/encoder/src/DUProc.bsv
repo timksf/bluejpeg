@@ -65,7 +65,7 @@ module mkDUProc#(DUProcCfg#(dct_scale, q_scale) cfg)(DUProc_t#(bits))
 
     //processing submodules
     DCT2DOpt_ifc#(bits)         i_dct   <- mkDCT2D_Opt(cfg._dct_scale, False, !cfg.scale_in_dct, cfg.transpose_in_dct, cfg.dct_safe_arith, clocked_by cfg.slow_clock, reset_by cfg.slow_reset);
-    Quant_ifc#(bits)            i_quant <- mkQuantize_RT(cfg._q_scale, False);
+    Quant_ifc#(bits)            i_quant <- mkQuantize_RT(cfg._q_scale, True); //quantization should explicitly buffer inputs for timing
     Zigzag_ifc#(bits)           i_zz    <- mkZigZag_Opt(False, !cfg.transpose_in_dct);
 
     if(cfg.buffer_in)

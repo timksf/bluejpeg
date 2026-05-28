@@ -28,9 +28,9 @@ typedef 32 WordWidth;
 
 //DUT type parameters
 typedef 2560 MaxImgWidth;
-typedef 16  DCTScale;
-typedef 16  QuantScale;
-typedef 16  DPw;
+typedef 16 DCTScale;
+typedef 16 QuantScale;
+typedef 16 DPw;
 
 
 module [Module] mkTestBlueJPEGGray(TestHandler);

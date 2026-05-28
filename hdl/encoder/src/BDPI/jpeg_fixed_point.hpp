@@ -330,20 +330,13 @@ namespace jpeg_fixedpoint {
     }
 
     //
-    // Single-coefficient fixed-point quantization - mirrors Quantize.bsv scaled_mul_rt with trunc=True.
-    // Uses truncation toward zero (not rounding):
-    //   positive products: truncate (floor toward zero)
-    //   negative products: add (2^q_scale - 1) before shift (ceil toward zero)
+    // Single-coefficient fixed-point quantization - mirrors Quantize.bsv scaled_mul_rt
+    // with round=True.
     //
     template<int q_scale, int bits = 16>
     inline coeff_t<bits> quantize_coeff_fixed(coeff_t<bits> val, coeff_t<bits> scaled_mult) {
         wide_t<bits> prod = static_cast<wide_t<bits>>(val) * static_cast<wide_t<bits>>(scaled_mult);
-        wide_t<bits> prod_m;
-        if (prod < 0) {
-            prod_m = prod + ((wide_t<bits>{1} << q_scale) - 1);
-        } else {
-            prod_m = prod;
-        }
+        wide_t<bits> prod_m = prod + (wide_t<bits>{1} << (q_scale - 1));
         return truncate_to<bits>(prod_m >> q_scale);
     }
 
