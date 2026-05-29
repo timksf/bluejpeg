@@ -19,6 +19,7 @@ module mkDCT1D_16b(DCT1D_ifc#(16));
     return ifc;
 endmodule
 
+
 (* synthesize *)
 module mkDCT2D_12b(DCT2D_ifc#(12));
     NumProxy#(8) f_scale = ?;
@@ -26,6 +27,7 @@ module mkDCT2D_12b(DCT2D_ifc#(12));
     mkDCT2D#(f_scale, False) __int(ifc);
     return ifc;
 endmodule
+
 
 (* synthesize *)
 module mkDCT2D_Optimized_12b(DCT2DOpt_ifc#(12));
@@ -35,6 +37,7 @@ module mkDCT2D_Optimized_12b(DCT2DOpt_ifc#(12));
     return ifc;
 endmodule
 
+
 (* synthesize *)
 module mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
     NumProxy#(12) f_scale = ?;
@@ -42,6 +45,7 @@ module mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
     mkDCT2D_Opt#(f_scale, False, True, False) __int(ifc);
     return ifc;
 endmodule
+
 
 (* synthesize *)
 module mkDUProc_16b(DUProc_t#(16));
@@ -71,6 +75,7 @@ module mkDUProc_16b(DUProc_t#(16));
     mkDUProc#(mcuproc_cfg) __int(ifc);
     return ifc;
 endmodule
+
 
 (* synthesize *)
 module mkImageTilingEngine_1920(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
@@ -125,6 +130,7 @@ module mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
     return ifc;
 endmodule
 
+
 (* synthesize, default_clock_osc="aclk", default_reset="aresetn" *)
 module mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
@@ -165,6 +171,36 @@ module mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
     let dct_reset <- mkResetSync(2, True, dct_clock);
 
     NumProxy#(1920) maximw = ?;
+    NumProxy#(12)   fscale = ?;
+    NumProxy#(16)   dpw = ?;
+
+    let jpeg_cfg = BlueJPEGCfg_t {
+        slow_clock : dct_clock,
+        slow_reset : dct_reset.new_rst,
+        _prx_miw   : maximw,
+        _prx_dsc   : fscale,
+        _prx_qsc   : fscale,
+        _prx_dpw   : dpw,
+        en_tiler   : True,
+        en_chroma  : False
+    };
+    BlueJPEG_ifc ifc();
+    mkBlueJPEG#(jpeg_cfg) __internal(ifc);
+
+    return ifc;
+endmodule
+
+
+(* synthesize, default_clock_osc="aclk", default_reset="aresetn" *)
+module mkBlueJPEGGrayTop_720_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+
+    //fast clock and associated reset
+    let aclk    <- exposeCurrentClock;
+    let aresetn <- exposeCurrentReset;
+
+    let dct_reset <- mkResetSync(2, True, dct_clock);
+
+    NumProxy#(720) maximw = ?;
     NumProxy#(12)   fscale = ?;
     NumProxy#(16)   dpw = ?;
 

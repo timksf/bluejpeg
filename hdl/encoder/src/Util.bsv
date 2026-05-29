@@ -111,24 +111,25 @@ endfunction
 * Runtime variant: multiplies Int#(bits) by a runtime Int#(bits_frac) multiplier
 * that was pre-scaled by 2^bits_frac. Rounds and removes the scaling factor.
 */
-function Int#(bits) scaled_mul_rt(NumProxy#(bits_frac) _proxy, Bool trunc, Int#(bits) val, Int#(bits_frac) f) 
+function Int#(bits) scaled_mul_rt(Bool sat, Bool round, NumProxy#(bits_frac) _proxy, Int#(bits) val, Int#(bits_frac) f) 
     provisos(
-        Add#(bits, bits_frac, bits_mul)
+        Add#(bits_frac, 2, coeff_bits),
+        Add#(bits, coeff_bits, bits_mul)
     );
-    Int#(bits_mul) wide_val   = signExtend(val);
-    Int#(bits_mul) wide_const = signExtend(f);
-    Int#(bits_mul) prod       = wide_val * wide_const;
+    Int#(coeff_bits) f_const    = signExtend(f);
+    Int#(bits_mul)   prod       = signedMul(val, f_const);
 
-    Int#(bits_mul) prod_m = 0;
-
-    if(!trunc) begin
-        //rounding: add 2^(bits_frac-1) before shifting
-        prod_m = satPlus(Sat_Bound, prod, (1 << fromInteger(valueOf(bits_frac) - 1)));
+    //rounding: add 2^(bits_frac-1) before shifting
+    Int#(bits_mul) prod_m       = ?;
+    if(round) begin
+        //saturation only important when rounding is applied
+        if(sat)
+            prod_m = satPlus(Sat_Bound, prod, (1 << fromInteger(valueOf(bits_frac) - 1)));
+        else
+            prod_m = prod + (1 << fromInteger(valueOf(bits_frac) - 1));
     end else begin
-        //truncation toward zero: no rounding for positive, add (2^frac - 1) for negative
-        prod_m = (prod < 0) ? prod + ((1 << fromInteger(valueOf(bits_frac))) - 1) : prod;
+        prod_m = prod;
     end
-
     return truncate(prod_m >> valueOf(bits_frac));
 endfunction
 

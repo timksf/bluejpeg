@@ -142,7 +142,7 @@ module mkQuantize_RT#(NumProxy#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#(b
         w_tableidx <= QuantTableIdx_t { pt: f_mode.first, idx: rg_pxcnt };
     endrule
 
-    function qmul = scaled_mul_rt(f_scale, True);
+    function qmul = scaled_mul_rt(True, True, f_scale);
 
     rule rquant;
         let val = f_i.first;
