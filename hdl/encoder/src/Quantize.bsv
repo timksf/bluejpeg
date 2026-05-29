@@ -141,11 +141,10 @@ module mkQuantize_RT#(NumProxy#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#(b
 
     FIFO#(Int#(bits)) f_table_pending <- mkPipelineFIFO;
     FIFO#(QuantMul_t#(bits, bits_frac)) f_mul <- mkPipelineFIFO;
+    FIFO#(Int#(bits_mul)) f_prod <- mkPipelineFIFO;
 
     Reg#(QuantTableIdx_t) rg_tableidx <- mkReg(QuantTableIdx_t { pt: Luma, idx: 0 });
     Wire#(Int#(32)) w_mult <- mkWire;
-
-    function qmul = scaled_mul_rt(True, True, f_scale);
 
     rule rtable_req;
         let val = f_i.first;
@@ -166,12 +165,21 @@ module mkQuantize_RT#(NumProxy#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#(b
         f_mul.enq(QuantMul_t { val: val, mult: mult });
     endrule
 
-    rule rquant;
+    rule rmul;
         let qm = f_mul.first;
         f_mul.deq;
 
-        Int#(bits) prod = qmul(qm.val, qm.mult);
-        f_o.enq(prod);
+        Int#(coeff_bits) f_const = signExtend(qm.mult);
+        Int#(bits_mul) prod = signedMul(qm.val, f_const);
+        f_prod.enq(prod);
+    endrule
+
+    rule rquant;
+        let prod = f_prod.first;
+        f_prod.deq;
+
+        Int#(bits_mul) prod_r = satPlus(Sat_Bound, prod, (1 << fromInteger(valueOf(bits_frac) - 1)));
+        f_o.enq(truncate(prod_r >> valueOf(bits_frac)));
     endrule
 
     method Action rewind();
@@ -179,6 +187,7 @@ module mkQuantize_RT#(NumProxy#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#(b
         f_mode.clear;
         f_table_pending.clear;
         f_mul.clear;
+        f_prod.clear;
     endmethod
     
     interface du_mode   = toPut(f_mode);
