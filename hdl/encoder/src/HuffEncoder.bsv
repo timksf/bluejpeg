@@ -42,9 +42,9 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         Add#(d__, 5, TAdd#(TLog#(bits), 1))   // for truncate in calc_magnitude
     );
 
-    FIFO#(RLETag_t#(bits)) f_in  <- mkPipelineFIFO;
-    FIFO#(HuffCode_t)      f_out <- mkPipelineFIFO;
-    FIFO#(HuffPending_t#(bits)) f_pending <- mkPipelineFIFO;
+    FIFO#(RLETag_t#(bits)) f_in             <- mkBypassFIFO;
+    FIFO#(HuffCode_t)      f_out            <- mkFIFO;
+    FIFO#(HuffPending_t#(bits)) f_pending   <- mkPipelineFIFO;
 
     FIFO#(HuffDUMeta_t)     f_meta       <- mkSizedFIFO(4);
     Reg#(Bit#(6))   rg_coeff_idx    <- mkReg(0);

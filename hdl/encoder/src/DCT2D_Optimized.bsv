@@ -23,10 +23,10 @@ endinterface
 module mkDCT2D_Opt#(NumProxy#(frac_bits) f_scale, Bool buffer_in, Bool omit_scaling, Bool transpose_output, Bool dct_safe_arith)(DCT2DOpt_ifc#(bits));
 
     FIFO#(Vector#(8, Int#(bits))) f_in;
-    FIFO#(Vector#(8, Int#(bits))) f_out <- mkPipelineFIFO;
+    FIFO#(Vector#(8, Int#(bits))) f_out <- mkFIFO;
 
     if(buffer_in)
-        f_in <- mkPipelineFIFO;
+        f_in <- mkFIFO;
     else
         f_in <- mkBypassFIFO;
 

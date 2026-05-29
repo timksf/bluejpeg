@@ -170,6 +170,19 @@ module mkTableStorage#(NumProxy#(qwidth) qp, Bool transposed)(TableStorage_ifc#(
     Reg#(UInt#(8))         rg_cg_j      <- mkRegU; //counter within current length
     Reg#(Bit#(9))          rg_cg_k      <- mkRegU; //running HUFFVAL index
     Reg#(Bit#(16))         rg_cg_code   <- mkRegU; //running code value
+    FIFO#(HuffTableWrite_t) f_cg_write  <- mkPipelineFIFO;
+
+    rule r_codegen_write;
+        let wr = f_cg_write.first;
+        f_cg_write.deq;
+
+        case (wr.table_id)
+            DC_Luma:    huff_code_dc[0].upd(truncate(wr.addr), wr.entry);
+            DC_Chroma:  huff_code_dc[1].upd(truncate(wr.addr), wr.entry);
+            AC_Luma:    huff_code_ac[0].upd(wr.addr, wr.entry);
+            AC_Chroma:  huff_code_ac[1].upd(wr.addr, wr.entry);
+        endcase
+    endrule
 
     rule r_codegen if (rg_cg_active);
         //Steps:
@@ -197,14 +210,11 @@ module mkTableStorage#(NumProxy#(qwidth) qp, Bool transposed)(TableStorage_ifc#(
                 size: truncate(rg_cg_si)
             };
 
-            //DC_Luma -> huff_code_dc[0], DC_Chroma -> huff_code_dc[1]
-            //AC_Luma -> huff_code_ac[0], AC_Chroma -> huff_code_ac[1]
-            case (rg_cg_table)
-                DC_Luma:    huff_code_dc[0].upd(truncate(pack(symbol)), entry);
-                DC_Chroma:  huff_code_dc[1].upd(truncate(pack(symbol)), entry);
-                AC_Luma:    huff_code_ac[0].upd(pack(symbol), entry);
-                AC_Chroma:  huff_code_ac[1].upd(pack(symbol), entry);
-            endcase
+            f_cg_write.enq(HuffTableWrite_t {
+                table_id: rg_cg_table,
+                addr: pack(symbol),
+                entry: entry
+            });
 
             //TODO stop if symbol 0?
 

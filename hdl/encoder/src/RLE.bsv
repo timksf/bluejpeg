@@ -34,8 +34,8 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
         - ordinary AC values
     */
 
-    FIFO#(Int#(bits))      f_in  <- mkPipelineFIFO;
-    FIFO#(RLETag_t#(bits)) f_out <- mkPipelineFIFO;
+    FIFO#(Int#(bits))      f_in     <- mkBypassFIFO;
+    FIFO#(RLETag_t#(bits)) f_out    <- mkFIFO;
 
     Reg#(Bit#(6))    rg_idx      <- mkReg(0);
     Reg#(Bit#(6))    rg_zero_run <- mkReg(0);

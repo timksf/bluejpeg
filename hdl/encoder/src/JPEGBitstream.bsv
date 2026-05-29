@@ -16,10 +16,10 @@ endinterface
 module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
 
     FIFO#(HuffCode_t) f_in;
-    FIFO#(Bit#(8))    f_out <- mkPipelineFIFO;
+    FIFO#(Bit#(8))    f_out <- mkFIFO;
 
     if(buffer_in)
-        f_in <- mkPipelineFIFO;
+        f_in <- mkFIFO;
     else
         f_in <- mkBypassFIFO;
 

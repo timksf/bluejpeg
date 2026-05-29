@@ -28,7 +28,7 @@ module mkDUDispatcher(DUDispatcher_ifc);
 
     Reg#(SubsamplingMode_t) rg_mode <- mkRegU;
 
-    FIFO#(UInt#(8)) f_out <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_out <- mkFIFO;
 
     function Bool is_y_phase  = (rg_phase <= 3);
     function Bool is_cb_phase = (rg_phase == 4);
