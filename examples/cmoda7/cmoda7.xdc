@@ -13,6 +13,13 @@ create_generated_clock -name clk_dct \
     -divide_by 8 \
     [get_pins {i_clkdiv_dct_BUFR/O}]
 
+# The DCT domain crosses to/from the 100 MHz domain through Bluespec Gearbox
+# CDC logic. Keep each domain constrained internally, but do not time direct
+# register-to-register paths between the two clock domains.
+set_clock_groups -asynchronous \
+    -group [get_clocks clk_100] \
+    -group [get_clocks clk_dct]
+
 set_property -dict { PACKAGE_PIN A18 IOSTANDARD LVCMOS33 } [get_ports { btn }]
 
 set_property -dict { PACKAGE_PIN A17 IOSTANDARD LVCMOS33 } [get_ports { led[0] }]
