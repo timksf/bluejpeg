@@ -61,6 +61,11 @@ interface Quant_ifc#(numeric type bits);
     interface Server#(Int#(bits), Int#(bits)) data;
 endinterface
 
+typedef struct {
+    Int#(bits) val;
+    Int#(bits_frac) mult;
+} QuantMul_t#(numeric type bits, numeric type bits_frac) deriving(Eq, Bits, FShow);
+
 module mkQuantize#(NumProxy#(bits_frac) f_scale, Bool buffer_in, Bool aan_scaling, Bool transposed)(Quant_ifc#(bits)) 
     provisos(
         Add#(bits_frac, 2, coeff_bits),
@@ -134,35 +139,50 @@ module mkQuantize_RT#(NumProxy#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#(b
     Reg#(Bit#(6))   rg_pxcnt  <- mkReg(0);
     FIFO#(PixType_t) f_mode   <- mkSizedFIFO(4);
 
-    //combinatorial table lookup
-    Wire#(QuantTableIdx_t) w_tableidx <- mkWire;
-    Wire#(Int#(32)) w_mult <- mkWire;
+    FIFO#(Int#(bits)) f_table_pending <- mkPipelineFIFO;
+    FIFO#(QuantMul_t#(bits, bits_frac)) f_mul <- mkPipelineFIFO;
 
-    rule rtable_read;
-        w_tableidx <= QuantTableIdx_t { pt: f_mode.first, idx: rg_pxcnt };
-    endrule
+    Reg#(QuantTableIdx_t) rg_tableidx <- mkReg(QuantTableIdx_t { pt: Luma, idx: 0 });
+    Wire#(Int#(32)) w_mult <- mkWire;
 
     function qmul = scaled_mul_rt(True, True, f_scale);
 
-    rule rquant;
+    rule rtable_req;
         let val = f_i.first;
         f_i.deq;
 
-        Int#(bits_frac) mult = truncate(w_mult);
-        Int#(bits) prod = qmul(val, mult);
+        rg_tableidx <= QuantTableIdx_t { pt: f_mode.first, idx: rg_pxcnt };
+        f_table_pending.enq(val);
 
-        f_o.enq(prod);
         if (rg_pxcnt == 63) f_mode.deq;
         rg_pxcnt <= rg_pxcnt + 1;
+    endrule
+
+    rule rtable_resp;
+        let val = f_table_pending.first;
+        f_table_pending.deq;
+
+        Int#(bits_frac) mult = truncate(w_mult);
+        f_mul.enq(QuantMul_t { val: val, mult: mult });
+    endrule
+
+    rule rquant;
+        let qm = f_mul.first;
+        f_mul.deq;
+
+        Int#(bits) prod = qmul(qm.val, qm.mult);
+        f_o.enq(prod);
     endrule
 
     method Action rewind();
         rg_pxcnt <= 0;
         f_mode.clear;
+        f_table_pending.clear;
+        f_mul.clear;
     endmethod
     
     interface du_mode   = toPut(f_mode);
-    interface qtable    = toGPClient(asReg(w_tableidx), asReg(w_mult));
+    interface qtable    = toGPClient(rg_tableidx, asReg(w_mult));
     interface data      = toGPServer(f_i, f_o);
 
 endmodule
