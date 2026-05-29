@@ -74,10 +74,10 @@ module mkQuantize#(NumProxy#(bits_frac) f_scale, Bool buffer_in, Bool aan_scalin
     );
 
     FIFO#(Int#(bits)) f_i;
-    FIFO#(Int#(bits)) f_o <- mkPipelineFIFO;
+    FIFO#(Int#(bits)) f_o <- mkFIFO;
 
     if(buffer_in)
-        f_i <- mkPipelineFIFO;
+        f_i <- mkFIFO;
     else 
         f_i <- mkBypassFIFO;
 
@@ -129,10 +129,10 @@ module mkQuantize_RT#(NumProxy#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#(b
     );
 
     FIFO#(Int#(bits)) f_i;
-    FIFO#(Int#(bits)) f_o <- mkPipelineFIFO;
+    FIFO#(Int#(bits)) f_o <- mkFIFO;
 
     if(buffer_in)
-        f_i <- mkPipelineFIFO;
+        f_i <- mkFIFO;
     else 
         f_i <- mkBypassFIFO;
 

@@ -42,10 +42,10 @@ endinterface
 module mkZigZag#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
 
     FIFO#(Int#(bits)) f_in;
-    FIFO#(Int#(bits)) f_out <- mkPipelineFIFO;
+    FIFO#(Int#(bits)) f_out <- mkFIFO;
 
     if(buffer_in)
-        f_in <- mkPipelineFIFO;
+        f_in <- mkFIFO;
     else 
         f_in <- mkBypassFIFO;
 
@@ -107,10 +107,10 @@ endmodule
 module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
 
     FIFO#(Int#(bits)) f_in;
-    FIFO#(Int#(bits)) f_out <- mkPipelineFIFO;
+    FIFO#(Int#(bits)) f_out <- mkFIFO;
 
     if(buffer_in)
-        f_in <- mkPipelineFIFO;
+        f_in <- mkFIFO;
     else 
         f_in <- mkBypassFIFO;
 

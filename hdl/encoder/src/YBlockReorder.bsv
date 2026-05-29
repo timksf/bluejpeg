@@ -35,10 +35,10 @@ module mkYBlockReorder#(NumProxy#(max_blk_cols) _, Bool buffer_in)(YBlockReorder
     );
 
     FIFO#(UInt#(8)) f_in;
-    FIFO#(UInt#(8)) f_out <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_out <- mkFIFO;
 
     if(buffer_in)
-        f_in <- mkPipelineFIFO;
+        f_in <- mkFIFO;
     else
         f_in <- mkBypassFIFO;
 

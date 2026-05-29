@@ -25,8 +25,8 @@ module mkChromaBlockReorder#(NumProxy#(max_blk_cols) _)(ChromaBlockReorder_ifc)
         Add#(a__, bram_aw, 32)
     );
 
-    FIFO#(UInt#(8)) f_in  <- mkPipelineFIFO;
-    FIFO#(UInt#(8)) f_out <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_in  <- mkBypassFIFO;
+    FIFO#(UInt#(8)) f_out <- mkFIFO;
 
     Reg#(SubsamplingMode_t) rg_mode     <- mkReg(YCBCR_444);
     Reg#(Bit#(13))          rg_blk_cols <- mkReg(0);

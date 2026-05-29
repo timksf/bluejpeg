@@ -61,8 +61,8 @@ endinterface
 
 module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
-    FIFO#(Maybe#(Bit#(8))) f_scan <- mkPipelineFIFO;
-    FIFO#(Bit#(8))         f_out  <- mkPipelineFIFO;
+    FIFO#(Maybe#(Bit#(8))) f_scan <- mkFIFO;
+    FIFO#(Bit#(8))         f_out  <- mkFIFO;
 
     Reg#(State_t) rg_state <- mkReg(IDLE);
 

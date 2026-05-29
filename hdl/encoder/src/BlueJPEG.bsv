@@ -165,12 +165,12 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         du_disp     <- mkDUDispatcher;
     end
 
-    FIFO#(UInt#(8))                         f_du_pixels <- mkPipelineFIFO;
+    FIFO#(UInt#(8))                         f_du_pixels <- mkFIFO;
 
     DUProc_t#(dpw)                          du_proc   <- mkDUProc(du_proc_cfg);
 
-    RLE_ifc#(dpw)                           rle       <- mkRLE;
-    HuffEncoder_ifc#(dpw)                   huff      <- mkHuffEncoder;
+    RLE_ifc#(dpw)                           rle       <- mkRLE();
+    HuffEncoder_ifc#(dpw)                   huff      <- mkHuffEncoder();
     JPEGBitstream_ifc                       stuffer   <- mkJPEGBitstream(False);
 
     JPEGFramewriter_ifc                     fwriter   <- mkJPEGFramewriter(cfg.en_chroma);

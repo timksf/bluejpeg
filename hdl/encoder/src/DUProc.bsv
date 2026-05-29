@@ -46,7 +46,7 @@ module mkDUProc#(DUProcCfg#(dct_scale, q_scale) cfg)(DUProc_t#(bits))
     Reset fast_reset <- exposeCurrentReset;
 
     FIFO#(Int#(bits)) f_i;
-    FIFO#(Int#(bits)) f_dct <- mkPipelineFIFO;
+    FIFO#(Int#(bits)) f_dct <- mkFIFO;
 
     DUDebug_ifc#(Int#(bits), 8, 8)  du_dbg_0;
     DUDebug_ifc#(Int#(bits), 8, 8)  du_dbg_1;
@@ -65,11 +65,11 @@ module mkDUProc#(DUProcCfg#(dct_scale, q_scale) cfg)(DUProc_t#(bits))
 
     //processing submodules
     DCT2DOpt_ifc#(bits)         i_dct   <- mkDCT2D_Opt(cfg._dct_scale, False, !cfg.scale_in_dct, cfg.transpose_in_dct, cfg.dct_safe_arith, clocked_by cfg.slow_clock, reset_by cfg.slow_reset);
-    Quant_ifc#(bits)            i_quant <- mkQuantize_RT(cfg._q_scale, True); //quantization should explicitly buffer inputs for timing
+    Quant_ifc#(bits)            i_quant <- mkQuantize_RT(cfg._q_scale, False);
     Zigzag_ifc#(bits)           i_zz    <- mkZigZag_Opt(False, !cfg.transpose_in_dct);
 
     if(cfg.buffer_in)
-        f_i <- mkPipelineFIFO;
+        f_i <- mkFIFO;
     else 
         f_i <- mkBypassFIFO;
 

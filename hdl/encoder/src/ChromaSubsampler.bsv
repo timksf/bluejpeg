@@ -23,8 +23,8 @@ module mkChromaSubsampler#(NumProxy#(block_w) _)(ChromaSubsampler_ifc)
         NumAlias#(line_addr_w, TLog#(half_w))
     );
 
-    FIFO#(UInt#(8)) f_in  <- mkPipelineFIFO;
-    FIFO#(UInt#(8)) f_out <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_in  <- mkBypassFIFO;
+    FIFO#(UInt#(8)) f_out <- mkFIFO;
 
     Reg#(SubsamplingMode_t) rg_mode <- mkReg(YCBCR_444);
 
