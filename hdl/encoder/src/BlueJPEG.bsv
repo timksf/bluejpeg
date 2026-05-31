@@ -286,13 +286,13 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     // ---- framewriter output -> AXI output ----
 
     rule r_byte_out;
-        let b <- fwriter.byte_out.get();
+        match {.b, .last_byte} <- fwriter.byte_out.get();
         AXI4_Stream_Pkg#(8, 0) pkg = AXI4_Stream_Pkg {
             data : b,
             user : 0,
             keep : 1,
             dest : 0,
-            last : fwriter.done(),
+            last : last_byte,
             id   : ?
         };
         axis_wr.pkg.put(pkg);

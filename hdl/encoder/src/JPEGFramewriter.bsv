@@ -56,13 +56,13 @@ interface JPEGFramewriter_ifc;
     interface Client#(HuffValIdx_t,    UInt#(8)) huff_val;
 
     interface Put#(Maybe#(Bit#(8))) scan_data;
-    interface Get#(Bit#(8)) byte_out;
+    interface Get#(Tuple2#(Bit#(8), Bool)) byte_out;
 endinterface
 
 module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     FIFO#(Maybe#(Bit#(8))) f_scan <- mkFIFO;
-    FIFO#(Bit#(8))         f_out  <- mkFIFO;
+    FIFO#(Tuple2#(Bit#(8), Bool)) f_out <- mkFIFO;
 
     Reg#(State_t) rg_state <- mkReg(IDLE);
 
@@ -92,6 +92,12 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     Wire#(HuffValIdx_t)    w_hval_req  <- mkWire;
     Wire#(UInt#(8))        w_hval_resp <- mkWire;
+
+    function Action enq_out(Bit#(8) b, Bool last);
+        action
+            f_out.enq(tuple2(b, last));
+        endaction
+    endfunction
 
     // ----------------------------------------------------------------
     // Constant header byte lookups
@@ -218,7 +224,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //emit SOI + APP0 (20 bytes)
     rule r_static_header (rg_state == STATIC_HEADER);
-        f_out.enq(jfif_hdr(rg_cnt));
+        enq_out(jfif_hdr(rg_cnt), False);
         if (rg_cnt == 19) begin
             rg_cnt   <= 0;
             rg_dqt   <= 0;
@@ -229,7 +235,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //emit DQT marker header (5 bytes)
     rule r_dqt_head (rg_state == DQT_HEAD);
-        f_out.enq(dqt_head_byte(rg_cnt, rg_dqt));
+        enq_out(dqt_head_byte(rg_cnt, rg_dqt), False);
         if (rg_cnt == 4) begin
             rg_cnt   <= 0;
             rg_state <= DQT_DATA;
@@ -249,7 +255,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //emit 64 quantization table values
     rule r_dqt_data (rg_state == DQT_DATA);
-        f_out.enq(pack(w_qraw_resp));
+        enq_out(pack(w_qraw_resp), False);
         if (rg_cnt == 63) begin
             rg_cnt <= 0;
             if (en_chroma && rg_dqt == 0) begin
@@ -281,7 +287,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //emit DHT marker: FF C4 Lh_hi Lh_lo Tc_Th  (5 bytes)
     rule r_dht_head (rg_state == DHT_HEAD);
         Bit#(8) b = dht_head_byte(rg_cnt, rg_dht);
-        f_out.enq(b);
+        enq_out(b, False);
         if (rg_cnt == 4) begin
             rg_cnt   <= 0;
             rg_state <= DHT_BITS;
@@ -291,7 +297,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //emit 16 BITS bytes
     rule r_dht_bits (rg_state == DHT_BITS);
-        f_out.enq(pack(w_hbits_resp));
+        enq_out(pack(w_hbits_resp), False);
         if (rg_cnt == 15) begin
             rg_cnt <= 0;
             if (rg_huffval_total == 0) begin
@@ -317,7 +323,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //emit HUFFVAL bytes
     rule r_dht_val (rg_state == DHT_VAL);
-        f_out.enq(pack(w_hval_resp));
+        enq_out(pack(w_hval_resp), False);
         if (rg_cnt == rg_huffval_total - 1) begin
             rg_cnt           <= 0;
             rg_huffval_total <= 0;
@@ -333,7 +339,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //emit SOF0 frame header (19 bytes)
     rule r_sof0 (rg_state == SOF0);
-        f_out.enq(sof0_byte(rg_cnt));
+        enq_out(sof0_byte(rg_cnt), False);
         if (rg_cnt == (en_chroma ? 18 : 12)) begin
             rg_cnt           <= 0;
             rg_dht           <= 0;
@@ -345,7 +351,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //emit SOS header (14 bytes)
     rule r_scan_header (rg_state == SCAN_HEAD);
-        f_out.enq(sos_byte(rg_cnt));
+        enq_out(sos_byte(rg_cnt), False);
         if (rg_cnt == (en_chroma ? 13 : 9)) begin
             rg_cnt   <= 0;
             rg_state <= SCAN;
@@ -357,7 +363,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     rule r_scan (rg_state == SCAN);
         let mb = f_scan.first; f_scan.deq;
         case (mb) matches
-            tagged Valid .b: f_out.enq(b);
+            tagged Valid .b: enq_out(b, False);
             tagged Invalid: begin
                 rg_state <= EOI;
                 rg_cnt   <= 0;
@@ -367,7 +373,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //emit EOI marker (FF D9)
     rule r_eoi (rg_state == EOI);
-        f_out.enq((rg_cnt == 0) ? 'hFF : 'hD9);
+        enq_out((rg_cnt == 0) ? 'hFF : 'hD9, rg_cnt == 1);
         if (rg_cnt == 1) begin
             rg_state <= DONE;
             rg_cnt   <= 0;
