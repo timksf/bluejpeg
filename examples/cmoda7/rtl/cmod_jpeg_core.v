@@ -51,6 +51,7 @@ module cmod_jpeg_core(
     reg [1:0] codegen_table;
     reg op_active;
     reg op_is_write;
+    reg run_active;
 
     reg cfg_awvalid;
     reg [31:0] cfg_awaddr;
@@ -82,8 +83,8 @@ module cmod_jpeg_core(
     wire gated_s_axis_tvalid;
 
     assign rstn = ~rst;
-    assign gated_s_axis_tvalid = init_done ? s_axis_tvalid : 1'b0;
-    assign s_axis_tready = init_done ? encoder_s_axis_tready : 1'b0;
+    assign gated_s_axis_tvalid = (init_done && run_active) ? s_axis_tvalid : 1'b0;
+    assign s_axis_tready = (init_done && run_active) ? encoder_s_axis_tready : 1'b0;
     assign m_axis_tvalid = encoder_m_axis_tvalid;
     assign m_axis_tdata = encoder_m_axis_tdata;
     assign m_axis_tlast = encoder_m_axis_tlast;
@@ -133,6 +134,7 @@ module cmod_jpeg_core(
             codegen_table <= 2'd0;
             op_active <= 1'b0;
             op_is_write <= 1'b0;
+            run_active <= 1'b0;
             cfg_awvalid <= 1'b0;
             cfg_awaddr <= 32'd0;
             cfg_awprot <= 3'b000;
@@ -147,8 +149,13 @@ module cmod_jpeg_core(
             init_done <= 1'b0;
             init_error <= 1'b0;
         end else begin
-            if (cfg_state != CFG_READY) begin
+            if (cfg_state != CFG_READY && cfg_state != CFG_WRITE_START &&
+                cfg_state != CFG_WAIT_AXIS && cfg_state != CFG_CLEAR_START) begin
                 init_done <= 1'b0;
+            end
+
+            if (gated_s_axis_tvalid && encoder_s_axis_tready && s_axis_tlast) begin
+                run_active <= 1'b0;
             end
 
             if (cfg_state == CFG_ERROR) begin
@@ -184,7 +191,8 @@ module cmod_jpeg_core(
                                     cfg_state <= CFG_WRITE_SUBS;
                                 end
                                 CFG_WRITE_SUBS: begin
-                                    cfg_state <= CFG_WRITE_START;
+                                    cfg_state <= CFG_READY;
+                                    init_done <= 1'b1;
                                 end
                                 CFG_WRITE_START: begin
                                     cfg_state <= CFG_WAIT_AXIS;
@@ -192,6 +200,7 @@ module cmod_jpeg_core(
                                 CFG_CLEAR_START: begin
                                     cfg_state <= CFG_READY;
                                     init_done <= 1'b1;
+                                    run_active <= 1'b1;
                                 end
                                 default: begin
                                     cfg_state <= CFG_ERROR;
@@ -308,6 +317,9 @@ module cmod_jpeg_core(
                     end
                     CFG_READY: begin
                         init_done <= 1'b1;
+                        if (!run_active && s_axis_tvalid) begin
+                            cfg_state <= CFG_WRITE_START;
+                        end
                     end
                     CFG_ERROR: begin
                         init_error <= 1'b1;

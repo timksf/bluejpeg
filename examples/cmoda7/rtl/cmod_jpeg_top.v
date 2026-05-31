@@ -2,7 +2,9 @@
 
 
 module cmod_jpeg_top #(
-    parameter integer UART_BAUD_RATE = 1000000
+    parameter integer UART_BAUD_RATE = 1000000,
+    parameter integer UART_RX_FIFO_DEPTH = 4096,
+    parameter integer UART_TX_FIFO_DEPTH = 65536
 ) (
     input wire clk_12,
     input wire btn,
@@ -133,7 +135,9 @@ module cmod_jpeg_top #(
         .CLK_FREQ_HZ(100000000),
         .BAUD_RATE(UART_BAUD_RATE),
         .RX_AXIS_TDATA_WIDTH(24),
-        .TX_AXIS_TDATA_WIDTH(8)
+        .TX_AXIS_TDATA_WIDTH(8),
+        .RX_FIFO_DEPTH(UART_RX_FIFO_DEPTH),
+        .TX_FIFO_DEPTH(UART_TX_FIFO_DEPTH)
     ) uart_axis_bridge_inst (
         .clk(clk_100),
         .rst(core_rst),

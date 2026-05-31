@@ -1,6 +1,7 @@
 import os
 import logging
 import struct
+from itertools import cycle
 from pathlib import Path
 
 import cocotb
@@ -112,10 +113,46 @@ async def wait_for_high(signal, clock, max_cycles: int, name: str):
     raise TimeoutError(f"Timed out waiting for {name}")
 
 
-@cocotb.test()
-async def test_cmod_jpeg_core(dut):
+def output_backpressure_pattern():
+    return cycle(
+        [
+            False,
+            False,
+            False,
+            False,
+            True,
+            True,
+            True,
+            False,
+            True,
+            False,
+            False,
+            True,
+            True,
+            True,
+            True,
+            False,
+        ]
+    )
+
+
+def resolve_output_path(output_name: str) -> Path:
+    output_env = os.environ.get("OUTPUT_JPEG")
+    if output_env is None:
+        return Path(output_name).resolve()
+
+    output_path = Path(output_env).resolve()
+    if output_name == "cmod_jpeg_core_cocotb.jpg":
+        return output_path
+
+    return Path(
+        os.environ.get("OUTPUT_JPEG_BACKPRESSURE", output_path.with_name(output_name))
+    ).resolve()
+
+
+async def run_cmod_jpeg_core(dut, output_name: str, sink_pause_generator=None):
     image_path = Path(os.environ.get("BMP_PATH", "")).resolve()
-    output_path = Path(os.environ.get("OUTPUT_JPEG", "cmod_jpeg_core_cocotb.jpg")).resolve()
+    output_path = resolve_output_path(output_name)
     expected_width = int(os.environ.get("EXPECTED_WIDTH", "192"))
     expected_height = int(os.environ.get("EXPECTED_HEIGHT", "192"))
 
@@ -144,6 +181,7 @@ async def test_cmod_jpeg_core(dut):
     sink = AxiStreamSink(AxiStreamBus.from_prefix(dut, "m_axis"), dut.clk, dut.rst)
     source.log.setLevel(logging.WARNING)
     sink.log.setLevel(logging.WARNING)
+    sink.set_pause_generator(sink_pause_generator)
 
     for _ in range(8):
         await RisingEdge(dut.clk)
@@ -155,6 +193,7 @@ async def test_cmod_jpeg_core(dut):
 
     await source.send(AxiStreamFrame(payload))
     frame = await with_timeout(sink.recv(), 20, "ms")
+    sink.clear_pause_generator()
     jpeg_bytes = extract_frame_bytes(frame)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,3 +209,78 @@ async def test_cmod_jpeg_core(dut):
         )
 
     dut._log.info("Wrote %d JPEG bytes to %s", len(jpeg_bytes), output_path)
+
+
+@cocotb.test()
+async def test_cmod_jpeg_core_consecutive_frames(dut):
+    image_path = Path(os.environ.get("BMP_PATH", "")).resolve()
+    expected_width = int(os.environ.get("EXPECTED_WIDTH", "192"))
+    expected_height = int(os.environ.get("EXPECTED_HEIGHT", "192"))
+
+    rgb_array = load_bmp_array(image_path)
+    height, width, channels = rgb_array.shape
+    if channels != 3:
+        raise AssertionError(f"Expected an RGB image with 3 channels, got {channels}")
+    if (width, height) != (expected_width, expected_height):
+        raise AssertionError(
+            f"Expected a {expected_width}x{expected_height} BMP, got {width}x{height}"
+        )
+
+    payload = pack_ycbcr_pixels(rgb_array)
+
+    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk_dct, 80, units="ns").start())
+
+    dut.rst.setimmediatevalue(1)
+    dut.s_axis_tdata.setimmediatevalue(0)
+    dut.s_axis_tvalid.setimmediatevalue(0)
+    dut.s_axis_tlast.setimmediatevalue(0)
+
+    source = AxiStreamSource(AxiStreamBus.from_prefix(dut, "s_axis"), dut.clk, dut.rst)
+    sink = AxiStreamSink(AxiStreamBus.from_prefix(dut, "m_axis"), dut.clk, dut.rst)
+    source.log.setLevel(logging.WARNING)
+    sink.log.setLevel(logging.WARNING)
+
+    for _ in range(8):
+        await RisingEdge(dut.clk)
+    dut.rst.value = 0
+
+    await with_timeout(wait_for_high(dut.init_done, dut.clk, 200000, "init_done"), 20, "ms")
+    if int(dut.init_error.value):
+        raise AssertionError("cmod_jpeg_core asserted init_error during startup")
+
+    for frame_index in range(2):
+        send_timeout = (20, "ms") if frame_index == 0 else (100, "us")
+        await with_timeout(source.send(AxiStreamFrame(payload)), *send_timeout)
+        frame = await with_timeout(sink.recv(), 20, "ms")
+        jpeg_bytes = extract_frame_bytes(frame)
+
+        if len(jpeg_bytes) == 0:
+            raise AssertionError(f"No JPEG bytes were received for frame {frame_index + 1}")
+
+        jpeg_width, jpeg_height = parse_jpeg_dimensions(jpeg_bytes)
+        if (jpeg_width, jpeg_height) != (expected_width, expected_height):
+            raise AssertionError(
+                f"Frame {frame_index + 1} JPEG dimensions "
+                f"{jpeg_width}x{jpeg_height} do not match {expected_width}x{expected_height}"
+            )
+
+        dut._log.info(
+            "Received frame %d with %d JPEG bytes",
+            frame_index + 1,
+            len(jpeg_bytes),
+        )
+
+
+@cocotb.test()
+async def test_cmod_jpeg_core(dut):
+    await run_cmod_jpeg_core(dut, "cmod_jpeg_core_cocotb.jpg")
+
+
+@cocotb.test()
+async def test_cmod_jpeg_core_output_backpressure(dut):
+    await run_cmod_jpeg_core(
+        dut,
+        "cmod_jpeg_core_backpressure_cocotb.jpg",
+        sink_pause_generator=output_backpressure_pattern(),
+    )

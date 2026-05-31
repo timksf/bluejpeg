@@ -5,6 +5,7 @@ from pathlib import Path
 import cocotb
 import numpy as np
 from cocotb.clock import Clock
+from cocotb.handle import Force, Release
 from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge, with_timeout
 from PIL import Image
 
@@ -160,10 +161,59 @@ async def send_uart_bytes(dut, payload: bytes):
         await send_uart_byte(dut, value)
 
 
-@cocotb.test()
-async def test_cmod_jpeg_top_uart_end_to_end(dut):
+async def count_encoder_output_backpressure(dut, stop_flag):
+    stalled_cycles = 0
+    while not stop_flag["done"]:
+        await RisingEdge(dut.clk_100)
+        if signal_is_high(dut.encoder_tvalid) and not signal_is_high(dut.encoder_tready):
+            stalled_cycles += 1
+    return stalled_cycles
+
+
+async def wait_for_top_ready(dut):
+    dut.btn.setimmediatevalue(0)
+    dut.uart_rxd.setimmediatevalue(1)
+    cocotb.start_soon(Clock(dut.clk_12, 83334, units="ps").start())
+
+    await with_timeout(wait_for_high(dut.startup_done, dut.clk_12, 1000, "startup_done"), 1, "ms")
+    dut._log.info("FPGA startup done")
+    await with_timeout(wait_for_high(dut.mmcm_locked, dut.clk_12, 100000, "mmcm_locked"), 10, "ms")
+    dut._log.info("MMCM locked")
+    await with_timeout(wait_for_high(dut.init_done, dut.clk_100, 200000, "init_done"), 20, "ms")
+    dut._log.info("JPEG core initialized")
+    await RisingEdge(dut.clk_100)
+
+
+async def drive_image_axis(dut, payload: bytes):
+    dut.image_tdata.value = Force(0)
+    dut.image_tvalid.value = Force(0)
+    dut.image_tlast.value = Force(0)
+
+    try:
+        for index in range(0, len(payload), 3):
+            word = payload[index] | (payload[index + 1] << 8) | (payload[index + 2] << 16)
+            is_last = index + 3 >= len(payload)
+
+            dut.image_tdata.value = Force(word)
+            dut.image_tlast.value = Force(is_last)
+            dut.image_tvalid.value = Force(1)
+
+            while True:
+                await RisingEdge(dut.clk_100)
+                if signal_is_high(dut.image_tready):
+                    break
+
+        dut.image_tvalid.value = Force(0)
+        dut.image_tlast.value = Force(0)
+        await RisingEdge(dut.clk_100)
+    finally:
+        dut.image_tdata.value = Release()
+        dut.image_tvalid.value = Release()
+        dut.image_tlast.value = Release()
+
+
+def load_expected_payload():
     image_path = Path(os.environ.get("BMP_PATH", "")).resolve()
-    output_path = Path(os.environ.get("TOP_OUTPUT_JPEG", "cmod_jpeg_top_uart_cocotb.jpg")).resolve()
     expected_width = int(os.environ.get("EXPECTED_WIDTH", "192"))
     expected_height = int(os.environ.get("EXPECTED_HEIGHT", "192"))
 
@@ -180,24 +230,28 @@ async def test_cmod_jpeg_top_uart_end_to_end(dut):
     if len(payload) != width * height * 3:
         raise AssertionError("Packed AXI payload size does not match the BMP dimensions")
 
-    dut.btn.setimmediatevalue(0)
-    dut.uart_rxd.setimmediatevalue(1)
-    cocotb.start_soon(Clock(dut.clk_12, 83334, units="ps").start())
+    return payload, expected_width, expected_height
 
-    await with_timeout(wait_for_high(dut.startup_done, dut.clk_12, 1000, "startup_done"), 1, "ms")
-    dut._log.info("FPGA startup done")
-    await with_timeout(wait_for_high(dut.mmcm_locked, dut.clk_12, 100000, "mmcm_locked"), 10, "ms")
-    dut._log.info("MMCM locked")
-    await with_timeout(wait_for_high(dut.init_done, dut.clk_100, 200000, "init_done"), 20, "ms")
-    dut._log.info("JPEG core initialized")
-    await RisingEdge(dut.clk_100)
+
+@cocotb.test()
+async def test_cmod_jpeg_top_uart_end_to_end(dut):
+    output_path = Path(os.environ.get("TOP_OUTPUT_JPEG", "cmod_jpeg_top_uart_cocotb.jpg")).resolve()
+    payload, expected_width, expected_height = load_expected_payload()
+    await wait_for_top_ready(dut)
 
     command = bytes([ord("S")]) + len(payload).to_bytes(4, "little") + payload
+    stop_backpressure_monitor = {"done": False}
+    backpressure_monitor = cocotb.start_soon(
+        count_encoder_output_backpressure(dut, stop_backpressure_monitor)
+    )
     receiver = cocotb.start_soon(recv_jpeg_until_eoi(dut, max_bytes=512 * 1024))
 
     await send_uart_bytes(dut, command)
 
     jpeg_bytes = await with_timeout(receiver, 200, "ms")
+    stop_backpressure_monitor["done"] = True
+    await RisingEdge(dut.clk_100)
+    stalled_cycles = await backpressure_monitor
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(jpeg_bytes)
@@ -210,5 +264,55 @@ async def test_cmod_jpeg_top_uart_end_to_end(dut):
 
     if led_bit_is_high(dut, 1):
         raise AssertionError("cmod_jpeg_top asserted the error LED")
+    if stalled_cycles == 0:
+        raise AssertionError("UART TX path did not backpressure the encoder output")
 
-    dut._log.info("Wrote %d JPEG bytes to %s", len(jpeg_bytes), output_path)
+    dut._log.info(
+        "Wrote %d JPEG bytes to %s after %d encoder output backpressure cycles",
+        len(jpeg_bytes),
+        output_path,
+        stalled_cycles,
+    )
+
+
+@cocotb.test()
+async def test_cmod_jpeg_top_uart_tx_backpressure(dut):
+    output_path = Path(
+        os.environ.get("TOP_OUTPUT_JPEG", "cmod_jpeg_top_uart_tx_backpressure_cocotb.jpg")
+    ).resolve()
+    payload, expected_width, expected_height = load_expected_payload()
+    await wait_for_top_ready(dut)
+
+    stop_backpressure_monitor = {"done": False}
+    backpressure_monitor = cocotb.start_soon(
+        count_encoder_output_backpressure(dut, stop_backpressure_monitor)
+    )
+    receiver = cocotb.start_soon(recv_jpeg_until_eoi(dut, max_bytes=512 * 1024))
+
+    await drive_image_axis(dut, payload)
+
+    jpeg_bytes = await with_timeout(receiver, 50, "ms")
+    stop_backpressure_monitor["done"] = True
+    await RisingEdge(dut.clk_100)
+    stalled_cycles = await backpressure_monitor
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(jpeg_bytes)
+
+    jpeg_width, jpeg_height = parse_jpeg_dimensions(jpeg_bytes)
+    if (jpeg_width, jpeg_height) != (expected_width, expected_height):
+        raise AssertionError(
+            f"JPEG dimensions {jpeg_width}x{jpeg_height} do not match {expected_width}x{expected_height}"
+        )
+
+    if led_bit_is_high(dut, 1):
+        raise AssertionError("cmod_jpeg_top asserted the error LED")
+    if stalled_cycles == 0:
+        raise AssertionError("UART TX path did not backpressure the encoder output")
+
+    dut._log.info(
+        "Wrote %d JPEG bytes to %s after %d encoder output backpressure cycles",
+        len(jpeg_bytes),
+        output_path,
+        stalled_cycles,
+    )

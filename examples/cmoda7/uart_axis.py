@@ -3,6 +3,7 @@
 import argparse
 import struct
 import threading
+import time
 from pathlib import Path
 
 import serial
@@ -15,6 +16,7 @@ DEFAULT_UART_TIMEOUT_S = 0.1
 DEFAULT_RESULT_TIMEOUT_S = 30.0
 DEFAULT_MAX_JPEG_BYTES = 512 * 1024
 DEFAULT_CHUNK_SIZE = 4096
+DEFAULT_CHUNK_DELAY_S = 0.0
 EOI_MARKER = b"\xff\xd9"
 
 
@@ -104,7 +106,7 @@ def build_command(image_path: Path) -> tuple[bytes, int]:
     return command, len(payload)
 
 
-def send_command(uart: serial.Serial, command: bytes, chunk_size: int) -> None:
+def send_command(uart: serial.Serial, command: bytes, chunk_size: int, chunk_delay: float) -> None:
     total_written = 0
 
     while total_written < len(command):
@@ -115,6 +117,8 @@ def send_command(uart: serial.Serial, command: bytes, chunk_size: int) -> None:
         total_written += written
         if total_written % DEFAULT_CHUNK_SIZE == 0 or total_written == len(command):
             print(f"Sent {total_written}/{len(command)} UART bytes")
+        if chunk_delay > 0.0 and total_written < len(command):
+            time.sleep(chunk_delay)
 
     uart.flush()
 
@@ -206,6 +210,12 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CHUNK_SIZE,
         help="UART write chunk size in bytes",
     )
+    parser.add_argument(
+        "--chunk-delay",
+        type=float,
+        default=DEFAULT_CHUNK_DELAY_S,
+        help="Delay in seconds after each UART write chunk",
+    )
     return parser.parse_args()
 
 
@@ -247,7 +257,7 @@ def main() -> int:
         receiver.start()
 
         try:
-            send_command(uart, command, args.chunk_size)
+            send_command(uart, command, args.chunk_size, args.chunk_delay)
 
             if not done_event.wait(args.result_timeout):
                 done_event.set()
