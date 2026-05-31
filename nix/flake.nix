@@ -37,6 +37,7 @@
                         cocotbext-axi
                         numpy
                         pillow
+                        pyserial
                         pytest
                         pytest-asyncio
                     ]);
