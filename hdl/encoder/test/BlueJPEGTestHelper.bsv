@@ -1,9 +1,15 @@
 package BlueJPEGTestHelper;
 
+import GetPut :: *;
 import StmtFSM :: *;
 import PrintUtil :: *;
+import ClientServer :: *;
 
 import BlueCSR :: *;
+import BlueAXI :: *;
+
+import Types :: *;
+import BDPI :: *;
 
 function Action bjpeg_expect_wr_ok(BlueCSRTbAccessor_ifc#(32) cfg_acc);
     action
@@ -78,6 +84,40 @@ function Stmt bjpeg_poll_done(
         endseq
         print_mod_pre_color_t_s("DUT signaled done via STATUS register", GREEN);
         rg_finished <= True;
+    endseq;
+endfunction
+
+function Stmt ycbcr_pix_stmt(
+    Integer n_pixels,
+    Reg#(UInt#(64)) rg_ram_ptr,
+    Reg#(UInt#(32)) rg_pixel_idx,
+    AXI4_Stream_Wr#(24, wuser) axis_wr
+    );
+    return seq
+        rg_pixel_idx <= 0;
+        while (rg_pixel_idx < fromInteger(n_pixels)) action
+            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
+            Bit#(24) pixel = truncate(pack(word));
+            Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
+                unpack(pixel[23:16]),
+                unpack(pixel[15:08]),
+                unpack(pixel[07:00])
+            );
+            YCbCr_t pix_ycbcr = YCbCr_t {
+                y:  unpack(ycbcr_raw[23:16]),
+                cb: unpack(ycbcr_raw[15:08]),
+                cr: unpack(ycbcr_raw[07:00])
+            };
+            let is_last = (rg_pixel_idx == fromInteger(n_pixels - 1));
+            axis_wr.pkg.put(AXI4_Stream_Pkg {
+                data: pack(pix_ycbcr),
+                user: ?,
+                keep: unpack(-1),
+                dest: 0,
+                last: is_last
+            });
+            rg_pixel_idx <= rg_pixel_idx + 1;
+        endaction
     endseq;
 endfunction
 

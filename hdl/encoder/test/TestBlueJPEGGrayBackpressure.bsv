@@ -157,32 +157,7 @@ module [Module] test(TestHandler)
 
     UInt#(64) out_base_addr = fromInteger(valueOf(n_pixels));
 
-    Stmt feed_pixels = seq
-        rg_pixel_idx <= 0;
-        while (rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
-            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
-            Bit#(24) pixel = truncate(pack(word));
-            Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
-                unpack(pixel[23:16]),
-                unpack(pixel[15:08]),
-                unpack(pixel[07:00])
-            );
-            YCbCr_t pix_ycbcr = YCbCr_t {
-                y:  unpack(ycbcr_raw[23:16]),
-                cb: unpack(ycbcr_raw[15:08]),
-                cr: unpack(ycbcr_raw[07:00])
-            };
-            let is_last = (rg_pixel_idx == fromInteger(valueOf(n_pixels) - 1));
-            axis_tx.pkg.put(AXI4_Stream_Pkg {
-                data: pack(pix_ycbcr),
-                user: ?,
-                keep: unpack(-1),
-                dest: 0,
-                last: is_last
-            });
-            rg_pixel_idx <= rg_pixel_idx + 1;
-        endaction
-    endseq;
+    Stmt feed_pixels = ycbcr_pix_stmt(valueof(n_pixels), rg_ram_ptr, rg_pixel_idx, axis_tx);
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
 
     Stmt collect_output = seq
@@ -211,8 +186,8 @@ module [Module] test(TestHandler)
     endseq;
     FSM fsm_collect <- mkFSM(collect_output);
 
-    FSM fsm_poll_done <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
-    FSM fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
+    FSM fsm_poll_done   <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
+    FSM fsm_wait_ready  <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
 
     Stmt main = seq
         rg_out_count <= 0;
@@ -225,13 +200,11 @@ module [Module] test(TestHandler)
 
         action
             let ram <- create_SimRAM(fromInteger(valueOf(ram_words)), fromInteger(valueof(TDiv#(WordWidth, 8))));
+            let img <- create_ImageLoader(input_image_path);
+            rg_img_load_ptr <= img;
             rg_ram_ptr <= ram;
         endaction
         print_s("Loading image into SimRAM...", YELLOW);
-        action
-            let img <- create_ImageLoader(input_image_path);
-            rg_img_load_ptr <= img;
-        endaction
         write_to_mem_interleaved_ImageLoader(rg_img_load_ptr, rg_ram_ptr, 0);
         print_s("Image loaded", GREEN);
 
@@ -245,11 +218,7 @@ module [Module] test(TestHandler)
         print_s("Luma Huffman code generation complete", GREEN);
 
         print_s("Configuring grayscale mode...", YELLOW);
-        action
-            Bit#(16) img_height = fromInteger(valueof(InputHeight));
-            Bit#(16) img_width  = fromInteger(valueof(InputWidth));
-            i_cfg_acc.write_reg_req("IMSZ", {img_height, img_width});
-        endaction
+        i_cfg_acc.write_reg_req("IMSZ", {Bit#(16)'(fromInteger(valueof(InputHeight))), Bit#(16)'(fromInteger(valueof(InputWidth)))});
         bjpeg_expect_wr_ok(i_cfg_acc);
 
         i_cfg_acc.write_reg_req("SUBS", 0);
