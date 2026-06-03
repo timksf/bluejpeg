@@ -111,55 +111,12 @@ module [Module] test(TestHandler)
         rg_watchdog <= rg_watchdog + 1;
     endrule
 
-    Stmt feed_pixels = seq
-        rg_pixel_idx <= 0;
-        while (rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
-            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
-            Bit#(24) pixel = truncate(pack(word));
-            Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
-                unpack(pixel[23:16]),
-                unpack(pixel[15:08]),
-                unpack(pixel[07:00])
-            );
-            YCbCr_t pix_ycbcr = YCbCr_t {
-                y:  unpack(ycbcr_raw[23:16]),
-                cb: unpack(ycbcr_raw[15:08]),
-                cr: unpack(ycbcr_raw[07:00])
-            };
-            let is_last = (rg_pixel_idx == fromInteger(valueOf(n_pixels) - 1));
-            axis_tx.pkg.put(AXI4_Stream_Pkg {
-                data: pack(pix_ycbcr),
-                user: ?,
-                keep: unpack(-1),
-                dest: 0,
-                last: is_last
-            });
-            rg_pixel_idx <= rg_pixel_idx + 1;
-        endaction
-    endseq;
+    Stmt feed_pixels    = ycbcr_pix_stmt(valueof(n_pixels), rg_ram_ptr, rg_pixel_idx, axis_tx);
+    Stmt collect_output = axis2mm_sim(out_base_addr, rg_ram_ptr, rg_out_count, rg_out_finished, axis_out);
+
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
-
-    Stmt collect_output = seq
-        while (!rg_finished) action
-            let pkg <- axis_out.pkg.get();
-            Bit#(8) b = pkg.data;
-            write_byte_SimRAM(
-                rg_ram_ptr,
-                out_base_addr + extend(rg_total_count),
-                unpack(extend(b))
-            );
-            rg_out_count <= rg_out_count + 1;
-            rg_total_count <= rg_total_count + 1;
-            if (pkg.last) begin
-                print_fmt($format("Frame %0d TLAST, bytes: %0d",
-                    rg_frame_idx + 1, rg_out_count + 1), GREEN);
-                rg_finished <= True;
-            end
-        endaction
-    endseq;
-    FSM fsm_collect <- mkFSM(collect_output);
-
-    FSM fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
+    FSM fsm_collect     <- mkFSM(collect_output);
+    FSM fsm_wait_ready  <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
 
     Stmt start_frame = seq
         action

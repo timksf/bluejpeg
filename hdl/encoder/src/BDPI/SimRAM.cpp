@@ -55,8 +55,7 @@ void SimRAM::write_strobe(SimRAM::addr_t word_addr, SimRAM::data_t word, SimRAM:
 SimRAM::data_t SimRAM::read_byte(SimRAM::addr_t byte_addr) {
     const uint64_t capacity = get_byte_size();
     if(byte_addr >= capacity) {
-        std::cerr << "[SimRAM] Tried to read byte beyond bounds: " << byte_addr
-                  << "/" << capacity << std::endl;
+        std::cerr << "[SimRAM] Tried to read byte beyond bounds: " << byte_addr << "/" << capacity << std::endl;
         exit(1);
     }
     ++m_read_accesses;

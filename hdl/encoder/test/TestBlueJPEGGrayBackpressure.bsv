@@ -32,60 +32,6 @@ typedef 16 DCTScale;
 typedef 16 QuantScale;
 typedef 16 DPw;
 
-module mkBackpressuredAXI4StreamRd#(Integer bufferSize)(AXI4_Stream_Rd#(datawidth, userwidth))
-    provisos(Div#(datawidth, 8, keepwidth));
-
-    let isRst <- isResetAsserted();
-
-    Wire#(Bool)                  tvalidIn <- mkBypassWire();
-    Wire#(Bit#(datawidth))       dataIn   <- mkBypassWire();
-    Wire#(Bit#(userwidth))       userIn   <- mkBypassWire();
-    Wire#(Bit#(keepwidth))       keepIn   <- mkBypassWire();
-    Wire#(Bit#(4))               destIn   <- mkBypassWire();
-    Wire#(Bit#(8))               idIn     <- mkBypassWire();
-    Wire#(Bool)                  lastIn   <- mkBypassWire();
-    Reg#(UInt#(8))               rg_cycle <- mkReg(0);
-
-    FIFOF#(AXI4_Stream_Pkg#(datawidth, userwidth)) in <- mkSizedFIFOF(bufferSize);
-    if (bufferSize == 1)
-        in <- mkPipelineFIFOF();
-    if (bufferSize == 2)
-        in <- mkFIFOF();
-
-    function Bool ready_pattern();
-        UInt#(8) phase = rg_cycle % 16;
-        return phase < 5 || phase == 9 || phase == 10 || phase == 15;
-    endfunction
-
-    rule count_cycles if (!isRst);
-        rg_cycle <= rg_cycle + 1;
-    endrule
-
-    rule writeFIFO if (!isRst && ready_pattern() && tvalidIn && in.notFull());
-        AXI4_Stream_Pkg#(datawidth, userwidth) s;
-        s.data = dataIn;
-        s.user = userIn;
-        s.keep = keepIn;
-        s.dest = destIn;
-        s.id   = idIn;
-        s.last = lastIn;
-        in.enq(s);
-    endrule
-
-    interface Get pkg = toGet(in);
-
-    interface AXI4_Stream_Rd_Fab fab;
-        interface tready = !isRst && ready_pattern() && in.notFull();
-        interface ptvalid = tvalidIn._write;
-        interface ptdata  = dataIn._write;
-        interface ptuser  = userIn._write;
-        interface ptkeep  = keepIn._write;
-        interface ptDest  = destIn._write;
-        interface ptid    = idIn._write;
-        interface ptlast  = lastIn._write;
-    endinterface
-endmodule
-
 module [Module] mkTestBlueJPEGGrayBackpressure(TestHandler);
 
     let t1 <- test;
@@ -137,8 +83,8 @@ module [Module] test(TestHandler)
     AXI4_Lite_Master_Wr#(32, 32) cfg_wr <- mkAXI4_Lite_Master_Wr(16);
     let i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, cfg_rd, cfg_wr);
 
-    AXI4_Stream_Wr#(24, 0) axis_tx  <- mkAXI4_Stream_Wr(128);
-    AXI4_Stream_Rd#(8, 0)  axis_out <- mkBackpressuredAXI4StreamRd(8);
+    AXI4_Stream_Wr#(24, 0) axis_tx  <- mkAXI4_Stream_Wr(1);
+    AXI4_Stream_Rd#(8, 0)  axis_out <- mkAXI4_Stream_Rd(1);
 
     mkConnection(axis_tx.fab,      dut.s_axis);
     mkConnection(dut.m_axis,       axis_out.fab);
@@ -156,7 +102,25 @@ module [Module] test(TestHandler)
     UInt#(64) out_base_addr = fromInteger(valueOf(n_pixels)) * fromInteger(valueOf(TDiv#(WordWidth, 8)));
 
     Stmt feed_pixels    = ycbcr_pix_stmt(valueof(n_pixels), rg_ram_ptr, rg_pixel_idx, axis_tx);
-    Stmt collect_output = axis2mm_sim(out_base_addr, rg_ram_ptr, rg_out_count, rg_out_finished, axis_out);
+
+    Stmt collect_output = seq
+        rg_out_finished <= False;
+        delay(10000); //some initial delay to cause backpressure
+        while (!rg_out_finished) action
+            let pkg <- axis_out.pkg.get();
+            Bit#(8) b = pkg.data;
+            write_byte_SimRAM(
+                rg_ram_ptr,
+                out_base_addr+rg_out_count,
+                unpack(extend(b))
+            );
+            rg_out_count <= rg_out_count + 1;
+            if (pkg.last) begin
+                print_fmt($format("TLAST, bytes: %0d", rg_out_count + 1), GREEN);
+                rg_out_finished <= True;
+            end
+        endaction
+    endseq;
     
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
     FSM fsm_collect     <- mkFSM(collect_output);

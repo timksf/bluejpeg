@@ -1,6 +1,7 @@
 ###
 # DO NOT CHANGE
 ###
+PWD=$(CURDIR)
 TOP_MODULE=mkBlueJPEG
 TESTBENCH_MODULE=mkTestbench
 IGNORE_MODULES=mkTestbench mkTestsMainTest
@@ -53,6 +54,7 @@ CXX_NO_OPT := 1
 # Any additional files added during compilation
 # For instance for BDPI or Verilog/VHDL files for simulation
 CPP_FILES += $(PWD)/src/BDPI/*.cpp
+CXX_DEPS += $(PWD)/../../sw/*.h $(PWD)/../../sw/*.hpp
 
 # Custom defines added to compile steps
 EXTRA_FLAGS+=-I $(PWD)/src/BDPI -I $(PWD)/../../dep/BlueSY/src -Xc++ -std=c++23 -I $(PWD)/../../dep/CImg -Xc++ -std=c++23 -D cimg_use_png
@@ -60,7 +62,7 @@ EXTRA_FLAGS+=-I $(PWD)/src/BDPI -I $(PWD)/../../dep/BlueSY/src -Xc++ -std=c++23 
 # EXTRA_FLAGS+=-Wno-format-overflow -Wno-dangling-else
 
 # Flags added to simulator execution
-RUN_FLAGS+=#-V dump.vcd 
+RUN_FLAGS+=-V dump.vcd 
 #-F -A
 
 # Add additional parameters for IP-XACT generation. Passed directly to Vivado.
@@ -86,4 +88,3 @@ endif
 
 # Do not change: Include base makefile
 include $(BSV_TOOLS)/scripts/rules.mk
-
