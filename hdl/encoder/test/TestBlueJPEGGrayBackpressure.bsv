@@ -148,52 +148,25 @@ module [Module] test(TestHandler)
     Reg#(UInt#(64)) rg_ram_ptr      <- mkRegU;
     Reg#(UInt#(64)) rg_img_load_ptr <- mkRegU;
     Reg#(Bit#(32))  rg_axil_rsp     <- mkRegU;
-    Reg#(Bool)      rg_finished     <- mkReg(False);
-    Reg#(UInt#(32)) rg_out_count    <- mkReg(0);
+    Reg#(Bool)      rg_dut_finished <- mkRegU;
+    Reg#(Bool)      rg_out_finished <- mkRegU;
+    Reg#(UInt#(64)) rg_out_count    <- mkReg(0);
     Reg#(UInt#(32)) rg_pixel_idx    <- mkReg(0);
-    Reg#(Bit#(8))   rg_prev_byte    <- mkReg(0);
-    Reg#(Bit#(8))   rg_last_byte    <- mkReg(0);
-    Reg#(File)      rg_out_file     <- mkRegU;
 
-    UInt#(64) out_base_addr = fromInteger(valueOf(n_pixels));
+    UInt#(64) out_base_addr = fromInteger(valueOf(n_pixels)) * fromInteger(valueOf(TDiv#(WordWidth, 8)));
 
-    Stmt feed_pixels = ycbcr_pix_stmt(valueof(n_pixels), rg_ram_ptr, rg_pixel_idx, axis_tx);
+    Stmt feed_pixels    = ycbcr_pix_stmt(valueof(n_pixels), rg_ram_ptr, rg_pixel_idx, axis_tx);
+    Stmt collect_output = axis2mm_sim(out_base_addr, rg_ram_ptr, rg_out_count, rg_out_finished, axis_out);
+    
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
-
-    Stmt collect_output = seq
-        action
-            let fd <- $fopen(output_jpeg_path, "wb");
-            if (fd == InvalidFile) begin
-                print_s("ERROR: cannot open output file", RED);
-                $finish();
-            end
-            rg_out_file <= fd;
-        endaction
-        while (!rg_finished) action
-            let pkg <- axis_out.pkg.get();
-            Bit#(8) b = pkg.data;
-            write_word_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count), unpack(extend(b)));
-            $fwrite(rg_out_file, "%c", b);
-            rg_prev_byte <= rg_last_byte;
-            rg_last_byte <= b;
-            rg_out_count <= rg_out_count + 1;
-            if (pkg.last) begin
-                print_fmt($format("Received TLAST under backpressure, total bytes: %0d", rg_out_count + 1), GREEN);
-                rg_finished <= True;
-            end
-        endaction
-        $fclose(rg_out_file);
-    endseq;
-    FSM fsm_collect <- mkFSM(collect_output);
-
-    FSM fsm_poll_done   <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
+    FSM fsm_collect     <- mkFSM(collect_output);
+    FSM fsm_poll_done   <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_dut_finished));
     FSM fsm_wait_ready  <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
 
     Stmt main = seq
         rg_out_count <= 0;
-        rg_prev_byte <= 0;
-        rg_last_byte <= 0;
-        rg_finished <= False;
+        rg_dut_finished <= False;
+        rg_out_finished <= False;
         rg_axil_rsp <= 0;
 
         print_fmt($format("=== TestBlueJPEGGrayBackpressure start ==="), GREEN);
@@ -237,6 +210,7 @@ module [Module] test(TestHandler)
             seq fsm_collect.start();     await(fsm_collect.done());     endseq
             seq fsm_poll_done.start();   await(fsm_poll_done.done());   endseq
         endpar
+        dump_range_SimRAM(rg_ram_ptr, output_jpeg_path, out_base_addr, extend(rg_out_count));
 
         i_cfg_acc.read_reg_req("PERF0");
         action
@@ -256,15 +230,16 @@ module [Module] test(TestHandler)
                 print_s("ERROR: no JPEG bytes were produced", RED);
                 $finish();
             end
-            if (rg_prev_byte != 'hFF || rg_last_byte != 'hD9) begin
-                print_fmt($format("ERROR: output does not end with EOI, tail=%02x %02x",
-                    rg_prev_byte, rg_last_byte), RED);
+            Bit#(8) prev_byte <- read_byte_SimRAM(rg_ram_ptr, out_base_addr+rg_out_count-2);
+            Bit#(8) last_byte <- read_byte_SimRAM(rg_ram_ptr, out_base_addr+rg_out_count-1);
+            if (prev_byte != 'hFF || last_byte != 'hD9) begin
+                print_fmt($format("ERROR: output does not end with EOI, tail=%02x %02x", prev_byte, last_byte), RED);
                 $finish();
             end
         endaction
 
         print_fmt($format("Backpressured grayscale JPEG complete, %0d bytes output", rg_out_count), GREEN);
-        print_fmt($format("Output written to %s and SimRAM[%0d..]", output_jpeg_path, out_base_addr), GREEN);
+        print_fmt($format("Output written to %s and SimRAM byte[%0d..]", output_jpeg_path, out_base_addr), GREEN);
         print_fmt($format("=== TestBlueJPEGGrayBackpressure PASSED ==="), GREEN);
     endseq;
 

@@ -98,9 +98,9 @@ module [Module] test(TestHandler)
     Reg#(UInt#(32)) rg_frame_idx    <- mkReg(0);
     Reg#(UInt#(32)) rg_watchdog     <- mkReg(0);
     Reg#(Bool)      rg_watchdog_en  <- mkReg(False);
-    Reg#(File)      rg_out_file     <- mkRegU;
 
-    UInt#(64) out_base_addr = fromInteger(valueOf(n_pixels));
+    UInt#(64) out_base_addr =
+        fromInteger(valueOf(n_pixels)) * fromInteger(valueOf(TDiv#(WordWidth, 8)));
 
     rule watchdog if (rg_watchdog_en);
         if (rg_watchdog > 2_000_000) begin
@@ -140,23 +140,14 @@ module [Module] test(TestHandler)
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
 
     Stmt collect_output = seq
-        action
-            let fd <- $fopen(output_jpeg_path, "wb");
-            if (fd == InvalidFile) begin
-                print_s("ERROR: cannot open output file", RED);
-                $finish();
-            end
-            rg_out_file <= fd;
-        endaction
         while (!rg_finished) action
             let pkg <- axis_out.pkg.get();
             Bit#(8) b = pkg.data;
-            write_word_SimRAM(
+            write_byte_SimRAM(
                 rg_ram_ptr,
                 out_base_addr + extend(rg_total_count),
                 unpack(extend(b))
             );
-            $fwrite(rg_out_file, "%c", b);
             rg_out_count <= rg_out_count + 1;
             rg_total_count <= rg_total_count + 1;
             if (pkg.last) begin
@@ -165,7 +156,6 @@ module [Module] test(TestHandler)
                 rg_finished <= True;
             end
         endaction
-        $fclose(rg_out_file);
     endseq;
     FSM fsm_collect <- mkFSM(collect_output);
 
@@ -259,8 +249,12 @@ module [Module] test(TestHandler)
             endaction
         endseq
 
+        dump_range_SimRAM(rg_ram_ptr, output_jpeg_path, out_base_addr, extend(rg_total_count));
+
         print_fmt($format("Two consecutive grayscale JPEG frames complete, total bytes: %0d",
             rg_total_count), GREEN);
+        print_fmt($format("Output written to %s and SimRAM byte[%0d..]",
+            output_jpeg_path, out_base_addr), GREEN);
         print_fmt($format("=== TestBlueJPEGGrayConsecutive PASSED ==="), GREEN);
     endseq;
 

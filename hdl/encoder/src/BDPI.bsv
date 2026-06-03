@@ -17,7 +17,7 @@ import "BDPI" function Action write_strobe_SimRAM(
     UInt#(64) data,
     UInt#(64) strobe
 );
-import "BDPI" function ActionValue#(UInt#(64)) read_byte_SimRAM(
+import "BDPI" function ActionValue#(Bit#(8)) read_byte_SimRAM(
     UInt#(64) ptr,
     UInt#(64) byte_addr
 );
@@ -25,6 +25,12 @@ import "BDPI" function Action write_byte_SimRAM(
     UInt#(64) ptr,
     UInt#(64) byte_addr,
     UInt#(64) byte_val
+);
+import "BDPI" function Action dump_range_SimRAM(
+    UInt#(64) ptr,
+    String filename,
+    UInt#(64) start_byte_addr,
+    UInt#(64) byte_count
 );
 
 //Image Loader; from file to memory to simulation ram model

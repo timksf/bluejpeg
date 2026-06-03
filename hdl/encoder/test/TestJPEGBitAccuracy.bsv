@@ -109,12 +109,13 @@ module [Module] test(TestHandler)
     Reg#(UInt#(32)) rg_pixel_idx    <- mkReg(0);
     Reg#(UInt#(32)) rg_ref_bytes    <- mkReg(0);
 
-    // SimRAM layout (word-addressed):
-    //   [0 .. n_pixels-1]                     : input image pixels
-    //   [n_pixels .. n_pixels+500_000-1]      : HW output bytes (one byte per word)
-    //   [n_pixels+500_000 .. ]                : SW reference bytes (one byte per word)
-    UInt#(64) hw_out_base  = fromInteger(valueOf(n_pixels));
-    UInt#(64) ref_out_base = fromInteger(valueOf(n_pixels)) + 500000;
+    // SimRAM layout:
+    //   words [0 .. n_pixels-1]                : input image pixels
+    //   bytes [n_pixels*bytes_per_word .. ]    : HW output bytes
+    //   bytes [n_pixels*bytes_per_word+500k ..]: SW reference bytes
+    UInt#(64) hw_out_base =
+        fromInteger(valueOf(n_pixels)) * fromInteger(valueOf(TDiv#(WordWidth, 8)));
+    UInt#(64) ref_out_base = hw_out_base + 500000;
 
     // ---- sub-FSMs ----
 
@@ -152,7 +153,7 @@ module [Module] test(TestHandler)
         while (!rg_finished) action
             let pkg <- axis_out.pkg.get();
             Bit#(8) b = pkg.data;
-            write_word_SimRAM(rg_ram_ptr,
+            write_byte_SimRAM(rg_ram_ptr,
                 hw_out_base + extend(rg_out_count),
                 unpack(extend(b)));
             rg_out_count <= rg_out_count + 1;
@@ -270,8 +271,8 @@ module [Module] test(TestHandler)
         rg_cmp_idx <= 0;
         while (rg_cmp_idx < rg_out_count && rg_cmp_idx < rg_ref_bytes) seq
             action
-                let hw_word  <- read_word_SimRAM(rg_ram_ptr, hw_out_base  + extend(rg_cmp_idx));
-                let ref_word <- read_word_SimRAM(rg_ram_ptr, ref_out_base + extend(rg_cmp_idx));
+                let hw_word  <- read_byte_SimRAM(rg_ram_ptr, hw_out_base  + extend(rg_cmp_idx));
+                let ref_word <- read_byte_SimRAM(rg_ram_ptr, ref_out_base + extend(rg_cmp_idx));
                 Bit#(8) hw_byte  = truncate(pack(hw_word));
                 Bit#(8) ref_byte = truncate(pack(ref_word));
                 if (hw_byte != ref_byte) begin

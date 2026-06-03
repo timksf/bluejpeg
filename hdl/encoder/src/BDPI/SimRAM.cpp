@@ -1,4 +1,4 @@
-#include <cmath>
+#include <fstream>
 
 #include "SimRAM.h"
 
@@ -53,18 +53,65 @@ void SimRAM::write_strobe(SimRAM::addr_t word_addr, SimRAM::data_t word, SimRAM:
 }
 
 SimRAM::data_t SimRAM::read_byte(SimRAM::addr_t byte_addr) {
+    const uint64_t capacity = get_byte_size();
+    if(byte_addr >= capacity) {
+        std::cerr << "[SimRAM] Tried to read byte beyond bounds: " << byte_addr
+                  << "/" << capacity << std::endl;
+        exit(1);
+    }
     ++m_read_accesses;
     auto it = m_data.find(byte_addr);
     return (it != m_data.end()) ? it->second : 0;
 }
 
 void SimRAM::write_byte(SimRAM::addr_t byte_addr, SimRAM::data_t byte_val) {
+    const uint64_t capacity = get_byte_size();
+    if(byte_addr >= capacity) {
+        std::cerr << "[SimRAM] Tried to write byte beyond bounds: " << byte_addr
+                  << "/" << capacity << std::endl;
+        exit(1);
+    }
     m_data[byte_addr] = static_cast<uint8_t>(byte_val & 0xFF);
     ++m_write_accesses;
 }
 
+void SimRAM::dump_range(const char *filename, SimRAM::addr_t start_byte_addr, uint64_t byte_count) {
+    const uint64_t capacity = get_byte_size();
+    if(byte_count > capacity || start_byte_addr > capacity - byte_count) {
+        std::cerr << "[SimRAM] Tried to dump byte range beyond bounds: start="
+                  << start_byte_addr << ", count=" << byte_count
+                  << ", capacity=" << capacity << std::endl;
+        exit(1);
+    }
+
+    std::ofstream out(filename, std::ios::binary);
+    if(!out) {
+        std::cerr << "[SimRAM] Could not open dump file: " << filename << std::endl;
+        exit(1);
+    }
+
+    for(uint64_t i = 0; i < byte_count; ++i) {
+        const uint64_t byte_addr = start_byte_addr + i;
+        auto it = m_data.find(byte_addr);
+        const uint8_t byte = (it != m_data.end()) ? it->second : 0;
+        out.put(static_cast<char>(byte));
+    }
+
+    if(!out) {
+        std::cerr << "[SimRAM] Failed while writing dump file: " << filename << std::endl;
+        exit(1);
+    }
+
+    std::cout << "[SimRAM] Dumped " << byte_count << " bytes from byte address "
+              << start_byte_addr << " to " << filename << std::endl;
+}
+
 uint32_t SimRAM::get_size() {
     return m_size;
+}
+
+uint64_t SimRAM::get_byte_size() {
+    return static_cast<uint64_t>(m_size) * m_bytes_per_word;
 }
 
 BSV_ENABLE_PSEUDO_GC(SimRAM)
@@ -74,3 +121,4 @@ BSV_WRAP_INSTANCE_METHOD(SimRAM, write_word, void, (SimRAM::addr_t, addr), (SimR
 BSV_WRAP_INSTANCE_METHOD(SimRAM, write_strobe, void, (SimRAM::addr_t, addr), (SimRAM::data_t, word), (SimRAM::data_t, strobe))
 BSV_WRAP_INSTANCE_METHOD(SimRAM, read_byte, SimRAM::data_t, (SimRAM::addr_t, byte_addr))
 BSV_WRAP_INSTANCE_METHOD(SimRAM, write_byte, void, (SimRAM::addr_t, byte_addr), (SimRAM::data_t, byte_val))
+BSV_WRAP_INSTANCE_METHOD(SimRAM, dump_range, void, (const char*, filename), (SimRAM::addr_t, start_byte_addr), (uint64_t, byte_count))

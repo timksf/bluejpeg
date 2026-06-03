@@ -109,10 +109,10 @@ module [Module] test(TestHandler)
     Reg#(Bool)      rg_finished     <- mkReg(False);
     Reg#(UInt#(32)) rg_out_count    <- mkReg(0);
     Reg#(UInt#(32)) rg_pixel_idx    <- mkReg(0);
-    Reg#(File)      rg_out_file     <- mkRegU;
 
-    // output write base address in SimRAM (word-addressed, after input image)
-    UInt#(64) out_base_addr = fromInteger(valueOf(n_pixels));
+    // output write base address in SimRAM (byte-addressed, after input image)
+    UInt#(64) out_base_addr =
+        fromInteger(valueOf(n_pixels)) * fromInteger(valueOf(TDiv#(WordWidth, 8)));
 
     // ---- sub-FSMs ----
 
@@ -147,30 +147,18 @@ module [Module] test(TestHandler)
     endseq;
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
 
-    //collect JPEG output bytes to output file and RAM output region
+    //collect JPEG output bytes to RAM output region
     Stmt collect_output = seq
-        action
-            let fd <- $fopen(output_jpeg_path, "wb");
-            if (fd == InvalidFile) begin
-                print_s("ERROR: cannot open output file", RED);
-                $finish();
-            end
-            rg_out_file <= fd;
-        endaction
         while (!rg_finished) action
             let pkg <- axis_out.pkg.get();
             Bit#(8) b = pkg.data;
-            //write to SimRAM
-            write_word_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count), unpack(extend(b)));
-            //write to file
-            $fwrite(rg_out_file, "%c", b);
+            write_byte_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count), unpack(extend(b)));
             rg_out_count <= rg_out_count + 1;
             if (pkg.last) begin
                 print_fmt($format("Received TLAST, total bytes: %0d", rg_out_count + 1), GREEN);
                 rg_finished <= True;
             end
         endaction
-        $fclose(rg_out_file);
     endseq;
     FSM fsm_collect <- mkFSM(collect_output);
 
@@ -244,6 +232,7 @@ module [Module] test(TestHandler)
             seq fsm_collect.start();     await(fsm_collect.done());     endseq
             seq fsm_poll_done.start();   await(fsm_poll_done.done());   endseq
         endpar
+        dump_range_SimRAM(rg_ram_ptr, output_jpeg_path, out_base_addr, extend(rg_out_count));
 
         i_cfg_acc.read_reg_req("PERF0");
         action
@@ -259,7 +248,7 @@ module [Module] test(TestHandler)
         print_fmt($format("Processed Pixels: %0d", rg_axil_rsp), GREEN);
 
         print_fmt($format("Grayscale JPEG encoding complete, %0d bytes output", rg_out_count), GREEN);
-        print_fmt($format("Output written to %s and SimRAM[%0d..]",
+        print_fmt($format("Output written to %s and SimRAM byte[%0d..]",
             output_jpeg_path, out_base_addr), GREEN);
         print_fmt($format("=== TestBlueJPEGGray PASSED ==="), GREEN);
     endseq;

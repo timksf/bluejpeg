@@ -37,7 +37,7 @@ extern "C" {
             image_path       - path to BMP input file
             subsampling_mode - 0=444, 1=422, 2=420
             ram_ptr          - SimRAM pointer (from create_SimRAM)
-            start_addr       - word address in SimRAM to start writing bytes
+            start_addr       - byte address in SimRAM to start writing bytes
 
         Returns: total number of JPEG bytes produced
     */
@@ -98,18 +98,18 @@ extern "C" {
             dct_fn, quant_fn, reorder_fn
         );
 
-        // Read JPEG file back and store bytes in SimRAM (one byte per word)
+        // Read JPEG file back and store bytes in SimRAM.
         std::ifstream jpeg_in(tmp_name + ".jpg", std::ios::binary);
         if (!jpeg_in) {
             std::cerr << "[jpeg_encode_ref] Failed to read back " << tmp_name << ".jpg" << std::endl;
             return 0;
         }
 
-        SimRAM* ram = reinterpret_cast<SimRAM*>(ram_ptr);
+        SimRAM *ram = reinterpret_cast<SimRAM*>(ram_ptr);
         uint64_t addr = start_addr;
         char byte;
         while (jpeg_in.get(byte)) {
-            ram->write_word(addr++, static_cast<uint8_t>(byte));
+            ram->write_byte(addr++, static_cast<uint8_t>(byte));
         }
 
         std::cout << "[jpeg_encode_ref] Encoded " << bytes_written

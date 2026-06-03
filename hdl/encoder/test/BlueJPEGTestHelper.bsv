@@ -2,14 +2,14 @@ package BlueJPEGTestHelper;
 
 import GetPut :: *;
 import StmtFSM :: *;
-import PrintUtil :: *;
 import ClientServer :: *;
 
 import BlueCSR :: *;
 import BlueAXI :: *;
 
-import Types :: *;
 import BDPI :: *;
+import Types :: *;
+import PrintUtil :: *;
 
 function Action bjpeg_expect_wr_ok(BlueCSRTbAccessor_ifc#(32) cfg_acc);
     action
@@ -91,8 +91,7 @@ function Stmt ycbcr_pix_stmt(
     Integer n_pixels,
     Reg#(UInt#(64)) rg_ram_ptr,
     Reg#(UInt#(32)) rg_pixel_idx,
-    AXI4_Stream_Wr#(24, wuser) axis_wr
-    );
+    AXI4_Stream_Wr#(24, wuser) axis_wr);
     return seq
         rg_pixel_idx <= 0;
         while (rg_pixel_idx < fromInteger(n_pixels)) action
@@ -117,6 +116,29 @@ function Stmt ycbcr_pix_stmt(
                 last: is_last
             });
             rg_pixel_idx <= rg_pixel_idx + 1;
+        endaction
+    endseq;
+endfunction
+
+function Stmt axis2mm_sim(
+    UInt#(64) base_addr,
+    Reg#(UInt#(64)) rg_ram_ptr,
+    Reg#(UInt#(64)) rg_out_cnt,
+    Reg#(Bool) rg_out_finished,
+    AXI4_Stream_Rd#(8, wuser) axis_rd
+    );
+    return seq
+        rg_out_cnt <= 0;
+        rg_out_finished <= False;
+        while (!rg_out_finished) action
+            let pkg <- axis_rd.pkg.get();
+            Bit#(8) b = pkg.data;
+            write_byte_SimRAM(rg_ram_ptr, base_addr + extend(rg_out_cnt), unpack(extend(b)));
+            rg_out_cnt <= rg_out_cnt + 1;
+            if (pkg.last) begin
+                print_mod_pre_color_t_f($format("Received TLAST under backpressure, total bytes: %0d", rg_out_cnt + 1), GREEN);
+                rg_out_finished <= True;
+            end
         endaction
     endseq;
 endfunction

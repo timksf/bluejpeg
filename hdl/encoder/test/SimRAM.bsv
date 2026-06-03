@@ -13,7 +13,7 @@ interface SimRAMSimple_ifc;
     method ActionValue#(UInt#(64)) read(UInt#(64) addr);
     method Action write(UInt#(64) addr, UInt#(64) data);
     method Action write_strobe(UInt#(64) addr, UInt#(64) data, UInt#(64) strobe);
-    method ActionValue#(UInt#(64)) read_byte(UInt#(64) byte_addr);
+    method ActionValue#(Bit#(8)) read_byte(UInt#(64) byte_addr);
     method Action write_byte(UInt#(64) byte_addr, UInt#(64) byte_val);
 endinterface
 

@@ -25,8 +25,10 @@ public:
 
     data_t read_byte(addr_t byte_addr);
     void write_byte(addr_t byte_addr, data_t byte_val);
+    void dump_range(const char *filename, addr_t start_byte_addr, uint64_t byte_count);
 
     uint32_t get_size();
+    uint64_t get_byte_size();
 
 private:
     uint32_t m_size;           // capacity in words
