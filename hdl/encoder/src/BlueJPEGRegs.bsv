@@ -31,6 +31,7 @@ function PerfCounter_ifc#(n) reg_to_perfc(Reg#(Bit#(n)) r);
 endfunction
 
 interface BlueJPEGCfg_ifc;
+    method Action accept_start();
     method Action finish();
     method Action error();
     method Action invalid_cfg();
@@ -160,6 +161,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
 
     method perf_rst         = action rg_perf_cycles <= 0; rg_perf_pixels <= 0; rg_perf_byteso <= 0; endaction;
 
+    method accept_start     = action rg_start      <= False; rg_done <= 0; endaction;
     method table_sts(r, c)  = action rg_ready <= r; rg_cg_busy <= c;    endaction;
     method error            = action rg_error       <= 1;               endaction;
     method invalid_cfg      = action rg_inv_cfg     <= True;            endaction;

@@ -144,6 +144,7 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t
         rg_pix_cnt  <= 0;
         rg_buf_addr <= 0;
         rg_output   <= False;
+        rg_running  <= False;
     endrule
 
     method Action set_img_width(Bit#(13) w) = action

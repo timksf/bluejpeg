@@ -9,7 +9,7 @@ import Types :: *;
 
 interface JPEGBitstream_ifc;
     method Bool scan_done();
-    method Action rewind();
+    method Action start_scan();
     interface Server#(HuffCode_t, Bit#(8)) data;
 endinterface
 
@@ -25,12 +25,11 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
 
     //64 bit accumulator; CReg allows r_emit (port 0) and r_accumulate (port 1)
     //to fire in the same cycle.  Valid bits are in positions [rg_bits-1:0].
-    //Port 0: emit / flush rules   Port 1: accumulate   Port 2: rewind
-    Reg#(Bit#(64))  rg_buffer[3] <- mkCReg(3, 0);
-    Reg#(UInt#(7))  rg_bits[3]   <- mkCReg(3, 0);
+    Reg#(Bit#(64))  rg_buffer[2] <- mkCReg(2, 0);
+    Reg#(UInt#(7))  rg_bits[2]   <- mkCReg(2, 0);
 
     //stuffing: after emitting 0xFF, must emit 0x00
-    Reg#(Bool) rg_stuff[3] <- mkCReg(3, False);
+    Reg#(Bool) rg_stuff[2] <- mkCReg(2, False);
 
     //flush state machine
     Reg#(Bool) rg_finishing    <- mkReg(False); //seen last flag, draining bytes
@@ -98,15 +97,8 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
 
     method Bool scan_done() = rg_done;
 
-    method Action rewind();
-        rg_buffer[2]    <= 0;
-        rg_bits[2]      <= 0;
-        rg_stuff[2]     <= False;
-        rg_finishing    <= False;
-        rg_pad_injected <= False;
-        rg_done         <= False;
-        f_in.clear();
-        f_out.clear();
+    method Action start_scan();
+        rg_done <= False;
     endmethod
 
     interface data = toGPServer(f_in, f_out);

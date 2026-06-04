@@ -134,17 +134,8 @@ module [Module] test(TestHandler)
     FSM fsm_wait_ready  <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
 
     Stmt start_frame = seq
-        action
-            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
-            Bit#(32) start_mask = 1 << start_bit;
-            i_cfg_acc.write_reg_req("CTRL", start_mask);
-        endaction
-        bjpeg_expect_wr_ok(i_cfg_acc);
-
+        bjpeg_start_encoder(i_cfg_acc);
         await(dut.s_axis.tready());
-
-        i_cfg_acc.write_reg_req("CTRL", 0);
-        bjpeg_expect_wr_ok(i_cfg_acc);
     endseq;
     FSM fsm_start_frame <- mkFSM(start_frame);
 
@@ -176,9 +167,7 @@ module [Module] test(TestHandler)
         print_s("Configuring grayscale mode...", YELLOW);
         bjpeg_configure_image(i_cfg_acc, valueof(InputWidth), valueof(InputHeight), 0);
 
-        for (rg_frame_idx <= 0;
-             rg_frame_idx < 2;
-             rg_frame_idx <= rg_frame_idx + 1) seq
+        for (rg_frame_idx <= 0; rg_frame_idx < 2; rg_frame_idx <= rg_frame_idx + 1) seq
             action
                 rg_out_count <= 0;
                 rg_finished <= False;

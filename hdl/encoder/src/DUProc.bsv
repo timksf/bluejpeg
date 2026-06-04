@@ -18,7 +18,6 @@ import DCT2D_Optimized :: *;
 import DUDebug :: *;
 
 interface DUProc_t#(numeric type bits);
-    method Action force_rewind(); //for recovery purposes
     interface Put#(PixType_t) du_mode;
 
     interface Client#(QuantTableIdx_t, Int#(32)) qtable;

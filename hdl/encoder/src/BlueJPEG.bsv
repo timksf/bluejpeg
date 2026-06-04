@@ -411,8 +411,12 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         rg_mcu_y        <= 0;
         rg_mcu_phase    <= 0;
         rg_du_pix       <= 0;
+        csrs.internal.accept_start();
 
         if(cfg_valid) begin
+            rle.start_scan();
+            stuffer.start_scan();
+
             if(cfg.en_tiler) begin
                 img_tiler.set_img_width(truncate(width));
                 img_tiler.start();

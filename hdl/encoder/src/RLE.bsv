@@ -9,6 +9,7 @@ import SpecialFIFOs :: *;
 import Types :: *;
 
 interface RLE_ifc#(numeric type bits);
+    method Action start_scan();
     method Action rewind();
     interface Put#(Bit#(2)) du_comp;
     interface Server#(Int#(bits), RLETag_t#(bits)) data;
@@ -115,6 +116,10 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
             else              rg_idx <= rg_idx + 1;
         end
     endrule
+
+    method Action start_scan();
+        writeVReg(v_prev_dc, replicate(0));
+    endmethod
 
     method Action rewind();
         rg_idx <= 0;
