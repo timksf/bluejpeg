@@ -135,39 +135,26 @@ module [Module] test(TestHandler)
 
         print_fmt($format("=== TestBlueJPEGGrayBackpressure start ==="), GREEN);
 
-        action
-            let ram <- create_SimRAM(fromInteger(valueOf(ram_words)), fromInteger(valueof(TDiv#(WordWidth, 8))));
-            let img <- create_ImageLoader(input_image_path);
-            rg_img_load_ptr <= img;
-            rg_ram_ptr <= ram;
-        endaction
-        print_s("Loading image into SimRAM...", YELLOW);
-        write_to_mem_interleaved_ImageLoader(rg_img_load_ptr, rg_ram_ptr, 0);
-        print_s("Image loaded", GREEN);
+        bjpeg_load_image(
+            input_image_path,
+            valueof(ram_words),
+            valueof(TDiv#(WordWidth, 8)),
+            rg_ram_ptr,
+            rg_img_load_ptr);
 
         print_s("Waiting for default table init...", YELLOW);
         fsm_wait_ready.start();
         await(fsm_wait_ready.done());
 
         print_s("Generating luma Huffman codes...", YELLOW);
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 0);
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 2);
+        bjpeg_trigger_codegen_luma(i_cfg_acc, rg_axil_rsp);
         print_s("Luma Huffman code generation complete", GREEN);
 
         print_s("Configuring grayscale mode...", YELLOW);
-        i_cfg_acc.write_reg_req("IMSZ", {Bit#(16)'(fromInteger(valueof(InputHeight))), Bit#(16)'(fromInteger(valueof(InputWidth)))});
-        bjpeg_expect_wr_ok(i_cfg_acc);
-
-        i_cfg_acc.write_reg_req("SUBS", 0);
-        bjpeg_expect_wr_ok(i_cfg_acc);
+        bjpeg_configure_image(i_cfg_acc, valueof(InputWidth), valueof(InputHeight), 0);
 
         print_s("Starting grayscale BlueJPEG encoder with output backpressure...", YELLOW);
-        action
-            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
-            Bit#(32) start_mask = 1 << start_bit;
-            i_cfg_acc.write_reg_req("CTRL", start_mask);
-        endaction
-        bjpeg_expect_wr_ok(i_cfg_acc);
+        bjpeg_start_encoder(i_cfg_acc);
 
         par
             seq fsm_feed_pixels.start(); await(fsm_feed_pixels.done()); endseq
@@ -176,18 +163,8 @@ module [Module] test(TestHandler)
         endpar
         dump_range_SimRAM(rg_ram_ptr, output_jpeg_path, out_base_addr, extend(rg_out_count));
 
-        i_cfg_acc.read_reg_req("PERF0");
-        action
-            let perf0_rsp <- i_cfg_acc.read_reg_rsp();
-            rg_axil_rsp <= tpl_1(perf0_rsp);
-        endaction
-        print_fmt($format("Elapsed Cycles: %0d", rg_axil_rsp), GREEN);
-        i_cfg_acc.read_reg_req("PERF1");
-        action
-            let perf1_rsp <- i_cfg_acc.read_reg_rsp();
-            rg_axil_rsp <= tpl_1(perf1_rsp);
-        endaction
-        print_fmt($format("Processed Pixels: %0d", rg_axil_rsp), GREEN);
+        bjpeg_print_perf(i_cfg_acc, rg_axil_rsp, "PERF0", "Elapsed Cycles: %0d");
+        bjpeg_print_perf(i_cfg_acc, rg_axil_rsp, "PERF1", "Processed Pixels: %0d");
 
         action
             if (rg_out_count == 0) begin

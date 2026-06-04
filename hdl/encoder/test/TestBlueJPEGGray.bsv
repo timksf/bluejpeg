@@ -116,50 +116,10 @@ module [Module] test(TestHandler)
 
     // ---- sub-FSMs ----
 
-    // Feed pixels from SimRAM into DUT via AXI stream
-    // Interleaved format: one pixel per 64-bit word, R in low byte
-    // Truncate to 32 bits -> {0x00, B, G, R} per beat
-    Stmt feed_pixels = seq
-        rg_pixel_idx <= 0;
-        while (rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
-            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
-            Bit#(24) pixel = truncate(pack(word));
-            Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
-                unpack(pixel[23:16]),   //R
-                unpack(pixel[15:08]),   //G
-                unpack(pixel[07:00])    //B
-            );
-            YCbCr_t pix_ycbcr = YCbCr_t { 
-                y:  unpack(ycbcr_raw[23:16]),
-                cb: unpack(ycbcr_raw[15:08]),
-                cr: unpack(ycbcr_raw[07:00])
-            };
-            let is_last = (rg_pixel_idx == fromInteger(valueOf(n_pixels) - 1));
-            axis_tx.pkg.put(AXI4_Stream_Pkg {
-                data: pack(pix_ycbcr),
-                user: ?,
-                keep: unpack(-1),
-                dest: 0,
-                last: is_last
-            });
-            rg_pixel_idx <= rg_pixel_idx + 1;
-        endaction
-    endseq;
+    Stmt feed_pixels = ycbcr_pix_stmt(valueof(n_pixels), rg_ram_ptr, rg_pixel_idx, axis_tx);
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
 
-    //collect JPEG output bytes to RAM output region
-    Stmt collect_output = seq
-        while (!rg_finished) action
-            let pkg <- axis_out.pkg.get();
-            Bit#(8) b = pkg.data;
-            write_byte_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count), unpack(extend(b)));
-            rg_out_count <= rg_out_count + 1;
-            if (pkg.last) begin
-                print_fmt($format("Received TLAST, total bytes: %0d", rg_out_count + 1), GREEN);
-                rg_finished <= True;
-            end
-        endaction
-    endseq;
+    Stmt collect_output = axis2mm_sim32(out_base_addr, rg_ram_ptr, rg_out_count, rg_finished, axis_out);
     FSM fsm_collect <- mkFSM(collect_output);
 
     //poll CTRL register for done bit
@@ -181,17 +141,12 @@ module [Module] test(TestHandler)
         print_fmt($format("=== TestBlueJPEGGray start ==="), GREEN);
 
         // ---- phase 1: create SimRAM and load image ----
-        action
-            let ram <- create_SimRAM(fromInteger(valueOf(ram_words)), fromInteger(valueof(TDiv#(WordWidth, 8))));
-            rg_ram_ptr <= ram;
-        endaction
-        print_s("Loading image into SimRAM...", YELLOW);
-        action
-            let img <- create_ImageLoader(input_image_path);
-            rg_img_load_ptr <= img;
-        endaction
-        write_to_mem_interleaved_ImageLoader(rg_img_load_ptr, rg_ram_ptr, 0);
-        print_s("Image loaded", GREEN);
+        bjpeg_load_image(
+            input_image_path,
+            valueof(ram_words),
+            valueof(TDiv#(WordWidth, 8)),
+            rg_ram_ptr,
+            rg_img_load_ptr);
 
         // ---- phase 2: wait for table init ----
         print_s("Waiting for default table init...", YELLOW);
@@ -200,31 +155,16 @@ module [Module] test(TestHandler)
 
         // ---- phase 3: generate only luma Huffman codes ----
         print_s("Generating luma Huffman codes...", YELLOW);
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 0);  // DC_Luma
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 2);  // AC_Luma
+        bjpeg_trigger_codegen_luma(i_cfg_acc, rg_axil_rsp);
         print_s("Luma Huffman code generation complete", GREEN);
 
         // ---- phase 4: configure BlueJPEG ----
         print_s("Configuring BlueJPEG grayscale mode...", YELLOW);
-        action
-            Bit#(16) img_height = fromInteger(valueof(InputHeight));
-            Bit#(16) img_width  = fromInteger(valueof(InputWidth));
-            i_cfg_acc.write_reg_req("IMSZ", {img_height, img_width});
-        endaction
-        bjpeg_expect_wr_ok(i_cfg_acc);
-
-        // SUBSAMPLING: 4:4:4 = 0 (required when chroma is disabled)
-        i_cfg_acc.write_reg_req("SUBS", 0);
-        bjpeg_expect_wr_ok(i_cfg_acc);
+        bjpeg_configure_image(i_cfg_acc, valueof(InputWidth), valueof(InputHeight), 0);
 
         // ---- phase 5: start encoder ----
         print_s("Starting grayscale BlueJPEG encoder...", YELLOW);
-        action
-            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
-            Bit#(32) start_mask = 1 << start_bit;
-            i_cfg_acc.write_reg_req("CTRL", start_mask);
-        endaction
-        bjpeg_expect_wr_ok(i_cfg_acc);
+        bjpeg_start_encoder(i_cfg_acc);
 
         // ---- phase 6: feed pixels + collect output + poll done ----
         par
@@ -234,18 +174,8 @@ module [Module] test(TestHandler)
         endpar
         dump_range_SimRAM(rg_ram_ptr, output_jpeg_path, out_base_addr, extend(rg_out_count));
 
-        i_cfg_acc.read_reg_req("PERF0");
-        action
-            let perf0_rsp <- i_cfg_acc.read_reg_rsp();
-            rg_axil_rsp <= tpl_1(perf0_rsp);
-        endaction
-        print_fmt($format("Elapsed Cycles: %0d", rg_axil_rsp), GREEN);
-        i_cfg_acc.read_reg_req("PERF1");
-        action
-            let perf1_rsp <- i_cfg_acc.read_reg_rsp();
-            rg_axil_rsp <= tpl_1(perf1_rsp);
-        endaction
-        print_fmt($format("Processed Pixels: %0d", rg_axil_rsp), GREEN);
+        bjpeg_print_perf(i_cfg_acc, rg_axil_rsp, "PERF0", "Elapsed Cycles: %0d");
+        bjpeg_print_perf(i_cfg_acc, rg_axil_rsp, "PERF1", "Processed Pixels: %0d");
 
         print_fmt($format("Grayscale JPEG encoding complete, %0d bytes output", rg_out_count), GREEN);
         print_fmt($format("Output written to %s and SimRAM byte[%0d..]",

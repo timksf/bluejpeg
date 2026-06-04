@@ -112,8 +112,23 @@ module [Module] test(TestHandler)
     endrule
 
     Stmt feed_pixels    = ycbcr_pix_stmt(valueof(n_pixels), rg_ram_ptr, rg_pixel_idx, axis_tx);
-    Stmt collect_output = axis2mm_sim(out_base_addr, rg_ram_ptr, rg_out_count, rg_out_finished, axis_out);
-
+    Stmt collect_output = seq
+        while (!rg_finished) action
+            let pkg <- axis_out.pkg.get();
+            Bit#(8) b = pkg.data;
+            write_byte_SimRAM(
+                rg_ram_ptr,
+                out_base_addr + extend(rg_total_count),
+                unpack(extend(b))
+            );
+            rg_out_count <= rg_out_count + 1;
+            rg_total_count <= rg_total_count + 1;
+            if (pkg.last) begin
+                print_fmt($format("Frame %0d TLAST, bytes: %0d", rg_frame_idx + 1, rg_out_count + 1), GREEN);
+                rg_finished <= True;
+            end
+        endaction
+    endseq;
     FSM fsm_feed_pixels <- mkFSM(feed_pixels);
     FSM fsm_collect     <- mkFSM(collect_output);
     FSM fsm_wait_ready  <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
@@ -143,37 +158,23 @@ module [Module] test(TestHandler)
 
         print_fmt($format("=== TestBlueJPEGGrayConsecutive start ==="), GREEN);
 
-        action
-            let ram <- create_SimRAM(fromInteger(valueOf(ram_words)), fromInteger(valueof(TDiv#(WordWidth, 8))));
-            rg_ram_ptr <= ram;
-        endaction
-        print_s("Loading image into SimRAM...", YELLOW);
-        action
-            let img <- create_ImageLoader(input_image_path);
-            rg_img_load_ptr <= img;
-        endaction
-        write_to_mem_interleaved_ImageLoader(rg_img_load_ptr, rg_ram_ptr, 0);
-        print_s("Image loaded", GREEN);
+        bjpeg_load_image(
+            input_image_path,
+            valueof(ram_words),
+            valueof(TDiv#(WordWidth, 8)),
+            rg_ram_ptr,
+            rg_img_load_ptr);
 
         print_s("Waiting for default table init...", YELLOW);
         fsm_wait_ready.start();
         await(fsm_wait_ready.done());
 
         print_s("Generating luma Huffman codes...", YELLOW);
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 0);
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 2);
+        bjpeg_trigger_codegen_luma(i_cfg_acc, rg_axil_rsp);
         print_s("Luma Huffman code generation complete", GREEN);
 
         print_s("Configuring grayscale mode...", YELLOW);
-        action
-            Bit#(16) img_height = fromInteger(valueof(InputHeight));
-            Bit#(16) img_width  = fromInteger(valueof(InputWidth));
-            i_cfg_acc.write_reg_req("IMSZ", {img_height, img_width});
-        endaction
-        bjpeg_expect_wr_ok(i_cfg_acc);
-
-        i_cfg_acc.write_reg_req("SUBS", 0);
-        bjpeg_expect_wr_ok(i_cfg_acc);
+        bjpeg_configure_image(i_cfg_acc, valueof(InputWidth), valueof(InputHeight), 0);
 
         for (rg_frame_idx <= 0;
              rg_frame_idx < 2;
@@ -188,8 +189,7 @@ module [Module] test(TestHandler)
             print_fmt($format("Starting frame %0d", rg_frame_idx + 1), YELLOW);
             fsm_start_frame.start();
             await(fsm_start_frame.done());
-            print_fmt($format("Frame %0d accepted START and exposed input ready",
-                rg_frame_idx + 1), YELLOW);
+            print_fmt($format("Frame %0d accepted START and exposed input ready", rg_frame_idx + 1), YELLOW);
 
             par
                 seq fsm_feed_pixels.start(); await(fsm_feed_pixels.done()); endseq
@@ -208,10 +208,8 @@ module [Module] test(TestHandler)
 
         dump_range_SimRAM(rg_ram_ptr, output_jpeg_path, out_base_addr, extend(rg_total_count));
 
-        print_fmt($format("Two consecutive grayscale JPEG frames complete, total bytes: %0d",
-            rg_total_count), GREEN);
-        print_fmt($format("Output written to %s and SimRAM byte[%0d..]",
-            output_jpeg_path, out_base_addr), GREEN);
+        print_fmt($format("Two consecutive grayscale JPEG frames complete, total bytes: %0d", rg_total_count), GREEN);
+        print_fmt($format("Output written to %s and SimRAM byte[%0d..]", output_jpeg_path, out_base_addr), GREEN);
         print_fmt($format("=== TestBlueJPEGGrayConsecutive PASSED ==="), GREEN);
     endseq;
 
