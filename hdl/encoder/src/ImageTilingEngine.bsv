@@ -27,6 +27,7 @@ interface ImageTilingEngine_ifc#(type t, numeric type mcu_w, numeric type mcu_h)
     interface Get#(t) block_out;
 
     method Action set_img_width(Bit#(13) x);
+    method Action set_img_size(Bit#(13) w, Bit#(13) h);
     method Action start();
 endinterface
 
@@ -69,6 +70,8 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t
     Reg#(Bit#(buffer_addrw))    rg_buf_addr         <- mkRegU; /* address for writing to/reading from buffer */
     Reg#(Bit#(block_idx_w))     rg_block_idx        <- mkRegU; /* keeps track of pixel in MCU */
     Reg#(Bit#(line_w))          rg_curr_block       <- mkRegU; /* offs for current MCU in buffer */
+    Reg#(Bit#(13))              rg_frame_stripes    <- mkReg(0);
+    Reg#(Bit#(13))              rg_stripe_idx       <- mkReg(0);
 
     Reg#(Bool) rg_running   <- mkReg(False);
     Reg#(Bool) rg_output    <- mkRegU;
@@ -144,14 +147,39 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t
         rg_pix_cnt  <= 0;
         rg_buf_addr <= 0;
         rg_output   <= False;
-        rg_running  <= False;
+
+        if(rg_frame_stripes != 0 && rg_stripe_idx == rg_frame_stripes - 1) begin
+            rg_running    <= False;
+            rg_stripe_idx <= 0;
+        end else begin
+            rg_stripe_idx <= rg_stripe_idx + 1;
+        end
     endrule
+
+    function Action configure(Bit#(13) w, Bit#(13) h);
+        action
+            Bit#(line_w) w_trunc = truncate(w);
+            Bit#(13) stripes = 0;
+
+            if(h != 0)
+                stripes = (h + fromInteger(valueof(mcu_h) - 1)) / fromInteger(valueof(mcu_h));
+
+            rg_imgw <= w_trunc;
+            rg_buf_threshold <= zeroExtend(w_trunc) * fromInteger(valueof(mcu_h));
+            rg_frame_stripes <= stripes;
+            rg_stripe_idx <= 0;
+        endaction
+    endfunction
 
     method Action set_img_width(Bit#(13) w) = action
         Bit#(line_w) w_trunc = truncate(w);
         rg_imgw <= w_trunc;
         rg_buf_threshold <= zeroExtend(w_trunc) * fromInteger(valueof(mcu_h));
+        rg_frame_stripes <= 0;
+        rg_stripe_idx <= 0;
     endaction;
+
+    method Action set_img_size(Bit#(13) w, Bit#(13) h) = configure(w, h);
     
     method start if(!rg_running) = action
         rg_running  <= True;

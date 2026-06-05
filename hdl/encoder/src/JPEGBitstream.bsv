@@ -1,6 +1,7 @@
 package JPEGBitstream;
 
 import FIFO :: *;
+import FIFOF :: *;
 import GetPut :: *;
 import ClientServer :: *;
 import SpecialFIFOs :: *;
@@ -9,6 +10,7 @@ import Types :: *;
 
 interface JPEGBitstream_ifc;
     method Bool scan_done();
+    method Bool output_empty();
     method Action start_scan();
     interface Server#(HuffCode_t, Bit#(8)) data;
 endinterface
@@ -16,7 +18,7 @@ endinterface
 module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
 
     FIFO#(HuffCode_t) f_in;
-    FIFO#(Bit#(8))    f_out <- mkFIFO;
+    FIFOF#(Bit#(8))   f_out <- mkFIFOF;
 
     if(buffer_in)
         f_in <- mkFIFO;
@@ -96,6 +98,7 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
     endrule
 
     method Bool scan_done() = rg_done;
+    method Bool output_empty() = !f_out.notEmpty;
 
     method Action start_scan();
         rg_done <= False;

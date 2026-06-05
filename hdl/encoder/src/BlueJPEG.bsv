@@ -278,7 +278,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         fwriter.scan_data.put(tagged Valid b);
     endrule
 
-    rule r_scan_end (rg_state == S_FLUSH && stuffer.scan_done());
+    rule r_scan_end (rg_state == S_FLUSH && stuffer.scan_done() && stuffer.output_empty());
         fwriter.scan_data.put(tagged Invalid);
         rg_state <= S_DONE;
     endrule
@@ -418,7 +418,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             stuffer.start_scan();
 
             if(cfg.en_tiler) begin
-                img_tiler.set_img_width(truncate(width));
+                img_tiler.set_img_size(truncate(width), truncate(height));
                 img_tiler.start();
             end
 
