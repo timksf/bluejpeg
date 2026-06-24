@@ -12,6 +12,17 @@ from cocotbext.axi import AxiStreamBus, AxiStreamFrame, AxiStreamSink, AxiStream
 from PIL import Image
 
 
+AXI_RESP_OKAY = 0
+CTRL_ADDR = 0x04
+STS_ADDR = 0x08
+IMSZ_ADDR = 0x0C
+SUBS_ADDR = 0x10
+CGEN_ADDR = 0x14
+STS_RDY_BIT = 0
+STS_CGB_BIT = 1
+CGEN_TRIGGER = 0x80000000
+
+
 def load_bmp_array(path: Path) -> np.ndarray:
     image = Image.open(path).convert("RGB")
     return np.asarray(image, dtype=np.uint8)
@@ -113,6 +124,86 @@ async def wait_for_high(signal, clock, max_cycles: int, name: str):
     raise TimeoutError(f"Timed out waiting for {name}")
 
 
+def signal_is_high(signal) -> bool:
+    value = signal.value
+    return value.is_resolvable and bool(int(value))
+
+
+async def axi_lite_write(dut, addr: int, data: int):
+    dut.s_axi_cfg_awaddr.value = addr
+    dut.s_axi_cfg_awprot.value = 0
+    dut.s_axi_cfg_awvalid.value = 1
+    dut.s_axi_cfg_wdata.value = data
+    dut.s_axi_cfg_wstrb.value = 0xF
+    dut.s_axi_cfg_wvalid.value = 1
+    dut.s_axi_cfg_bready.value = 1
+
+    aw_done = False
+    w_done = False
+    while not (aw_done and w_done):
+        await RisingEdge(dut.clk)
+        if signal_is_high(dut.s_axi_cfg_awready):
+            aw_done = True
+            dut.s_axi_cfg_awvalid.value = 0
+        if signal_is_high(dut.s_axi_cfg_wready):
+            w_done = True
+            dut.s_axi_cfg_wvalid.value = 0
+
+    while True:
+        await RisingEdge(dut.clk)
+        if signal_is_high(dut.s_axi_cfg_bvalid):
+            response = int(dut.s_axi_cfg_bresp.value)
+            dut.s_axi_cfg_bready.value = 0
+            if response != AXI_RESP_OKAY:
+                raise AssertionError(f"AXI-lite write 0x{addr:08x} returned {response}")
+            return
+
+
+async def axi_lite_read(dut, addr: int) -> int:
+    dut.s_axi_cfg_araddr.value = addr
+    dut.s_axi_cfg_arprot.value = 0
+    dut.s_axi_cfg_arvalid.value = 1
+    dut.s_axi_cfg_rready.value = 1
+
+    while True:
+        await RisingEdge(dut.clk)
+        if signal_is_high(dut.s_axi_cfg_arready):
+            dut.s_axi_cfg_arvalid.value = 0
+            break
+
+    while True:
+        await RisingEdge(dut.clk)
+        if signal_is_high(dut.s_axi_cfg_rvalid):
+            response = int(dut.s_axi_cfg_rresp.value)
+            data = int(dut.s_axi_cfg_rdata.value)
+            dut.s_axi_cfg_rready.value = 0
+            if response != AXI_RESP_OKAY:
+                raise AssertionError(f"AXI-lite read 0x{addr:08x} returned {response}")
+            return data
+
+
+async def wait_status_bit(dut, bit_index: int, expected: int, max_reads: int, name: str):
+    for _ in range(max_reads):
+        status = await axi_lite_read(dut, STS_ADDR)
+        if ((status >> bit_index) & 1) == expected:
+            return status
+    raise TimeoutError(f"Timed out waiting for STS.{name}={expected}")
+
+
+async def configure_jpeg_core(dut, width: int, height: int):
+    await wait_status_bit(dut, STS_RDY_BIT, 1, 2000, "RDY")
+
+    for table_index in range(4):
+        await axi_lite_write(dut, CGEN_ADDR, CGEN_TRIGGER | table_index)
+        await wait_status_bit(dut, STS_CGB_BIT, 0, 2000, "CGB")
+
+    await axi_lite_write(dut, IMSZ_ADDR, (height << 16) | width)
+    await axi_lite_write(dut, SUBS_ADDR, 0)
+    await axi_lite_write(dut, CTRL_ADDR, 1)
+    await wait_for_high(dut.s_axis_tready, dut.clk, 200000, "s_axis_tready")
+    await axi_lite_write(dut, CTRL_ADDR, 0)
+
+
 def output_backpressure_pattern():
     return cycle(
         [
@@ -176,6 +267,17 @@ async def run_cmod_jpeg_core(dut, output_name: str, sink_pause_generator=None):
     dut.s_axis_tdata.setimmediatevalue(0)
     dut.s_axis_tvalid.setimmediatevalue(0)
     dut.s_axis_tlast.setimmediatevalue(0)
+    dut.s_axi_cfg_arvalid.setimmediatevalue(0)
+    dut.s_axi_cfg_araddr.setimmediatevalue(0)
+    dut.s_axi_cfg_arprot.setimmediatevalue(0)
+    dut.s_axi_cfg_rready.setimmediatevalue(0)
+    dut.s_axi_cfg_awvalid.setimmediatevalue(0)
+    dut.s_axi_cfg_awaddr.setimmediatevalue(0)
+    dut.s_axi_cfg_awprot.setimmediatevalue(0)
+    dut.s_axi_cfg_wvalid.setimmediatevalue(0)
+    dut.s_axi_cfg_wdata.setimmediatevalue(0)
+    dut.s_axi_cfg_wstrb.setimmediatevalue(0)
+    dut.s_axi_cfg_bready.setimmediatevalue(0)
 
     source = AxiStreamSource(AxiStreamBus.from_prefix(dut, "s_axis"), dut.clk, dut.rst)
     sink = AxiStreamSink(AxiStreamBus.from_prefix(dut, "m_axis"), dut.clk, dut.rst)
@@ -187,9 +289,7 @@ async def run_cmod_jpeg_core(dut, output_name: str, sink_pause_generator=None):
         await RisingEdge(dut.clk)
     dut.rst.value = 0
 
-    await with_timeout(wait_for_high(dut.init_done, dut.clk, 200000, "init_done"), 20, "ms")
-    if int(dut.init_error.value):
-        raise AssertionError("cmod_jpeg_core asserted init_error during startup")
+    await with_timeout(configure_jpeg_core(dut, width, height), 20, "ms")
 
     await source.send(AxiStreamFrame(payload))
     frame = await with_timeout(sink.recv(), 20, "ms")

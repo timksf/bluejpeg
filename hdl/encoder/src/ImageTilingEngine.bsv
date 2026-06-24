@@ -28,6 +28,7 @@ interface ImageTilingEngine_ifc#(type t, numeric type mcu_w, numeric type mcu_h)
 
     method Action set_img_width(Bit#(13) x);
     method Action start();
+    method Action rewind();
 endinterface
 
 
@@ -157,6 +158,15 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t
         rg_pix_cnt  <= 0;
         rg_buf_addr <= 0;
         rg_output   <= False;
+    endaction;
+
+    method Action rewind() = action
+        rg_running  <= False;
+        rg_pix_cnt  <= 0;
+        rg_buf_addr <= 0;
+        rg_output   <= False;
+        f_line.clear();
+        f_block.clear();
     endaction;
 
     interface line_in   = toPut(f_line);

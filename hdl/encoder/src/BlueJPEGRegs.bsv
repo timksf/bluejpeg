@@ -31,6 +31,7 @@ function PerfCounter_ifc#(n) reg_to_perfc(Reg#(Bit#(n)) r);
 endfunction
 
 interface BlueJPEGCfg_ifc;
+    method Action begin_frame();
     method Action finish();
     method Action error();
     method Action invalid_cfg();
@@ -158,6 +159,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     csr_region_rw('h1800, 1024, fn_table_read(HuffvalLumaAC),   fn_table_write(HuffvalLumaAC),   "HVALACL",  "HUFFVAL table for AC luma components.");
     csr_region_rw('h1C00, 1024, fn_table_read(HuffvalChromaAC), fn_table_write(HuffvalChromaAC), "HVALACC",  "HUFFVAL table for AC chroma components.");
 
+    method begin_frame      = action rg_done        <= 0;               endaction;
     method perf_rst         = action rg_perf_cycles <= 0; rg_perf_pixels <= 0; rg_perf_byteso <= 0; endaction;
 
     method table_sts(r, c)  = action rg_ready <= r; rg_cg_busy <= c;    endaction;

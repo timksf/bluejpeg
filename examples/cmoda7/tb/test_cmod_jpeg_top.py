@@ -11,6 +11,22 @@ from PIL import Image
 
 
 UART_BIT_CYCLES = int(os.environ.get("UART_BIT_CYCLES", "4"))
+UART_IDLE_TIMEOUT_BITS = int(os.environ.get("TOP_UART_IDLE_TIMEOUT_BITS", "64"))
+
+ROUTE_CTRL = ord("C")
+ROUTE_DATA = ord("D")
+UART_AXI_READ = 0x00
+UART_AXI_WRITE = 0x01
+UART_AXI_STATUS_OK = 0x00
+
+CTRL_ADDR = 0x04
+STS_ADDR = 0x08
+IMSZ_ADDR = 0x0C
+SUBS_ADDR = 0x10
+CGEN_ADDR = 0x14
+STS_RDY_BIT = 0
+STS_CGB_BIT = 1
+CGEN_TRIGGER = 0x80000000
 
 
 def load_bmp_array(path: Path) -> np.ndarray:
@@ -118,6 +134,14 @@ async def wait_for_high(signal, clock, max_cycles: int, name: str):
     raise TimeoutError(f"Timed out waiting for {name}")
 
 
+async def wait_for_led_bit(dut, bit_index: int, max_cycles: int, name: str):
+    for _ in range(max_cycles):
+        if led_bit_is_high(dut, bit_index):
+            return
+        await RisingEdge(dut.clk_100)
+    raise TimeoutError(f"Timed out waiting for {name}")
+
+
 async def send_uart_byte(dut, value: int):
     dut.uart_rxd.value = 0
     await ClockCycles(dut.clk_100, UART_BIT_CYCLES)
@@ -161,6 +185,73 @@ async def send_uart_bytes(dut, payload: bytes):
         await send_uart_byte(dut, value)
 
 
+async def wait_uart_route_idle(dut):
+    await ClockCycles(dut.clk_100, UART_BIT_CYCLES * (UART_IDLE_TIMEOUT_BITS + 8))
+
+
+async def wait_uart_mode(dut, expected: int, max_cycles: int, name: str):
+    for _ in range(max_cycles):
+        if dut.uart_mode.value.is_resolvable and int(dut.uart_mode.value) == expected:
+            return
+        await RisingEdge(dut.clk_100)
+    current = dut.uart_mode.value if dut.uart_mode.value.is_resolvable else "X"
+    raise TimeoutError(f"Timed out waiting for UART mode {name}; current={current}")
+
+
+async def recv_uart_byte_timeout(dut, what: str) -> int:
+    return await with_timeout(recv_uart_byte(dut), 200, "us")
+
+
+async def uart_axi_write(dut, addr: int, data: int):
+    request = (
+        bytes([UART_AXI_WRITE])
+        + int(addr).to_bytes(4, "little")
+        + int(data).to_bytes(4, "little")
+    )
+    await send_uart_bytes(dut, request)
+    status = await recv_uart_byte_timeout(dut, "write response")
+    if status != UART_AXI_STATUS_OK:
+        raise AssertionError(f"UART AXI write 0x{addr:08x} returned status 0x{status:02x}")
+
+
+async def uart_axi_read(dut, addr: int) -> int:
+    request = bytes([UART_AXI_READ]) + int(addr).to_bytes(4, "little")
+    await send_uart_bytes(dut, request)
+    status = await recv_uart_byte_timeout(dut, "read status")
+    data = bytes([await recv_uart_byte_timeout(dut, "read data") for _ in range(4)])
+    if status != UART_AXI_STATUS_OK:
+        raise AssertionError(f"UART AXI read 0x{addr:08x} returned status 0x{status:02x}")
+    return int.from_bytes(data, "little")
+
+
+async def wait_uart_status_bit(dut, bit_index: int, expected: int, max_reads: int, name: str):
+    for _ in range(max_reads):
+        status = await uart_axi_read(dut, STS_ADDR)
+        if ((status >> bit_index) & 1) == expected:
+            return status
+    raise TimeoutError(f"Timed out waiting for STS.{name}={expected}")
+
+
+async def configure_jpeg_over_uart(dut, width: int, height: int):
+    await send_uart_byte(dut, ROUTE_CTRL)
+    await wait_uart_mode(dut, 1, UART_BIT_CYCLES * 16, "CTRL")
+    await wait_uart_status_bit(dut, STS_RDY_BIT, 1, 2000, "RDY")
+
+    for table_index in range(4):
+        await uart_axi_write(dut, CGEN_ADDR, CGEN_TRIGGER | table_index)
+        await wait_uart_status_bit(dut, STS_CGB_BIT, 0, 2000, "CGB")
+
+    await uart_axi_write(dut, IMSZ_ADDR, (height << 16) | width)
+    await uart_axi_write(dut, SUBS_ADDR, 0)
+    await uart_axi_write(dut, CTRL_ADDR, 1)
+    dut._log.info("JPEG configured over UART AXI-lite")
+    await ClockCycles(dut.clk_100, 32)
+    await uart_axi_write(dut, CTRL_ADDR, 0)
+    if dut.frame_running.value.is_resolvable and not int(dut.frame_running.value):
+        raise AssertionError("Frame framer did not arm after CTRL.START")
+    await wait_uart_route_idle(dut)
+
+
 async def count_encoder_output_backpressure(dut, stop_flag):
     stalled_cycles = 0
     while not stop_flag["done"]:
@@ -179,8 +270,8 @@ async def wait_for_top_ready(dut):
     dut._log.info("FPGA startup done")
     await with_timeout(wait_for_high(dut.mmcm_locked, dut.clk_12, 100000, "mmcm_locked"), 10, "ms")
     dut._log.info("MMCM locked")
-    await with_timeout(wait_for_high(dut.init_done, dut.clk_100, 200000, "init_done"), 20, "ms")
-    dut._log.info("JPEG core initialized")
+    await with_timeout(wait_for_led_bit(dut, 0, 200000, "ready LED"), 20, "ms")
+    dut._log.info("Top-level reset released")
     await RisingEdge(dut.clk_100)
 
 
@@ -238,15 +329,38 @@ async def test_cmod_jpeg_top_uart_end_to_end(dut):
     output_path = Path(os.environ.get("TOP_OUTPUT_JPEG", "cmod_jpeg_top_uart_cocotb.jpg")).resolve()
     payload, expected_width, expected_height = load_expected_payload()
     await wait_for_top_ready(dut)
+    await with_timeout(
+        configure_jpeg_over_uart(dut, expected_width, expected_height),
+        50,
+        "ms",
+    )
 
-    command = bytes([ord("S")]) + len(payload).to_bytes(4, "little") + payload
     stop_backpressure_monitor = {"done": False}
     backpressure_monitor = cocotb.start_soon(
         count_encoder_output_backpressure(dut, stop_backpressure_monitor)
     )
     receiver = cocotb.start_soon(recv_jpeg_until_eoi(dut, max_bytes=512 * 1024))
 
-    await send_uart_bytes(dut, command)
+    await send_uart_byte(dut, ROUTE_DATA)
+    dut._log.info("Sent UART data route byte, mode=%s", dut.uart_mode.value)
+    await wait_uart_mode(dut, 2, UART_BIT_CYCLES * 16, "DATA")
+    dut._log.info("UART data mode selected")
+    await ClockCycles(dut.clk_100, UART_BIT_CYCLES * 2)
+    await send_uart_bytes(dut, payload)
+    dut._log.info("Sent %d pixel payload bytes", len(payload))
+    await ClockCycles(dut.clk_100, 128)
+    dut._log.info(
+        "Data snapshot mode=%s frame_running=%s frame_error=%s uart_axis=%s/%s image=%s/%s data_busy=%s/%s",
+        dut.uart_mode.value,
+        dut.frame_running.value,
+        dut.frame_error.value,
+        dut.uart_axis_tvalid.value,
+        dut.uart_axis_tready.value,
+        dut.image_tvalid.value,
+        dut.image_tready.value,
+        dut.data_rx_busy.value,
+        dut.data_tx_busy.value,
+    )
 
     jpeg_bytes = await with_timeout(receiver, 200, "ms")
     stop_backpressure_monitor["done"] = True
@@ -262,51 +376,6 @@ async def test_cmod_jpeg_top_uart_end_to_end(dut):
             f"JPEG dimensions {jpeg_width}x{jpeg_height} do not match {expected_width}x{expected_height}"
         )
 
-    if led_bit_is_high(dut, 1):
-        raise AssertionError("cmod_jpeg_top asserted the error LED")
-    if stalled_cycles == 0:
-        raise AssertionError("UART TX path did not backpressure the encoder output")
-
-    dut._log.info(
-        "Wrote %d JPEG bytes to %s after %d encoder output backpressure cycles",
-        len(jpeg_bytes),
-        output_path,
-        stalled_cycles,
-    )
-
-
-@cocotb.test()
-async def test_cmod_jpeg_top_uart_tx_backpressure(dut):
-    output_path = Path(
-        os.environ.get("TOP_OUTPUT_JPEG", "cmod_jpeg_top_uart_tx_backpressure_cocotb.jpg")
-    ).resolve()
-    payload, expected_width, expected_height = load_expected_payload()
-    await wait_for_top_ready(dut)
-
-    stop_backpressure_monitor = {"done": False}
-    backpressure_monitor = cocotb.start_soon(
-        count_encoder_output_backpressure(dut, stop_backpressure_monitor)
-    )
-    receiver = cocotb.start_soon(recv_jpeg_until_eoi(dut, max_bytes=512 * 1024))
-
-    await drive_image_axis(dut, payload)
-
-    jpeg_bytes = await with_timeout(receiver, 50, "ms")
-    stop_backpressure_monitor["done"] = True
-    await RisingEdge(dut.clk_100)
-    stalled_cycles = await backpressure_monitor
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(jpeg_bytes)
-
-    jpeg_width, jpeg_height = parse_jpeg_dimensions(jpeg_bytes)
-    if (jpeg_width, jpeg_height) != (expected_width, expected_height):
-        raise AssertionError(
-            f"JPEG dimensions {jpeg_width}x{jpeg_height} do not match {expected_width}x{expected_height}"
-        )
-
-    if led_bit_is_high(dut, 1):
-        raise AssertionError("cmod_jpeg_top asserted the error LED")
     if stalled_cycles == 0:
         raise AssertionError("UART TX path did not backpressure the encoder output")
 

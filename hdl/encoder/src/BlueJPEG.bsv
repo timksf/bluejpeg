@@ -427,6 +427,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             fwriter.configure(width, height, eff_mode);
 
             fwriter.start();
+            csrs.internal.begin_frame();
             csrs.internal.perf_rst();
         end else begin
             csrs.internal.invalid_cfg();
@@ -441,6 +442,12 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     rule r_done (rg_state == S_DONE && fwriter.done());
         csrs.internal.finish();
+        if(cfg.en_tiler) begin
+            img_tiler.rewind();
+        end
+        rle.rewind();
+        huff.rewind();
+        stuffer.rewind();
         rg_state <= S_IDLE;
     endrule
 
