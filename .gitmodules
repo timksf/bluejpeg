@@ -19,3 +19,6 @@
 [submodule "dep/blueuart"]
 	path = dep/blueuart
 	url = https://github.com/timksf/blueuart.git
+[submodule "dep/bluelens"]
+	path = dep/bluelens
+	url = https://github.com/timksf/bluelens.git
