@@ -2,3 +2,4 @@ __pycache__
 .deps
 results.xml
 sim_build*
+.Xil
