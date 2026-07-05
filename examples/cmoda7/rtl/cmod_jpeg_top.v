@@ -36,6 +36,9 @@ module cmod_jpeg_top (
     wire uart_axis_tvalid;
     wire uart_axis_tlast;
     wire uart_axis_tready;
+    wire image_framer_s_tvalid;
+    wire image_framer_s_tlast;
+    wire image_framer_s_tready;
     wire [23:0] image_tdata;
     wire image_tvalid;
     wire image_tlast;
@@ -49,6 +52,8 @@ module cmod_jpeg_top (
     wire frame_start;
     wire frame_running;
     wire frame_error;
+    reg [31:0] image_bytes_seen;
+    reg image_frame_active;
 
     wire cfg_arready;
     wire cfg_arvalid;
@@ -69,6 +74,15 @@ module cmod_jpeg_top (
     wire cfg_bvalid;
     wire cfg_bready;
     wire [1:0] cfg_bresp;
+
+    wire image_byte_fire = uart_axis_tvalid && uart_axis_tready;
+    wire image_input_last = image_frame_active && ((image_bytes_seen + 32'd1) >= frame_bytes);
+
+    assign image_framer_s_tvalid = uart_axis_tvalid && image_frame_active;
+    assign image_framer_s_tlast = image_input_last;
+    assign uart_axis_tready = image_frame_active && image_framer_s_tready;
+    assign frame_running = image_frame_active;
+    assign frame_error = 1'b0;
 
     STARTUPE2 i_STARTUPE2 (
         .EOS(startup_done)
@@ -154,6 +168,21 @@ module cmod_jpeg_top (
     assign core_rst = rst_sync[2];
     assign core_rstn = ~core_rst;
 
+    always @(posedge clk_100) begin
+        if (core_rst) begin
+            image_bytes_seen <= 32'd0;
+            image_frame_active <= 1'b0;
+        end else if (frame_start) begin
+            image_bytes_seen <= 32'd0;
+            image_frame_active <= frame_bytes != 32'd0;
+        end else if (image_byte_fire && image_input_last) begin
+            image_bytes_seen <= 32'd0;
+            image_frame_active <= 1'b0;
+        end else if (image_byte_fire) begin
+            image_bytes_seen <= image_bytes_seen + 32'd1;
+        end
+    end
+
     mkCmodUartModeSwitch uart_mode_switch_inst (
         .aclk(clk_100),
         .aresetn(core_rstn),
@@ -236,16 +265,14 @@ module cmod_jpeg_top (
     mkCmodAxis8ToAxis24Frame image_framer_inst (
         .aclk(clk_100),
         .aresetn(core_rstn),
-        .frame_bytes_frame_bytes(frame_bytes),
-        .frame_start_frame_start(frame_start),
-        .S_AXIS_tready(uart_axis_tready),
-        .S_AXIS_tvalid(uart_axis_tvalid),
+        .S_AXIS_tready(image_framer_s_tready),
+        .S_AXIS_tvalid(image_framer_s_tvalid),
         .S_AXIS_tdata(uart_axis_tdata),
         .S_AXIS_tuser(1'b0),
         .S_AXIS_tkeep(1'b1),
         .S_AXIS_tDest(4'b0000),
         .S_AXIS_tid(8'b0000_0000),
-        .S_AXIS_tlast(uart_axis_tlast),
+        .S_AXIS_tlast(image_framer_s_tlast),
         .M_AXIS_tvalid(image_tvalid),
         .M_AXIS_tready(image_tready),
         .M_AXIS_tdata(image_tdata),
@@ -253,9 +280,7 @@ module cmod_jpeg_top (
         .M_AXIS_tuser(),
         .M_AXIS_tkeep(),
         .M_AXIS_tDest(),
-        .M_AXIS_tid(),
-        .frame_running(frame_running),
-        .frame_error(frame_error)
+        .M_AXIS_tid()
     );
 
     cmod_jpeg_core jpeg_core_inst (

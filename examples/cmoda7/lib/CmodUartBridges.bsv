@@ -1,6 +1,7 @@
 package CmodUartBridges;
 
 import AXI4_Stream :: *;
+import AXIStreamConverters :: *;
 import FIFOF :: *;
 import GetPut :: *;
 import UartAxiLiteMaster :: *;
@@ -55,17 +56,6 @@ interface CmodUartModeSwitch;
     (* always_ready *) method Bit#(2) mode();
 endinterface
 
-interface AXIStreamUpConverter#(numeric type inwidth, numeric type outwidth, numeric type userwidth);
-    (* always_enabled *) method Action frame_bytes((* port="frame_bytes" *) Bit#(32) value);
-    (* always_enabled *) method Action frame_start((* port="frame_start" *) Bool value);
-
-    (* prefix="S_AXIS" *) interface AXI4_Stream_Rd_Fab#(inwidth, userwidth) s_axis;
-    (* prefix="M_AXIS" *) interface AXI4_Stream_Wr_Fab#(outwidth, userwidth) m_axis;
-
-    (* always_ready *) method Bool frame_running();
-    (* always_ready *) method Bool frame_error();
-endinterface
-
 function UartPrescaler cmod_uart_prescaler();
     return `CMOD_UART_PRESCALER;
 endfunction
@@ -83,26 +73,6 @@ function AXI4_Stream_Pkg#(8, 1) uart_byte_to_axis(Bit#(8) data);
         id:   0,
         last: True
     };
-endfunction
-
-function AXI4_Stream_Pkg#(outwidth, userwidth) axis_default(Bit#(outwidth) data, Bool last);
-    return AXI4_Stream_Pkg {
-        data: data,
-        user: 0,
-        keep: '1,
-        dest: 0,
-        id:   0,
-        last: last
-    };
-endfunction
-
-function Bit#(outwidth) insert_axis_chunk(Bit#(outwidth) word, UInt#(16) lane, Bit#(inwidth) data)
-    provisos(Add#(a__, inwidth, outwidth));
-    Bit#(16) shift_bits = pack(lane) * fromInteger(valueOf(inwidth));
-    Bit#(inwidth) chunk_mask = '1;
-    Bit#(outwidth) mask = zeroExtend(chunk_mask) << shift_bits;
-    Bit#(outwidth) chunk = zeroExtend(data) << shift_bits;
-    return (word & ~mask) | chunk;
 endfunction
 
 (* synthesize, default_clock_osc="aclk", default_reset="aresetn", clock_prefix="" *)
@@ -205,83 +175,9 @@ module mkCmodUartModeSwitch(CmodUartModeSwitch);
     method Bit#(2) mode = pack(rg_mode);
 endmodule
 
-module mkAXIStreamUpConverter#(Integer in_buffer, Integer out_buffer)(AXIStreamUpConverter#(inwidth, outwidth, userwidth))
-    provisos(
-        Add#(a__, inwidth, outwidth),
-        Div#(inwidth, 8, inbytes),
-        Mul#(inwidth, ratio, outwidth),
-        Div#(outwidth, 8, outbytes)
-    );
-
-    AXI4_Stream_Rd#(inwidth, userwidth) in_stream <- mkAXI4_Stream_Rd(in_buffer);
-    AXI4_Stream_Wr#(outwidth, userwidth) out_stream <- mkAXI4_Stream_Wr(out_buffer);
-
-    Reg#(Bit#(32)) rg_frame_bytes <- mkReg(0);
-    Reg#(Bit#(32)) rg_seen_bytes <- mkReg(0);
-    Reg#(UInt#(16)) rg_lane <- mkReg(0);
-    Reg#(Bit#(outwidth)) rg_word <- mkReg(0);
-    Reg#(Bool) rg_running <- mkReg(False);
-    Reg#(Bool) rg_error <- mkReg(False);
-    Wire#(Bit#(32)) w_frame_bytes <- mkDWire(0);
-    Wire#(Bool) w_frame_start <- mkDWire(False);
-
-    Integer chunks_per_output = valueOf(ratio);
-    Integer input_bytes = valueOf(inbytes);
-
-    rule rconvert if(rg_running);
-        let p <- in_stream.pkg.get();
-        Bit#(outwidth) next_word = insert_axis_chunk(rg_word, rg_lane, p.data);
-        Bit#(32) next_seen = rg_seen_bytes + fromInteger(input_bytes);
-        Bool frame_last = next_seen >= rg_frame_bytes;
-        Bool output_complete = rg_lane == fromInteger(chunks_per_output - 1);
-        Bool partial_frame_last = frame_last && !output_complete;
-
-        rg_seen_bytes <= next_seen;
-
-        if(output_complete) begin
-            out_stream.pkg.put(axis_default(next_word, frame_last));
-            if(frame_last) begin
-                rg_running <= False;
-            end
-            rg_word <= 0;
-            rg_lane <= 0;
-        end else if(partial_frame_last) begin
-            rg_running <= False;
-            rg_error <= True;
-            rg_word <= 0;
-            rg_lane <= 0;
-        end else begin
-            rg_word <= next_word;
-            rg_lane <= rg_lane + 1;
-        end
-    endrule
-
-    rule rstart if(w_frame_start);
-        rg_frame_bytes <= w_frame_bytes;
-        rg_running <= w_frame_bytes != 0;
-        rg_error <= rg_error || (w_frame_bytes == 0);
-        rg_seen_bytes <= 0;
-        rg_lane <= 0;
-        rg_word <= 0;
-    endrule
-
-    method Action frame_bytes(Bit#(32) value);
-        w_frame_bytes <= value;
-    endmethod
-
-    method Action frame_start(Bool value);
-        w_frame_start <= value;
-    endmethod
-
-    interface s_axis = in_stream.fab;
-    interface m_axis = out_stream.fab;
-    method Bool frame_running = rg_running;
-    method Bool frame_error = rg_error;
-endmodule
-
 (* synthesize, default_clock_osc="aclk", default_reset="aresetn", clock_prefix="" *)
 module mkCmodAxis8ToAxis24Frame(AXIStreamUpConverter#(8, 24, 1));
-    let converter <- mkAXIStreamUpConverter(32, 4);
+    let converter <- mkAXIStreamUpConverter();
     return converter;
 endmodule
 

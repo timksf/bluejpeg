@@ -9,6 +9,7 @@ import Vector :: *;
 
 import BDPI :: *;
 import Types :: *;
+import Util :: *;
 import PrintUtil :: *;
 import TestHelper :: *;
 import SimRAM_AXI :: *;

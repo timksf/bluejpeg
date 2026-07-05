@@ -51,7 +51,8 @@ module [Module] test(TestHandler);
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
-    DCT2D_ifc#(12) dut <- mkDCT2D_12b;
+    NumProxy#(8) f_scale = ?;
+    DCT2D_ifc#(12) dut <- mkDCT2D(f_scale, False);
     
     Reg#(Bit#(32)) rg_counter <- mkReg(0);
     Reg#(Bit#(32)) rg_errors <- mkReg(0);
@@ -141,7 +142,8 @@ module [Module] testOpt(TestHandler);
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
-    DCT2DOpt_ifc#(12) dut <- mkDCT2D_Optimized_12b;
+    NumProxy#(8) f_scale = ?;
+    DCT2DOpt_ifc#(12) dut <- mkDCT2D_Opt(f_scale, False, True, False, True);
     
     Reg#(Bit#(32)) rg_counter <- mkReg(0);
     Reg#(Bit#(32)) rg_errors <- mkReg(0);

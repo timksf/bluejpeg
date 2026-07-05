@@ -4,16 +4,11 @@ import StmtFSM :: *;
 
 import TestHelper :: *;
 import PrintUtil :: *;
-import BlueJPEG :: *;
-import BlueAXI :: *;
-import SimRAM_AXI :: *;
 
 (* synthesize *)
 module [Module] mkTestsMainTest(TestHelper::TestHandler);
 
     function print_s = print_mod_pre_color_t_s;
-
-    BlueJPEG dut <- mkBlueJPEG();
 
     Stmt s = {
         seq
