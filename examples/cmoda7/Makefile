@@ -8,10 +8,15 @@ SIM ?= icarus
 WAVES ?= 0
 CMOD_UART_PRESCALER ?= 100
 CMOD_UART_IDLE_TIMEOUT_CYCLES ?= 10000000
+CMOD_SYNTH_SCRIPT ?= $(CURDIR)/synth.tcl
 
 MAIN_MODULE := Encoder
 TOP_MODULE := mkMiniJPEGEncoder
 PROJECT_NAME := MiniJPEGEncoder
+FULLHD_COLOR_MAIN_MODULE := CmodFullHDColorEncoder
+FULLHD_COLOR_TOP_MODULE := mkCmodFullHDColorJPEGEncoder
+FULLHD_COLOR_PROJECT_NAME := CmodFullHDColorJPEGEncoder
+FULLHD_COLOR_SCRIPT := $(CURDIR)/synth_fullhd_color.tcl
 
 SRCDIR := $(CURDIR)/lib
 BUILDDIR := $(CURDIR)/build
@@ -21,7 +26,7 @@ EXTRA_FLAGS += -D "CMOD_UART_IDLE_TIMEOUT_CYCLES=$(CMOD_UART_IDLE_TIMEOUT_CYCLES
 VERILOGDIR_EXTRAS += $(CURDIR)/rtl
 PART := xc7a35tcpg236-1
 CONSTRAINTS := $(CURDIR)/cmoda7.xdc
-SCRIPT := $(CURDIR)/synth.tcl
+SCRIPT := $(CMOD_SYNTH_SCRIPT)
 
 include $(ENCODER_DIR)/Makefile
 
@@ -32,9 +37,17 @@ COCOTB_UART_PRESCALER ?= 4
 COCOTB_UART_IDLE_TIMEOUT_CYCLES ?= 256
 CMOD_BSC_VERILOG_FLAGS := $(filter-out -sim,$(COMPLETE_FLAGS))
 
-.PHONY: compile_cmod_uart_bridges
+.PHONY: compile_cmod_uart_bridges fullhd_color_bitstream
 
 compile_top: compile_cmod_uart_bridges
+
+fullhd_color_bitstream:
+	$(MAKE) SIM_TYPE=VERILOG \
+		MAIN_MODULE=$(FULLHD_COLOR_MAIN_MODULE) \
+		TOP_MODULE=$(FULLHD_COLOR_TOP_MODULE) \
+		PROJECT_NAME=$(FULLHD_COLOR_PROJECT_NAME) \
+		CMOD_SYNTH_SCRIPT=$(FULLHD_COLOR_SCRIPT) \
+		vivado_tcl
 
 compile_cmod_uart_bridges: $(BUILDDIR)/bsc_defines | directories
 	$(BSV) -elab -verilog $(CMOD_BSC_VERILOG_FLAGS) $(BSC_FLAGS) -g mkCmodUartAxisBridge -u $(SRCDIR)/CmodUartBridges.bsv
