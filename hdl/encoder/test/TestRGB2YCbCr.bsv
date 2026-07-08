@@ -16,11 +16,21 @@ import RGB2YCbCr :: *;
 import TestHelper :: *;
 import SimRAM_AXI :: *;
 
-String input_image_path = "../../../assets/sample_1920x1280.bmp"; //`IM_PATH;
+String input_image_path = "../../../assets/sample_192x192.bmp"; //`IM_PATH;
 String output_image_path = "../result.png"; //`RES_PATH;
 
-typedef 1920 InputWidth;
-typedef 1280 InputHeight;
+typedef 192 InputWidth;
+typedef 192 InputHeight;
+
+function Stmt axil_write_checked(AXI4_Lite_Master_Wr#(32, 32) wr, Bit#(32) addr, Bit#(32) data);
+    return seq
+        axi4_lite_write(wr, addr, data);
+        action
+            let rsp <- axi4_lite_write_response(wr);
+            if(rsp != OKAY) $fatal();
+        endaction
+    endseq;
+endfunction
 
 
 module [Module] mkTestRGB2YCbCr(TestHandler);
@@ -80,13 +90,13 @@ module [Module] simpleTest(TestHandler);
     Stmt s = seq
         print_mod_pre_color_t_s("Start", GREEN);
         //configure coefficients
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_a_offs), pack(extend(conv_params.a)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_log2b_offs), pack(extend(conv_params.log2_b)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_c_offs), pack(extend(conv_params.c)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_d_offs), pack(extend(conv_params.d)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_e_offs), pack(extend(conv_params.e)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_a_offs), pack(extend(conv_params.a)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_log2b_offs), pack(extend(conv_params.log2_b)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_c_offs), pack(extend(conv_params.c)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_d_offs), pack(extend(conv_params.d)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_e_offs), pack(extend(conv_params.e)));
         //start
-        axi4_lite_write(config_wr, fromInteger(cfg_start_offs), 1);
+        axil_write_checked(config_wr, fromInteger(cfg_start_offs), 1);
         //dispatch data
         action
             RGB_t rgb = RGB_t { r : 24, g : 12, b : 77 };
@@ -102,7 +112,7 @@ module [Module] simpleTest(TestHandler);
         action
             let res <- axis_rx.pkg.get();
             YCbCr_t ycbcr = unpack(res.data);
-            Bit#(32) ref_raw = rgb2ycbcr_model(24, 12, 77);
+            Bit#(32) ref_raw = rgb2ycbcr_ref(24, 12, 77);
             YCbCr_t ref_res = YCbCr_t { 
                 y:  unpack(truncate((ref_raw & 'hFF0000) >> 16)),
                 cb: unpack(truncate((ref_raw & 'hFF00) >> 8)),
@@ -251,13 +261,13 @@ module [Module] imageTest(TestHandler)
         print_s("Finished writing image to RAM", GREEN);
 
         //configure converter
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_a_offs), pack(extend(conv_params.a)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_log2b_offs), pack(extend(conv_params.log2_b)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_c_offs), pack(extend(conv_params.c)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_d_offs), pack(extend(conv_params.d)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_e_offs), pack(extend(conv_params.e)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_a_offs), pack(extend(conv_params.a)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_log2b_offs), pack(extend(conv_params.log2_b)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_c_offs), pack(extend(conv_params.c)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_d_offs), pack(extend(conv_params.d)));
+        axil_write_checked(config_wr, fromInteger(cfg_coeff_e_offs), pack(extend(conv_params.e)));
         //start
-        axi4_lite_write(config_wr, fromInteger(cfg_start_offs), 1);
+        axil_write_checked(config_wr, fromInteger(cfg_start_offs), 1);
 
         //now start the MM2S and S2MM systems
         mem_master_rd.server.request.put(rq_rd);

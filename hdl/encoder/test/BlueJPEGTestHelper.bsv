@@ -67,7 +67,7 @@ function Stmt bjpeg_poll_done(
     Reg#(Bool) rg_finished);
     return seq
         rg_rsp <= 0;
-        while (!unpack(rg_rsp[0])) seq
+        while (!unpack(rg_rsp[0]) && !rg_finished) seq
             cfg_acc.read_reg_req("STS");
             action
                 let sts_rsp <- cfg_acc.read_reg_rsp();
@@ -76,7 +76,10 @@ function Stmt bjpeg_poll_done(
                 rg_rsp <= zeroExtend(sts_data[done_bit]);
             endaction
         endseq
-        print_mod_pre_color_t_s("DUT signaled done via STATUS register", GREEN);
+        if(unpack(rg_rsp[0]))
+            print_mod_pre_color_t_s("DUT signaled done via STATUS register", GREEN);
+        else
+            print_mod_pre_color_t_s("Output TLAST observed before STATUS.DONE", YELLOW);
         rg_finished <= True;
     endseq;
 endfunction

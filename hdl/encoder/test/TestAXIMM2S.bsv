@@ -21,6 +21,16 @@ String output_image_path = "../result.png"; //`RES_PATH;
 typedef 192 InputWidth;
 typedef 192 InputHeight;
 
+function Stmt axil_write_checked(AXI4_Lite_Master_Wr#(32, 32) wr, Bit#(32) addr, Bit#(32) data);
+    return seq
+        axi4_lite_write(wr, addr, data);
+        action
+            let rsp <- axi4_lite_write_response(wr);
+            if(rsp != OKAY) $fatal();
+        endaction
+    endseq;
+endfunction
+
 module [Module] mkTestAXIMM2S(TestHandler);
 
     function print_s = print_mod_pre_color_t_s;
@@ -51,7 +61,7 @@ module [Module] test(TestHandler)
         NumAlias#(aw, 64),
         NumAlias#(dw, 64),
         NumAlias#(amount, TMul#(InputWidth, InputHeight)), //we use one pixel per word for simplicity
-        NumAlias#(amount_bytes, TMul#(amount, TDiv#(dw, 8))),
+        NumAlias#(amount_bytes, TMul#(amount, TDiv#(24, 8))),
         NumAlias#(amountw, TLog#(amount_bytes))
     );
 
@@ -118,21 +128,12 @@ module [Module] test(TestHandler)
         print_s("Finished writing image to RAM", GREEN);
 
         //configure dut
-        axi4_lite_write(config_wr, fromInteger(cfg_start_addr_lo_offs), 'h00);
-        axi4_lite_write(config_wr, fromInteger(cfg_start_addr_hi_offs), 'h00);
-        axi4_lite_write(config_wr, fromInteger(cfg_tx_bytes_lo_offs), fromInteger(valueof(amount_bytes)));
-        axi4_lite_write(config_wr, fromInteger(cfg_tx_bytes_hi_offs), 'h00);
+        axil_write_checked(config_wr, fromInteger(cfg_start_addr_lo_offs), 'h00);
+        axil_write_checked(config_wr, fromInteger(cfg_start_addr_hi_offs), 'h00);
+        axil_write_checked(config_wr, fromInteger(cfg_tx_bytes_lo_offs), fromInteger(valueof(amount_bytes)));
+        axil_write_checked(config_wr, fromInteger(cfg_tx_bytes_hi_offs), 'h00);
         //start
-        axi4_lite_read(config_rd, fromInteger(cfg_cmd_control_offs));
-        action
-            let rsp <- axi4_lite_read_response(config_rd);
-            rAXILRsp <= rsp;
-        endaction
-        action
-            let ctrl = rAXILRsp;
-            ctrl[cfg_start_bit_offs] = 1'b1;
-            axi4_lite_write(config_wr, fromInteger(cfg_cmd_control_offs), ctrl);
-        endaction
+        axil_write_checked(config_wr, fromInteger(cfg_cmd_control_offs), 1 << cfg_start_bit_offs);
         
         //receive data from stream and finish if certain bit is set in config registers
         par
