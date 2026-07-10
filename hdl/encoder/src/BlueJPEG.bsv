@@ -52,6 +52,7 @@ typedef struct {
     NumProxy#(quant_scale)      _prx_qsc;
     NumProxy#(datapath_width)   _prx_dpw;
     Bool en_tiler;
+    Bool double_buffer_tiler;
     Bool en_chroma;
 } BlueJPEGCfg_t#(
     numeric type max_img_width,
@@ -145,7 +146,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     ImageTilingEngine_ifc#(YCbCr_t, 8, 8)   img_tiler = ?;
     if(cfg.en_tiler) begin
-        img_tiler   <- mkImageTilingEngine(cfg._prx_miw);
+        img_tiler   <- mkImageTilingEngine(cfg._prx_miw, cfg.double_buffer_tiler);
     end
     ChannelSplitter_ifc                     ch_splt     <- mkChannelSplitter;
     YBlockReorder_ifc                       y_reord     <- mkYBlockReorder(_prx_mbc, False);

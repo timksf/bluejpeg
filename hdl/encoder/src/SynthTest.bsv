@@ -81,7 +81,7 @@ endmodule
 module mkImageTilingEngine_1920(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
     NumProxy#(1920) max_width = ?;
     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
-    mkImageTilingEngine#(max_width) __int(ifc);
+    mkImageTilingEngine#(max_width, False) __int(ifc);
     return ifc;
 endmodule
 
@@ -89,7 +89,7 @@ endmodule
 // module mkImageTilingEngine_2560(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
 //     NumProxy#(2560) max_width = ?;
 //     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
-//     mkImageTilingEngine#(max_width) __int(ifc);
+//     mkImageTilingEngine#(max_width, False) __int(ifc);
 //     return ifc;
 // endmodule
 
@@ -97,7 +97,7 @@ endmodule
 // module mkImageTilingEngine_3840(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
 //     NumProxy#(3840) max_width = ?;
 //     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
-//     mkImageTilingEngine#(max_width) __int(ifc);
+//     mkImageTilingEngine#(max_width, False) __int(ifc);
 //     return ifc;
 // endmodule
 
@@ -115,14 +115,15 @@ module mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
     NumProxy#(16)   dpw = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
-        slow_clock : dct_clock,
-        slow_reset : dct_reset.new_rst,
-        _prx_miw   : maximw,
-        _prx_dsc   : fscale,
-        _prx_qsc   : fscale,
-        _prx_dpw   : dpw,
-        en_tiler   : True,
-        en_chroma  : True
+        slow_clock          : dct_clock,
+        slow_reset          : dct_reset.new_rst,
+        _prx_miw            : maximw,
+        _prx_dsc            : fscale,
+        _prx_qsc            : fscale,
+        _prx_dpw            : dpw,
+        en_tiler            : True,
+        double_buffer_tiler : False,
+        en_chroma           : True
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
@@ -145,14 +146,15 @@ module mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
     NumProxy#(16)   dpw = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
-        slow_clock : dct_clock,
-        slow_reset : dct_reset.new_rst,
-        _prx_miw   : maximw,
-        _prx_dsc   : fscale,
-        _prx_qsc   : fscale,
-        _prx_dpw   : dpw,
-        en_tiler   : True,
-        en_chroma  : True
+        slow_clock          : dct_clock,
+        slow_reset          : dct_reset.new_rst,
+        _prx_miw            : maximw,
+        _prx_dsc            : fscale,
+        _prx_qsc            : fscale,
+        _prx_dpw            : dpw,
+        en_tiler            : True,
+        double_buffer_tiler : False,
+        en_chroma           : True
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
@@ -175,14 +177,15 @@ module mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
     NumProxy#(16)   dpw = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
-        slow_clock : dct_clock,
-        slow_reset : dct_reset.new_rst,
-        _prx_miw   : maximw,
-        _prx_dsc   : fscale,
-        _prx_qsc   : fscale,
-        _prx_dpw   : dpw,
-        en_tiler   : True,
-        en_chroma  : False
+        slow_clock          : dct_clock,
+        slow_reset          : dct_reset.new_rst,
+        _prx_miw            : maximw,
+        _prx_dsc            : fscale,
+        _prx_qsc            : fscale,
+        _prx_dpw            : dpw,
+        en_tiler            : True,
+        double_buffer_tiler : False,
+        en_chroma           : False
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
@@ -205,14 +208,15 @@ module mkBlueJPEGGrayTop_720_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
     NumProxy#(16)   dpw = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
-        slow_clock : dct_clock,
-        slow_reset : dct_reset.new_rst,
-        _prx_miw   : maximw,
-        _prx_dsc   : fscale,
-        _prx_qsc   : fscale,
-        _prx_dpw   : dpw,
-        en_tiler   : True,
-        en_chroma  : False
+        slow_clock          : dct_clock,
+        slow_reset          : dct_reset.new_rst,
+        _prx_miw            : maximw,
+        _prx_dsc            : fscale,
+        _prx_qsc            : fscale,
+        _prx_dpw            : dpw,
+        en_tiler            : True,
+        double_buffer_tiler : False,
+        en_chroma           : False
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);

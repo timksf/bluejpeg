@@ -31,7 +31,8 @@ interface ImageTilingEngine_ifc#(type t, numeric type mcu_w, numeric type mcu_h)
 endinterface
 
 
-module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t, mcu_w, mcu_h))
+/* A second BRAM bank overlaps filling one line group with emitting the other. */
+module mkImageTilingEngine#(NumProxy#(max_img_width) _, Bool double_buffer)(ImageTilingEngine_ifc#(t, mcu_w, mcu_h))
     provisos(
         Bits#(t, bpp),
         Mul#(max_img_width, mcu_h, buffer_capacity),
@@ -61,17 +62,28 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t
     FIFO#(t) f_line     <- mkFIFO;
     FIFO#(t) f_block    <- mkFIFO;
 
-    BRAM1Port#(Bit#(buffer_addrw), t) bram_pixels <- mkBRAM1Server(cfg);
+    BRAM1Port#(Bit#(buffer_addrw), t) bram_pixels0 <- mkBRAM1Server(cfg);
+    BRAM1Port#(Bit#(buffer_addrw), t) bram_pixels1 = ?;
+    if(double_buffer) begin
+        bram_pixels1 <- mkBRAM1Server(cfg);
+    end
 
     Reg#(Bit#(line_w))          rg_imgw             <- mkRegU;
     Reg#(Bit#(buffer_addrw))    rg_buf_threshold    <- mkRegU;
-    Reg#(Bit#(buffer_addrw))    rg_pix_cnt          <- mkRegU;
-    Reg#(Bit#(buffer_addrw))    rg_buf_addr         <- mkRegU; /* address for writing to/reading from buffer */
+    Reg#(Bit#(buffer_addrw))    rg_wr_addr          <- mkRegU;
+    Reg#(Bit#(buffer_addrw))    rg_rd_addr          <- mkRegU;
+    Reg#(Bit#(buffer_addrw))    rg_rd_pix_cnt       <- mkRegU;
     Reg#(Bit#(block_idx_w))     rg_block_idx        <- mkRegU; /* keeps track of pixel in MCU */
     Reg#(Bit#(line_w))          rg_curr_block       <- mkRegU; /* offs for current MCU in buffer */
 
-    Reg#(Bool) rg_running   <- mkReg(False);
-    Reg#(Bool) rg_output    <- mkRegU;
+    Reg#(Bit#(1)) rg_wr_buf <- mkReg(0);
+    Reg#(Bit#(1)) rg_rd_buf <- mkReg(0);
+
+    Reg#(Bool) rg_buf0_ready <- mkReg(False);
+    Reg#(Bool) rg_buf1_ready <- mkReg(False);
+
+    Reg#(Bool) rg_running     <- mkReg(False);
+    Reg#(Bool) rg_rewind_read <- mkReg(False);
 
     /*
         We start filling a new MCU when all relevant pixels have been fetched
@@ -80,24 +92,18 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t
         of writing to the buffer
     */
 
-    /* Fill the buffer RAM with pixels */
-    rule r_drain_input if(rg_running && rg_pix_cnt < rg_buf_threshold && !rg_output);
-        let pix = f_line.first;
-        f_line.deq;
-        rg_pix_cnt <= rg_pix_cnt + 1;
-        if(rg_pix_cnt == rg_buf_threshold - 1) begin
-            /* buffer is now full, start building MCUs */
-            rg_block_idx    <= 0;
-            rg_buf_addr     <= 0;
-            rg_curr_block   <= 0;
-            rg_output       <= True;
-        end else begin
-            rg_buf_addr     <= rg_buf_addr + 1;
-        end
-        /* send write request for current pixel to BRAM controller */
-        write_to_bram(bram_pixels.portA, rg_buf_addr, pix);
-        // print_fmt($format("Writing %0X to BRAM at %0d", pix, rg_buf_addr), YELLOW);
-    endrule
+    function Action advance_write(Bit#(1) bank);
+        action
+            if(rg_wr_addr == rg_buf_threshold - 1) begin
+                rg_wr_addr <= 0;
+                if(double_buffer) rg_wr_buf <= ~rg_wr_buf;
+                if(bank == 0) rg_buf0_ready <= True;
+                else          rg_buf1_ready <= True;
+            end else begin
+                rg_wr_addr <= rg_wr_addr + 1;
+            end
+        endaction
+    endfunction
 
     /*
         When the buffer is full, we will be able to dispatch line_width / mcu_width blocks
@@ -105,46 +111,100 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t
         and the current index inside of the respective block while also modifying the 
         buffer address correctly
     */
-    rule r_process_block if(rg_running && rg_output && rg_curr_block < rg_imgw);
-        /* for debugging purposes */
-        let block_x = rg_block_idx % fromInteger(valueof(mcu_w));
-        let block_y = rg_block_idx / fromInteger(valueof(mcu_w));
+    function Action advance_read_request();
+        action
+            let next_addr = rg_rd_addr;
+            if((rg_block_idx & fromInteger(valueof(mcu_w) - 1)) == fromInteger(valueof(mcu_w) - 1)) begin
+                /* move to next scanline */
+                next_addr = next_addr + zeroExtend(rg_imgw) - fromInteger(valueof(mcu_w)) + 1;
+            end else begin
+                next_addr = next_addr + 1;
+            end
+            if(rg_block_idx == fromInteger(pixels_per_block - 1)) begin
+                /* move to start of next block */
+                let next_block_offs = rg_curr_block + fromInteger(valueof(mcu_w));
+                next_addr = zeroExtend(next_block_offs);
+                rg_curr_block <= next_block_offs;
+            end
+            rg_block_idx <= rg_block_idx + 1;
+            rg_rd_addr   <= next_addr;
+        endaction
+    endfunction
 
-        // print_fmt($format("Block %0d X %0d Y %0d Addr ", rg_curr_block>>fromInteger(valueof(log2_mcu_w)), block_x, block_y, rg_buf_addr), YELLOW);
+    function Action forward_pixel(t pix, Bit#(1) bank);
+        action
+            f_block.enq(pix);
+            if(rg_rd_pix_cnt == 1) begin
+                rg_rd_pix_cnt <= rg_buf_threshold;
+                rg_rewind_read <= True;
+                if(double_buffer) rg_rd_buf <= ~rg_rd_buf;
+                if(bank == 0) rg_buf0_ready <= False;
+                else          rg_buf1_ready <= False;
+            end else begin
+                rg_rd_pix_cnt <= rg_rd_pix_cnt - 1;
+            end
+        endaction
+    endfunction
 
-        let next_addr = rg_buf_addr;
-        if((rg_block_idx & fromInteger(valueof(mcu_w) - 1)) == fromInteger(valueof(mcu_w) - 1)) begin
-            /* move to next scanline */
-            next_addr = next_addr + zeroExtend(rg_imgw) - fromInteger(valueof(mcu_w)) + 1;
-        end else begin
-            next_addr = next_addr + 1;
-        end
-        if(rg_block_idx == fromInteger(pixels_per_block-1)) begin
-            /* move to start of next block */
-            let next_block_offs = rg_curr_block + fromInteger(valueof(mcu_w));
-            next_addr = zeroExtend(next_block_offs);
-            rg_curr_block <= next_block_offs;
-        end
-        rg_block_idx <= rg_block_idx + 1;
-        rg_buf_addr <= next_addr;
-
-        /* dispatch read request for current pixel */
-        read_req_to_bram(bram_pixels.portA, rg_buf_addr);
+    rule r_rewind_read (rg_running && rg_rewind_read);
+        rg_rd_addr     <= 0;
+        rg_block_idx   <= 0;
+        rg_curr_block  <= 0;
+        rg_rewind_read <= False;
     endrule
 
-    /* Forward BRAM read results to output fifo */
-    rule r_fwd_out if(rg_running && rg_output && rg_pix_cnt > 0);
-        let pix <- bram_pixels.portA.response.get();
-        f_block.enq(pix);
-        rg_pix_cnt <= rg_pix_cnt - 1;
-    endrule
+    if(double_buffer) begin
+        rule r_drain_input0 (rg_running && rg_wr_buf == 0 && !rg_buf0_ready);
+            let pix = f_line.first;
+            f_line.deq;
+            advance_write(0);
+            write_to_bram(bram_pixels0.portA, rg_wr_addr, pix);
+        endrule
 
-    rule r_finish if(rg_running && rg_output && rg_pix_cnt == 0 && rg_curr_block >= rg_imgw);
-        // print_s("Finished processing", BLUE);
-        rg_pix_cnt  <= 0;
-        rg_buf_addr <= 0;
-        rg_output   <= False;
-    endrule
+        rule r_drain_input1 (rg_running && rg_wr_buf == 1 && !rg_buf1_ready);
+            let pix = f_line.first;
+            f_line.deq;
+            advance_write(1);
+            write_to_bram(bram_pixels1.portA, rg_wr_addr, pix);
+        endrule
+
+        rule r_process_block0 (rg_running && !rg_rewind_read && rg_rd_buf == 0 && rg_buf0_ready && rg_curr_block < rg_imgw);
+            advance_read_request();
+            read_req_to_bram(bram_pixels0.portA, rg_rd_addr);
+        endrule
+
+        rule r_process_block1 (rg_running && !rg_rewind_read && rg_rd_buf == 1 && rg_buf1_ready && rg_curr_block < rg_imgw);
+            advance_read_request();
+            read_req_to_bram(bram_pixels1.portA, rg_rd_addr);
+        endrule
+
+        rule r_fwd_out0 (rg_running && !rg_rewind_read && rg_rd_buf == 0 && rg_buf0_ready && rg_rd_pix_cnt > 0);
+            let pix <- bram_pixels0.portA.response.get();
+            forward_pixel(pix, 0);
+        endrule
+
+        rule r_fwd_out1 (rg_running && !rg_rewind_read && rg_rd_buf == 1 && rg_buf1_ready && rg_rd_pix_cnt > 0);
+            let pix <- bram_pixels1.portA.response.get();
+            forward_pixel(pix, 1);
+        endrule
+    end else begin
+        rule r_drain_input (rg_running && !rg_buf0_ready);
+            let pix = f_line.first;
+            f_line.deq;
+            advance_write(0);
+            write_to_bram(bram_pixels0.portA, rg_wr_addr, pix);
+        endrule
+
+        rule r_process_block (rg_running && !rg_rewind_read && rg_buf0_ready && rg_curr_block < rg_imgw);
+            advance_read_request();
+            read_req_to_bram(bram_pixels0.portA, rg_rd_addr);
+        endrule
+
+        rule r_fwd_out (rg_running && !rg_rewind_read && rg_buf0_ready && rg_rd_pix_cnt > 0);
+            let pix <- bram_pixels0.portA.response.get();
+            forward_pixel(pix, 0);
+        endrule
+    end
 
     method Action set_img_width(Bit#(13) w) = action
         Bit#(line_w) w_trunc = truncate(w);
@@ -153,10 +213,17 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _)(ImageTilingEngine_ifc#(t
     endaction;
     
     method start if(!rg_running) = action
-        rg_running  <= True;
-        rg_pix_cnt  <= 0;
-        rg_buf_addr <= 0;
-        rg_output   <= False;
+        rg_running         <= True;
+        rg_wr_addr         <= 0;
+        rg_rd_addr         <= 0;
+        rg_rd_pix_cnt      <= rg_buf_threshold;
+        rg_block_idx       <= 0;
+        rg_curr_block      <= 0;
+        rg_wr_buf          <= 0;
+        rg_rd_buf          <= 0;
+        rg_buf0_ready      <= False;
+        rg_buf1_ready      <= False;
+        rg_rewind_read     <= False;
     endaction;
 
     interface line_in   = toPut(f_line);

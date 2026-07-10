@@ -71,14 +71,15 @@ module [Module] test(TestHandler)
     // ---- DUT: BlueJPEG ----
     BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, DPw) jpeg_cfg = 
         BlueJPEGCfg_t {
-            slow_clock : cur_clk,
-            slow_reset : cur_rst,
-            _prx_miw   : ?,
-            _prx_dsc   : ?,
-            _prx_qsc   : ?,
-            _prx_dpw   : ?,
-            en_tiler   : True,
-            en_chroma  : True
+            slow_clock          : cur_clk,
+            slow_reset          : cur_rst,
+            _prx_miw            : ?,
+            _prx_dsc            : ?,
+            _prx_qsc            : ?,
+            _prx_dpw            : ?,
+            en_tiler            : True,
+            double_buffer_tiler : False,
+            en_chroma           : True
         };
     BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
     let csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);

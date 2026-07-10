@@ -33,7 +33,7 @@ a ready-to-use core.
 
 #### Pipeline
 
-- [x] 8×8 block tiling - `mkImageTilingEngine` (BRAM line-buffer, configurable max width)
+- [x] 8×8 block tiling - `mkImageTilingEngine` (BRAM line-buffer, configurable max width, optional double buffering)
 - [x] Channel splitting - `mkChannelSplitter` (Y / Cb / Cr)
 - [x] DU dispatch - `mkDUDispatcher` (interleaves blocks per subsampling mode)
 - [x] Y block reorder - `mkYBlockReorder` (MCU pairing for 4:2:0)
