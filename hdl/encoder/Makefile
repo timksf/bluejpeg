@@ -27,6 +27,7 @@ ifeq ($(RUN_TEST),)
 # RUN_TEST=TestRGB2YCbCr
 # RUN_TEST=TestAXIMM2S
 # RUN_TEST=TestImageTiling
+# RUN_TEST=TestBankedMemory
 # RUN_TEST=TestTransposeBuffer
 # RUN_TEST=TestDCT1D
 # RUN_TEST=TestDCT2D
@@ -87,4 +88,3 @@ endif
 
 # Do not change: Include base makefile
 include $(BSV_TOOLS)/scripts/rules.mk
-
