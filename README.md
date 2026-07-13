@@ -66,6 +66,7 @@ a ready-to-use core.
 #### Utilities
 
 - [x] Transpose buffer - `mkTransposeBuffer`, `mkTransposeBufferOpt` (register or BRAM-based)
+- [x] [Banked memory](hdl/encoder/docs/BankedMemory.md) - configurable address mapping, fair same-bank arbitration, single/dual-port BRAM backends
 - [x] RGB to YCbCr conversion - `mkRGB2YCbCrConv` (standalone, not wired into main pipeline)
 
 #### Not yet completed

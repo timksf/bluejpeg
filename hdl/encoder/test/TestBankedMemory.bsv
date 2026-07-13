@@ -11,6 +11,8 @@ import TestHelper :: *;
 
 typedef 6 AddrWidth;
 typedef 5 BankAddrWidth;
+typedef 5 SharedAddrWidth;
+typedef 3 SharedBankAddrWidth;
 typedef 32 DataWidth;
 typedef 4 MaskWidth;
 
@@ -65,12 +67,34 @@ module [Module] mkTestBankedMemory(TestHandler);
     BankedAddressMapper_ifc#(2, 5, 3) i_contiguous_mapper <-
         mkBankedAddressMapper(contiguous_cfg);
 
+    BRAM_Configure shared_bram_cfg = defaultValue;
+    shared_bram_cfg.memorySize = 8;
+
+    BankedMemoryConfig_t shared_cfg = BankedMemoryConfig_t {
+        address_base     : 0,
+        memory_size      : 32,
+        bank_depth       : 8,
+        outstanding_reads: 4,
+        mapping          : BANK_MAP_INTERLEAVED
+    };
+
+    Vector#(4, BankedMemoryPort_ifc#(
+        1, SharedBankAddrWidth, DataWidth, MaskWidth)) i_shared_banks <-
+        replicateM(mkBankedMemoryBRAM1PortBE(shared_bram_cfg));
+    BankedMemoryAccessor_ifc#(3, SharedAddrWidth, DataWidth, MaskWidth) shared_dut <-
+        mkBankedMemoryAccessor(i_shared_banks, shared_cfg);
+
+    Vector#(4, BankedMemoryPort_ifc#(
+        2, SharedBankAddrWidth, DataWidth, MaskWidth)) i_shared_dual_banks <-
+        replicateM(mkBankedMemoryBRAM2PortBE(shared_bram_cfg));
+    BankedMemoryAccessor_ifc#(4, SharedAddrWidth, DataWidth, MaskWidth) shared_dual_dut <-
+        mkBankedMemoryAccessor(i_shared_dual_banks, shared_cfg);
+
     Reg#(UInt#(32)) rg_cycle      <- mkReg(0);
     Reg#(UInt#(32)) rg_read_start <- mkReg(0);
 
-    rule r_count_cycles;
-        rg_cycle <= rg_cycle + 1;
-    endrule
+    Reg#(Bool)                  rg_fairness_active  <- mkReg(False);
+    Vector#(3, Reg#(UInt#(8))) rg_fairness_accepts <- replicateM(mkReg(0));
 
     function BankedMemoryRequest_t#(addr_w, DataWidth, MaskWidth) write_req(
             Bit#(addr_w) address, Bit#(DataWidth) data, Bit#(MaskWidth) mask
@@ -91,6 +115,18 @@ module [Module] mkTestBankedMemory(TestHandler);
             write     : False
         };
     endfunction
+
+    rule r_count_cycles;
+        rg_cycle <= rg_cycle + 1;
+    endrule
+
+    for(Integer client = 0; client < 3; client = client + 1) begin
+        rule r_drive_fairness (rg_fairness_active);
+            shared_dut.port[client].request(write_req(
+                fromInteger(client * 4), fromInteger(client), '1));
+            rg_fairness_accepts[client] <= rg_fairness_accepts[client] + 1;
+        endrule
+    end
 
     Stmt test_seq = seq
         action
@@ -179,6 +215,78 @@ module [Module] mkTestBankedMemory(TestHandler);
         action
             let data <- dut.port[0].response();
             if(data != 'h55667788) $finish();
+        endaction
+
+        /* Three logical ports, fewer than four banks, may still select one bank together. */
+        par
+            shared_dut.port[0].request(write_req(0, 'h01010101, 'b1111));
+            shared_dut.port[1].request(write_req(4, 'h12121212, 'b1111));
+            shared_dut.port[2].request(write_req(8, 'h23232323, 'b1111));
+        endpar
+        par
+            shared_dut.port[0].request(read_req(0));
+            shared_dut.port[1].request(read_req(4));
+            shared_dut.port[2].request(read_req(8));
+        endpar
+        par
+            action
+                let data <- shared_dut.port[0].response();
+                if(data != 'h01010101) $finish();
+            endaction
+            action
+                let data <- shared_dut.port[1].response();
+                if(data != 'h12121212) $finish();
+            endaction
+            action
+                let data <- shared_dut.port[2].response();
+                if(data != 'h23232323) $finish();
+            endaction
+        endpar
+
+        /* Four logical ports share the two physical ports of one dual-port bank. */
+        par
+            shared_dual_dut.port[0].request(write_req(0, 'h30303030, 'b1111));
+            shared_dual_dut.port[1].request(write_req(4, 'h41414141, 'b1111));
+            shared_dual_dut.port[2].request(write_req(8, 'h52525252, 'b1111));
+            shared_dual_dut.port[3].request(write_req(12, 'h63636363, 'b1111));
+        endpar
+        par
+            shared_dual_dut.port[0].request(read_req(0));
+            shared_dual_dut.port[1].request(read_req(4));
+            shared_dual_dut.port[2].request(read_req(8));
+            shared_dual_dut.port[3].request(read_req(12));
+        endpar
+        par
+            action
+                let data <- shared_dual_dut.port[0].response();
+                if(data != 'h30303030) $finish();
+            endaction
+            action
+                let data <- shared_dual_dut.port[1].response();
+                if(data != 'h41414141) $finish();
+            endaction
+            action
+                let data <- shared_dual_dut.port[2].response();
+                if(data != 'h52525252) $finish();
+            endaction
+            action
+                let data <- shared_dual_dut.port[3].response();
+                if(data != 'h63636363) $finish();
+            endaction
+        endpar
+
+        /* Sustained same-bank traffic must make progress on every logical port. */
+        rg_fairness_active <= True;
+        delay(64);
+        rg_fairness_active <= False;
+        action
+            for(Integer client = 0; client < 3; client = client + 1) begin
+                if(rg_fairness_accepts[client] <= 12) begin
+                    print_fmt($format("Logical port %0d starved after %0d accepted requests",
+                        client, rg_fairness_accepts[client]), RED);
+                    $finish();
+                end
+            end
         endaction
 
         par
