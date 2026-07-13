@@ -2,258 +2,341 @@ package BankedMemory;
 
 import BRAM :: *;
 import FIFOF :: *;
-import GetPut :: *;
 import Vector :: *;
 
 typedef enum {
-    BANK_ARB_ROUND_ROBIN,
-    BANK_ARB_FIXED_PRIORITY
-} BankedMemoryArb_t deriving(Bits, Eq, FShow);
+    BANK_MAP_INTERLEAVED,
+    BANK_MAP_CONTIGUOUS
+} BankedMemoryMap_t deriving(Bits, Eq, FShow);
 
 typedef struct {
-    Bit#(bank_w) bank;
+    Integer address_base;
+    Integer memory_size;
+    Integer bank_depth;
+    Integer outstanding_reads;
+    BankedMemoryMap_t mapping;
+} BankedMemoryConfig_t;
+
+typedef struct {
     Bit#(addr_w) address;
     Bit#(data_w) data;
     Bit#(mask_w) write_mask;
     Bool write;
-    Bit#(tag_w) tag;
 } BankedMemoryRequest_t#(
-    numeric type bank_w,
     numeric type addr_w,
     numeric type data_w,
-    numeric type mask_w,
-    numeric type tag_w
+    numeric type mask_w
 ) deriving(Bits, Eq, FShow);
 
 typedef struct {
-    Bit#(data_w) data;
-    Bit#(tag_w) tag;
-} BankedMemoryResponse_t#(
-    numeric type data_w,
-    numeric type tag_w
+    Bit#(TLog#(n_banks)) bank;
+    Bit#(bank_addr_w) address;
+} BankedMemoryAccess_t#(
+    numeric type n_banks,
+    numeric type bank_addr_w
 ) deriving(Bits, Eq, FShow);
 
-/*
- * Buffered single-port backend. The signature intentionally matches the
- * request/response shape of BlueSRAM's RWIfc. A backend must retain a read
- * response until response() is called; use BlueSRAM's buffered mode.
- */
-interface BankedMemoryPort_ifc#(
+interface BankedAddressMapper_ifc#(
+    numeric type n_banks,
+    numeric type addr_w,
+    numeric type bank_addr_w
+);
+    method Bool in_range(Bit#(addr_w) address);
+    method BankedMemoryAccess_t#(n_banks, bank_addr_w) map_address(Bit#(addr_w) address);
+endinterface
+
+interface BankedMemoryRWPort_ifc#(
     numeric type addr_w,
     numeric type data_w,
     numeric type mask_w
 );
-    method Action request(Bit#(addr_w) address, Bit#(data_w) data,
-                          Bit#(mask_w) write_mask, Bool write);
+    method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req);
     method ActionValue#(Bit#(data_w)) response();
 endinterface
 
-interface BankedMemory_ifc#(
-    numeric type n_banks,
-    numeric type n_clients,
+/* One physical memory bank with N independently usable ports. */
+interface BankedMemoryPort_ifc#(
+    numeric type n_ports,
     numeric type addr_w,
     numeric type data_w,
-    numeric type mask_w,
-    numeric type tag_w
+    numeric type mask_w
 );
-    interface Vector#(n_clients, Put#(BankedMemoryRequest_t#(
-        TLog#(n_banks), addr_w, data_w, mask_w, tag_w))) request;
-    interface Vector#(n_clients, Get#(BankedMemoryResponse_t#(
-        data_w, tag_w))) response;
+    interface Vector#(n_ports, BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w)) port;
 endinterface
 
-typedef struct {
-    Bit#(TLog#(n_clients)) client;
-    Bit#(tag_w) tag;
-} BankedMemoryOwner_t#(
-    numeric type n_clients,
-    numeric type tag_w
-) deriving(Bits, Eq, FShow);
+/* N direct access lanes. Lane i always uses physical memory port i. */
+interface BankedMemoryAccessor_ifc#(
+    numeric type n_ports,
+    numeric type addr_w,
+    numeric type data_w,
+    numeric type mask_w
+);
+    interface Vector#(n_ports, BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w)) port;
+    method Bool in_range(Bit#(addr_w) address);
+endinterface
 
-/* Adapter for the standard Bluespec single-port byte-enable BRAM. */
-module mkBankedMemoryBRAMPort#(BRAM_Configure cfg)(BankedMemoryPort_ifc#(
-        addr_w, data_w, mask_w
-    )) provisos(
+module mkBankedAddressMapper#(
+        BankedMemoryConfig_t cfg
+    )(BankedAddressMapper_ifc#(n_banks, addr_w, bank_addr_w))
+    provisos(
+        Add#(1, banks_minus_one__, n_banks),
+        Add#(bank_index_pad__, TLog#(n_banks), addr_w),
+        Add#(bank_addr_w, bank_addr_pad__, addr_w),
+        Add#(bank_index_ext_pad__, TLog#(n_banks), TAdd#(addr_w, 1)),
+        Add#(bank_addr_w, bank_addr_ext_pad__, TAdd#(addr_w, 1))
+    );
+
+    method Bool in_range(Bit#(addr_w) address);
+        Bit#(TAdd#(addr_w, 1)) extended_address = zeroExtend(address);
+        return extended_address >= fromInteger(cfg.address_base) &&
+            extended_address < fromInteger(cfg.address_base + cfg.memory_size);
+    endmethod
+
+    method BankedMemoryAccess_t#(n_banks, bank_addr_w) map_address(Bit#(addr_w) address);
+        Bit#(TAdd#(addr_w, 1)) offset = zeroExtend(address) - fromInteger(cfg.address_base);
+        Bit#(TAdd#(addr_w, 1)) bank = 0;
+        Bit#(TAdd#(addr_w, 1)) local_address = 0;
+
+        if(cfg.mapping == BANK_MAP_INTERLEAVED) begin
+            bank = offset % fromInteger(valueof(n_banks));
+            local_address = offset / fromInteger(valueof(n_banks));
+        end else begin
+            bank = offset / fromInteger(cfg.bank_depth);
+            local_address = offset % fromInteger(cfg.bank_depth);
+        end
+
+        return BankedMemoryAccess_t {
+            bank   : truncate(bank),
+            address: truncate(local_address)
+        };
+    endmethod
+
+endmodule
+
+module mkBankedMemoryBRAM1Port#(
+        BRAM_Configure cfg
+    )(BankedMemoryPort_ifc#(1, addr_w, data_w, 1));
+
+    BRAM1Port#(Bit#(addr_w), Bit#(data_w)) i_bram <- mkBRAM1Server(cfg);
+
+    function BankedMemoryRWPort_ifc#(addr_w, data_w, 1) make_port(Integer port_index);
+        return interface BankedMemoryRWPort_ifc;
+            method Action request(BankedMemoryRequest_t#(addr_w, data_w, 1) req);
+                i_bram.portA.request.put(BRAMRequest {
+                    write          : req.write,
+                    responseOnWrite: False,
+                    address        : req.address,
+                    datain         : req.data
+                });
+            endmethod
+
+            method response = i_bram.portA.response.get;
+        endinterface;
+    endfunction
+
+    interface port = genWith(make_port);
+
+endmodule
+
+module mkBankedMemoryBRAM1PortBE#(
+        BRAM_Configure cfg
+    )(BankedMemoryPort_ifc#(1, addr_w, data_w, mask_w))
+    provisos(
         Div#(data_w, mask_w, chunk_w),
         Mul#(chunk_w, mask_w, data_w)
     );
 
     BRAM1PortBE#(Bit#(addr_w), Bit#(data_w), mask_w) i_bram <- mkBRAM1ServerBE(cfg);
 
-    method Action request(Bit#(addr_w) address, Bit#(data_w) data,
-                          Bit#(mask_w) write_mask, Bool write);
-        i_bram.portA.request.put(BRAMRequestBE {
-            writeen        : write ? write_mask : 0,
-            responseOnWrite: False,
-            address        : address,
-            datain         : data
-        });
-    endmethod
+    function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_port(Integer port_index);
+        return interface BankedMemoryRWPort_ifc;
+            method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req);
+                i_bram.portA.request.put(BRAMRequestBE {
+                    writeen        : req.write ? req.write_mask : 0,
+                    responseOnWrite: False,
+                    address        : req.address,
+                    datain         : req.data
+                });
+            endmethod
 
-    method ActionValue#(Bit#(data_w)) response();
-        let data <- i_bram.portA.response.get();
-        return data;
-    endmethod
+            method response = i_bram.portA.response.get;
+        endinterface;
+    endfunction
+
+    interface port = genWith(make_port);
 
 endmodule
 
-/*
- * Generic core. Requests to different banks proceed independently. Read
- * responses may return out of order across banks and are matched by tag.
- * The bank field must be smaller than n_banks.
- */
-module mkBankedMemory#(
-        Vector#(n_banks, BankedMemoryPort_ifc#(addr_w, data_w, mask_w)) memory,
-        BankedMemoryArb_t arbitration,
-        Integer queueDepth
-    )(BankedMemory_ifc#(n_banks, n_clients, addr_w, data_w, mask_w, tag_w))
-    provisos(
-        Add#(1, banks_minus_one__, n_banks),
-        Add#(1, clients_minus_one__, n_clients)
-    );
+module mkBankedMemoryBRAM2Port#(
+        BRAM_Configure cfg
+    )(BankedMemoryPort_ifc#(2, addr_w, data_w, 1));
 
-    Vector#(n_clients, FIFOF#(BankedMemoryRequest_t#(
-        TLog#(n_banks), addr_w, data_w, mask_w, tag_w))) f_client_req <-
-        replicateM(mkSizedFIFOF(queueDepth));
-    Vector#(n_clients, FIFOF#(BankedMemoryResponse_t#(
-        data_w, tag_w))) f_client_rsp <-
-        replicateM(mkSizedFIFOF(queueDepth));
+    BRAM2Port#(Bit#(addr_w), Bit#(data_w)) i_bram <- mkBRAM2Server(cfg);
 
-    Vector#(n_banks, Vector#(n_clients, FIFOF#(BankedMemoryRequest_t#(
-        TLog#(n_banks), addr_w, data_w, mask_w, tag_w)))) f_bank_req <-
-        replicateM(replicateM(mkSizedFIFOF(queueDepth)));
-    Vector#(n_banks, Vector#(n_clients, FIFOF#(BankedMemoryResponse_t#(
-        data_w, tag_w)))) f_bank_rsp <-
-        replicateM(replicateM(mkSizedFIFOF(queueDepth)));
-    Vector#(n_banks, FIFOF#(BankedMemoryOwner_t#(
-        n_clients, tag_w))) f_bank_owner <-
-        replicateM(mkSizedFIFOF(queueDepth));
+    function BankedMemoryRWPort_ifc#(addr_w, data_w, 1) make_port(Integer port_index);
+        return interface BankedMemoryRWPort_ifc;
+            method Action request(BankedMemoryRequest_t#(addr_w, data_w, 1) req);
+                BRAMRequest#(Bit#(addr_w), Bit#(data_w)) bram_req = BRAMRequest {
+                    write          : req.write,
+                    responseOnWrite: False,
+                    address        : req.address,
+                    datain         : req.data
+                };
+                if(port_index == 0)
+                    i_bram.portA.request.put(bram_req);
+                else
+                    i_bram.portB.request.put(bram_req);
+            endmethod
 
-    Vector#(n_banks, Reg#(Bit#(TLog#(n_clients)))) rg_next_client <-
-        replicateM(mkReg(0));
-    Vector#(n_clients, Reg#(Bit#(TLog#(n_banks)))) rg_next_bank <-
-        replicateM(mkReg(0));
-
-    function Bit#(TLog#(n_clients)) nextClient(Bit#(TLog#(n_clients)) index);
-        return index == fromInteger(valueof(n_clients) - 1) ? 0 : index + 1;
+            method ActionValue#(Bit#(data_w)) response();
+                Bit#(data_w) data = ?;
+                if(port_index == 0)
+                    data <- i_bram.portA.response.get;
+                else
+                    data <- i_bram.portB.response.get;
+                return data;
+            endmethod
+        endinterface;
     endfunction
 
-    function Bit#(TLog#(n_clients)) addWrappedClient(
-            Bit#(TLog#(n_clients)) base, Integer offset
-        );
-        Bit#(TAdd#(TLog#(n_clients), 1)) sum = zeroExtend(base) + fromInteger(offset);
-        if(sum >= fromInteger(valueof(n_clients)))
-            sum = sum - fromInteger(valueof(n_clients));
-        return truncate(sum);
-    endfunction
-
-    function Bit#(TLog#(n_banks)) nextBank(Bit#(TLog#(n_banks)) index);
-        return index == fromInteger(valueof(n_banks) - 1) ? 0 : index + 1;
-    endfunction
-
-    function Bit#(TLog#(n_banks)) addWrappedBank(
-            Bit#(TLog#(n_banks)) base, Integer offset
-        );
-        Bit#(TAdd#(TLog#(n_banks), 1)) sum = zeroExtend(base) + fromInteger(offset);
-        if(sum >= fromInteger(valueof(n_banks)))
-            sum = sum - fromInteger(valueof(n_banks));
-        return truncate(sum);
-    endfunction
-
-    /* Route each client into independent per-bank arbitration queues. */
-    for(Integer c = 0; c < valueof(n_clients); c = c + 1) begin
-        rule r_route_client;
-            let req = f_client_req[c].first;
-            f_client_req[c].deq;
-            f_bank_req[req.bank][c].enq(req);
-        endrule
-    end
-
-    /* One request per bank and cycle. */
-    for(Integer b = 0; b < valueof(n_banks); b = b + 1) begin
-        rule r_issue_bank_request;
-            Bit#(TLog#(n_clients)) start = arbitration == BANK_ARB_ROUND_ROBIN ?
-                rg_next_client[b] : 0;
-            Maybe#(Bit#(TLog#(n_clients))) selected = tagged Invalid;
-
-            for(Integer offset = 0; offset < valueof(n_clients); offset = offset + 1) begin
-                let client = addWrappedClient(start, offset);
-                if(!isValid(selected) && f_bank_req[b][client].notEmpty)
-                    selected = tagged Valid client;
-            end
-
-            if(selected matches tagged Valid .client) begin
-                let req = f_bank_req[b][client].first;
-                f_bank_req[b][client].deq;
-                memory[b].request(req.address, req.data, req.write_mask, req.write);
-
-                if(!req.write) begin
-                    f_bank_owner[b].enq(BankedMemoryOwner_t {
-                        client: client,
-                        tag   : req.tag
-                    });
-                end
-
-                if(arbitration == BANK_ARB_ROUND_ROBIN)
-                    rg_next_client[b] <= nextClient(client);
-            end
-        endrule
-
-        rule r_receive_bank_response;
-            let owner = f_bank_owner[b].first;
-            f_bank_owner[b].deq;
-            let data <- memory[b].response();
-            f_bank_rsp[b][owner.client].enq(BankedMemoryResponse_t {
-                data: data,
-                tag : owner.tag
-            });
-        endrule
-    end
-
-    /* Merge bank responses independently for each client. */
-    for(Integer c = 0; c < valueof(n_clients); c = c + 1) begin
-        rule r_collect_client_response;
-            Bit#(TLog#(n_banks)) start = arbitration == BANK_ARB_ROUND_ROBIN ?
-                rg_next_bank[c] : 0;
-            Maybe#(Bit#(TLog#(n_banks))) selected = tagged Invalid;
-
-            for(Integer offset = 0; offset < valueof(n_banks); offset = offset + 1) begin
-                let bank = addWrappedBank(start, offset);
-                if(!isValid(selected) && f_bank_rsp[bank][c].notEmpty)
-                    selected = tagged Valid bank;
-            end
-
-            if(selected matches tagged Valid .bank) begin
-                let rsp = f_bank_rsp[bank][c].first;
-                f_bank_rsp[bank][c].deq;
-                f_client_rsp[c].enq(rsp);
-                if(arbitration == BANK_ARB_ROUND_ROBIN)
-                    rg_next_bank[c] <= nextBank(bank);
-            end
-        endrule
-    end
-
-    interface request  = map(toPut, f_client_req);
-    interface response = map(toGet, f_client_rsp);
+    interface port = genWith(make_port);
 
 endmodule
 
-/* Convenience constructor using one standard single-port BRAM per bank. */
-module mkBankedMemoryBRAM#(
-        BRAM_Configure cfg,
-        BankedMemoryArb_t arbitration,
-        Integer queueDepth
-    )(BankedMemory_ifc#(n_banks, n_clients, addr_w, data_w, mask_w, tag_w))
+module mkBankedMemoryBRAM2PortBE#(
+        BRAM_Configure cfg
+    )(BankedMemoryPort_ifc#(2, addr_w, data_w, mask_w))
     provisos(
-        Add#(1, banks_minus_one__, n_banks),
-        Add#(1, clients_minus_one__, n_clients),
         Div#(data_w, mask_w, chunk_w),
         Mul#(chunk_w, mask_w, data_w)
     );
 
-    Vector#(n_banks, BankedMemoryPort_ifc#(addr_w, data_w, mask_w)) memory <-
-        replicateM(mkBankedMemoryBRAMPort(cfg));
-    let ifc <- mkBankedMemory(memory, arbitration, queueDepth);
+    BRAM2PortBE#(Bit#(addr_w), Bit#(data_w), mask_w) i_bram <- mkBRAM2ServerBE(cfg);
+
+    function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_port(Integer port_index);
+        return interface BankedMemoryRWPort_ifc;
+            method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req);
+                BRAMRequestBE#(Bit#(addr_w), Bit#(data_w), mask_w) bram_req = BRAMRequestBE {
+                    writeen        : req.write ? req.write_mask : 0,
+                    responseOnWrite: False,
+                    address        : req.address,
+                    datain         : req.data
+                };
+                if(port_index == 0)
+                    i_bram.portA.request.put(bram_req);
+                else
+                    i_bram.portB.request.put(bram_req);
+            endmethod
+
+            method ActionValue#(Bit#(data_w)) response();
+                Bit#(data_w) data = ?;
+                if(port_index == 0)
+                    data <- i_bram.portA.response.get;
+                else
+                    data <- i_bram.portB.response.get;
+                return data;
+            endmethod
+        endinterface;
+    endfunction
+
+    interface port = genWith(make_port);
+
+endmodule
+
+/*
+ * Address-only bank router. Requests are forwarded in the calling cycle. The
+ * only state in the multi-bank case records which bank owns each read response.
+ */
+module mkBankedMemoryAccessor#(
+        Vector#(n_banks, BankedMemoryPort_ifc#(
+            n_ports, bank_addr_w, data_w, mask_w)) memory,
+        BankedMemoryConfig_t cfg
+    )(BankedMemoryAccessor_ifc#(n_ports, addr_w, data_w, mask_w))
+    provisos(
+        Add#(1, banks_minus_one__, n_banks),
+        Add#(bank_index_pad__, TLog#(n_banks), addr_w),
+        Add#(bank_addr_w, bank_addr_pad__, addr_w),
+        Add#(bank_index_ext_pad__, TLog#(n_banks), TAdd#(addr_w, 1)),
+        Add#(bank_addr_w, bank_addr_ext_pad__, TAdd#(addr_w, 1))
+    );
+
+    BankedAddressMapper_ifc#(n_banks, addr_w, bank_addr_w) i_mapper <-
+        mkBankedAddressMapper(cfg);
+
+    Vector#(n_ports, BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w)) access_ports = ?;
+
+    if(valueof(n_banks) == 1) begin
+        function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_direct_port(Integer port_index);
+            return interface BankedMemoryRWPort_ifc;
+                method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req);
+                    let access = i_mapper.map_address(req.address);
+                    memory[0].port[port_index].request(BankedMemoryRequest_t {
+                        address   : access.address,
+                        data      : req.data,
+                        write_mask: req.write_mask,
+                        write     : req.write
+                    });
+                endmethod
+
+                method response = memory[0].port[port_index].response;
+            endinterface;
+        endfunction
+
+        access_ports = genWith(make_direct_port);
+    end else begin
+        Vector#(n_ports, FIFOF#(Bit#(TLog#(n_banks)))) f_response_bank <-
+            replicateM(mkSizedFIFOF(cfg.outstanding_reads));
+
+        function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_banked_port(Integer port_index);
+            return interface BankedMemoryRWPort_ifc;
+                method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req)
+                        if(f_response_bank[port_index].notFull);
+                    let access = i_mapper.map_address(req.address);
+                    memory[access.bank].port[port_index].request(BankedMemoryRequest_t {
+                        address   : access.address,
+                        data      : req.data,
+                        write_mask: req.write_mask,
+                        write     : req.write
+                    });
+                    if(!req.write)
+                        f_response_bank[port_index].enq(access.bank);
+                endmethod
+
+                method ActionValue#(Bit#(data_w)) response();
+                    let bank = f_response_bank[port_index].first;
+                    f_response_bank[port_index].deq;
+                    let data <- memory[bank].port[port_index].response;
+                    return data;
+                endmethod
+            endinterface;
+        endfunction
+
+        access_ports = genWith(make_banked_port);
+    end
+
+    interface port = access_ports;
+    method in_range = i_mapper.in_range;
+
+endmodule
+
+/* Direct dual-port BRAM accessor used by single-bank clients such as the tiler. */
+module mkBankedMemoryBRAM2Accessor#(
+        BRAM_Configure bram_cfg
+    )(BankedMemoryAccessor_ifc#(2, addr_w, data_w, 1));
+
+    BankedMemoryConfig_t cfg = BankedMemoryConfig_t {
+        address_base     : 0,
+        memory_size      : bram_cfg.memorySize,
+        bank_depth       : bram_cfg.memorySize,
+        outstanding_reads: 1,
+        mapping          : BANK_MAP_CONTIGUOUS
+    };
+
+    BankedMemoryPort_ifc#(2, addr_w, data_w, 1) i_bank <-
+        mkBankedMemoryBRAM2Port(bram_cfg);
+    Vector#(1, BankedMemoryPort_ifc#(2, addr_w, data_w, 1)) banks =
+        cons(i_bank, nil);
+    let ifc <- mkBankedMemoryAccessor(banks, cfg);
     return ifc;
 
 endmodule

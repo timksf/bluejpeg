@@ -85,6 +85,11 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         // -- mkImageTilingEngine: block-column index width fits in BRAM address width
         Add#(f__, TLog#(TDiv#(TLog#(max_imw), 8)), TLog#(TMul#(max_imw, 8))),
 
+        // -- mkImageTilingEngine: local addresses and counters fit the dual-port buffer
+        Add#(TLog#(max_imw), l__, TLog#(TAdd#(TMul#(max_imw, 8), 1))),
+        Add#(TLog#(TMul#(max_imw, 8)), m__, TLog#(TMul#(2, TMul#(max_imw, 8)))),
+        Add#(TLog#(TMul#(max_imw, 8)), n__, TLog#(TAdd#(TMul#(max_imw, 8), 1))),
+
         // -- mkYBlockReorder: max_blk_cols = max_imw / 64 (8×8 blocks across image width).
         //    BRAM stores max_blk_cols × 64 Y pixels; address width = ceil(log2(that)).
         //    Supports non-power-of-2 max widths (e.g. 2560).
