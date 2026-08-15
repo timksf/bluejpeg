@@ -18,85 +18,85 @@ typedef struct {
 } BankedMemoryConfig_t;
 
 typedef struct {
-    Bit#(addr_w) address;
-    Bit#(data_w) data;
-    Bit#(mask_w) write_mask;
+    Bit#(aw) address;
+    Bit#(dw) data;
+    Bit#(mw) write_mask;
     Bool write;
 } BankedMemoryRequest_t#(
-    numeric type addr_w,
-    numeric type data_w,
-    numeric type mask_w
+    numeric type aw,
+    numeric type dw,
+    numeric type mw
 ) deriving(Bits, Eq, FShow);
 
 typedef struct {
     Bit#(TLog#(n_banks)) bank;
-    Bit#(bank_addr_w) address;
+    Bit#(bank_aw) address;
 } BankedMemoryAccess_t#(
     numeric type n_banks,
-    numeric type bank_addr_w
+    numeric type bank_aw
 ) deriving(Bits, Eq, FShow);
 
 interface BankedAddressMapper_ifc#(
     numeric type n_banks,
-    numeric type addr_w,
-    numeric type bank_addr_w
+    numeric type aw,
+    numeric type bank_aw
 );
-    method Bool in_range(Bit#(addr_w) address);
-    method BankedMemoryAccess_t#(n_banks, bank_addr_w) map_address(Bit#(addr_w) address);
+    method Bool in_range(Bit#(aw) address);
+    method BankedMemoryAccess_t#(n_banks, bank_aw) map_address(Bit#(aw) address);
 endinterface
 
 interface BankedMemoryRWPort_ifc#(
-    numeric type addr_w,
-    numeric type data_w,
-    numeric type mask_w
+    numeric type aw,
+    numeric type dw,
+    numeric type mw
 );
-    method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req);
-    method ActionValue#(Bit#(data_w)) response();
+    method Action request(BankedMemoryRequest_t#(aw, dw, mw) req);
+    method ActionValue#(Bit#(dw)) response();
 endinterface
 
 /* One physical memory bank with N independently usable ports. */
 interface BankedMemoryPort_ifc#(
     numeric type n_memory_ports,
-    numeric type addr_w,
-    numeric type data_w,
-    numeric type mask_w
+    numeric type aw,
+    numeric type dw,
+    numeric type mw
 );
     interface Vector#(n_memory_ports, BankedMemoryRWPort_ifc#(
-        addr_w, data_w, mask_w)) port;
+        aw, dw, mw)) port;
 endinterface
 
 /* N logical request ports sharing the configured banks. */
 interface BankedMemoryAccessor_ifc#(
     numeric type n_clients,
-    numeric type addr_w,
-    numeric type data_w,
-    numeric type mask_w
+    numeric type aw,
+    numeric type dw,
+    numeric type mw
 );
-    interface Vector#(n_clients, BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w)) port;
-    method Bool in_range(Bit#(addr_w) address);
+    interface Vector#(n_clients, BankedMemoryRWPort_ifc#(aw, dw, mw)) port;
+    method Bool in_range(Bit#(aw) address);
 endinterface
 
 module mkBankedAddressMapper#(
         BankedMemoryConfig_t cfg
-    )(BankedAddressMapper_ifc#(n_banks, addr_w, bank_addr_w))
+    )(BankedAddressMapper_ifc#(n_banks, aw, bank_aw))
     provisos(
         Add#(1, banks_minus_one__, n_banks),
-        Add#(bank_index_pad__, TLog#(n_banks), addr_w),
-        Add#(bank_addr_w, bank_addr_pad__, addr_w),
-        Add#(bank_index_ext_pad__, TLog#(n_banks), TAdd#(addr_w, 1)),
-        Add#(bank_addr_w, bank_addr_ext_pad__, TAdd#(addr_w, 1))
+        Add#(bank_index_pad__, TLog#(n_banks), aw),
+        Add#(bank_aw, bank_addr_pad__, aw),
+        Add#(bank_index_ext_pad__, TLog#(n_banks), TAdd#(aw, 1)),
+        Add#(bank_aw, bank_addr_ext_pad__, TAdd#(aw, 1))
     );
 
-    method Bool in_range(Bit#(addr_w) address);
-        Bit#(TAdd#(addr_w, 1)) extended_address = zeroExtend(address);
+    method Bool in_range(Bit#(aw) address);
+        Bit#(TAdd#(aw, 1)) extended_address = zeroExtend(address);
         return extended_address >= fromInteger(cfg.address_base) &&
             extended_address < fromInteger(cfg.address_base + cfg.memory_size);
     endmethod
 
-    method BankedMemoryAccess_t#(n_banks, bank_addr_w) map_address(Bit#(addr_w) address);
-        Bit#(TAdd#(addr_w, 1)) offset = zeroExtend(address) - fromInteger(cfg.address_base);
-        Bit#(TAdd#(addr_w, 1)) bank = 0;
-        Bit#(TAdd#(addr_w, 1)) local_address = 0;
+    method BankedMemoryAccess_t#(n_banks, bank_aw) map_address(Bit#(aw) address);
+        Bit#(TAdd#(aw, 1)) offset = zeroExtend(address) - fromInteger(cfg.address_base);
+        Bit#(TAdd#(aw, 1)) bank = 0;
+        Bit#(TAdd#(aw, 1)) local_address = 0;
 
         if(cfg.mapping == BANK_MAP_INTERLEAVED) begin
             bank = offset % fromInteger(valueof(n_banks));
@@ -116,13 +116,13 @@ endmodule
 
 module mkBankedMemoryBRAM1Port#(
         BRAM_Configure cfg
-    )(BankedMemoryPort_ifc#(1, addr_w, data_w, 1));
+    )(BankedMemoryPort_ifc#(1, aw, dw, 1));
 
-    BRAM1Port#(Bit#(addr_w), Bit#(data_w)) i_bram <- mkBRAM1Server(cfg);
+    BRAM1Port#(Bit#(aw), Bit#(dw)) i_bram <- mkBRAM1Server(cfg);
 
-    function BankedMemoryRWPort_ifc#(addr_w, data_w, 1) make_port(Integer port_index);
+    function BankedMemoryRWPort_ifc#(aw, dw, 1) make_port(Integer port_index);
         return interface BankedMemoryRWPort_ifc;
-            method Action request(BankedMemoryRequest_t#(addr_w, data_w, 1) req);
+            method Action request(BankedMemoryRequest_t#(aw, dw, 1) req);
                 i_bram.portA.request.put(BRAMRequest {
                     write          : req.write,
                     responseOnWrite: False,
@@ -141,17 +141,17 @@ endmodule
 
 module mkBankedMemoryBRAM1PortBE#(
         BRAM_Configure cfg
-    )(BankedMemoryPort_ifc#(1, addr_w, data_w, mask_w))
+    )(BankedMemoryPort_ifc#(1, aw, dw, mw))
     provisos(
-        Div#(data_w, mask_w, chunk_w),
-        Mul#(chunk_w, mask_w, data_w)
+        Div#(dw, mw, chunk_w),
+        Mul#(chunk_w, mw, dw)
     );
 
-    BRAM1PortBE#(Bit#(addr_w), Bit#(data_w), mask_w) i_bram <- mkBRAM1ServerBE(cfg);
+    BRAM1PortBE#(Bit#(aw), Bit#(dw), mw) i_bram <- mkBRAM1ServerBE(cfg);
 
-    function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_port(Integer port_index);
+    function BankedMemoryRWPort_ifc#(aw, dw, mw) make_port(Integer port_index);
         return interface BankedMemoryRWPort_ifc;
-            method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req);
+            method Action request(BankedMemoryRequest_t#(aw, dw, mw) req);
                 i_bram.portA.request.put(BRAMRequestBE {
                     writeen        : req.write ? req.write_mask : 0,
                     responseOnWrite: False,
@@ -170,14 +170,14 @@ endmodule
 
 module mkBankedMemoryBRAM2Port#(
         BRAM_Configure cfg
-    )(BankedMemoryPort_ifc#(2, addr_w, data_w, 1));
+    )(BankedMemoryPort_ifc#(2, aw, dw, 1));
 
-    BRAM2Port#(Bit#(addr_w), Bit#(data_w)) i_bram <- mkBRAM2Server(cfg);
+    BRAM2Port#(Bit#(aw), Bit#(dw)) i_bram <- mkBRAM2Server(cfg);
 
-    function BankedMemoryRWPort_ifc#(addr_w, data_w, 1) make_port(Integer port_index);
+    function BankedMemoryRWPort_ifc#(aw, dw, 1) make_port(Integer port_index);
         return interface BankedMemoryRWPort_ifc;
-            method Action request(BankedMemoryRequest_t#(addr_w, data_w, 1) req);
-                BRAMRequest#(Bit#(addr_w), Bit#(data_w)) bram_req = BRAMRequest {
+            method Action request(BankedMemoryRequest_t#(aw, dw, 1) req);
+                BRAMRequest#(Bit#(aw), Bit#(dw)) bram_req = BRAMRequest {
                     write          : req.write,
                     responseOnWrite: False,
                     address        : req.address,
@@ -189,8 +189,8 @@ module mkBankedMemoryBRAM2Port#(
                     i_bram.portB.request.put(bram_req);
             endmethod
 
-            method ActionValue#(Bit#(data_w)) response();
-                Bit#(data_w) data = ?;
+            method ActionValue#(Bit#(dw)) response();
+                Bit#(dw) data = ?;
                 if(port_index == 0)
                     data <- i_bram.portA.response.get;
                 else
@@ -206,18 +206,18 @@ endmodule
 
 module mkBankedMemoryBRAM2PortBE#(
         BRAM_Configure cfg
-    )(BankedMemoryPort_ifc#(2, addr_w, data_w, mask_w))
+    )(BankedMemoryPort_ifc#(2, aw, dw, mw))
     provisos(
-        Div#(data_w, mask_w, chunk_w),
-        Mul#(chunk_w, mask_w, data_w)
+        Div#(dw, mw, chunk_w),
+        Mul#(chunk_w, mw, dw)
     );
 
-    BRAM2PortBE#(Bit#(addr_w), Bit#(data_w), mask_w) i_bram <- mkBRAM2ServerBE(cfg);
+    BRAM2PortBE#(Bit#(aw), Bit#(dw), mw) i_bram <- mkBRAM2ServerBE(cfg);
 
-    function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_port(Integer port_index);
+    function BankedMemoryRWPort_ifc#(aw, dw, mw) make_port(Integer port_index);
         return interface BankedMemoryRWPort_ifc;
-            method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req);
-                BRAMRequestBE#(Bit#(addr_w), Bit#(data_w), mask_w) bram_req = BRAMRequestBE {
+            method Action request(BankedMemoryRequest_t#(aw, dw, mw) req);
+                BRAMRequestBE#(Bit#(aw), Bit#(dw), mw) bram_req = BRAMRequestBE {
                     writeen        : req.write ? req.write_mask : 0,
                     responseOnWrite: False,
                     address        : req.address,
@@ -229,8 +229,8 @@ module mkBankedMemoryBRAM2PortBE#(
                     i_bram.portB.request.put(bram_req);
             endmethod
 
-            method ActionValue#(Bit#(data_w)) response();
-                Bit#(data_w) data = ?;
+            method ActionValue#(Bit#(dw)) response();
+                Bit#(dw) data = ?;
                 if(port_index == 0)
                     data <- i_bram.portA.response.get;
                 else
@@ -253,31 +253,31 @@ endmodule
  */
 module mkBankedMemoryAccessor#(
         Vector#(n_banks, BankedMemoryPort_ifc#(
-            n_memory_ports, bank_addr_w, data_w, mask_w)) memory,
+            n_memory_ports, bank_aw, dw, mw)) memory,
         BankedMemoryConfig_t cfg
-    )(BankedMemoryAccessor_ifc#(n_clients, addr_w, data_w, mask_w))
+    )(BankedMemoryAccessor_ifc#(n_clients, aw, dw, mw))
     provisos(
         Add#(1, banks_minus_one__, n_banks),
         Add#(1, clients_minus_one__, n_clients),
         Add#(1, memory_ports_minus_one__, n_memory_ports),
-        Add#(bank_index_pad__, TLog#(n_banks), addr_w),
-        Add#(bank_addr_w, bank_addr_pad__, addr_w),
-        Add#(bank_index_ext_pad__, TLog#(n_banks), TAdd#(addr_w, 1)),
-        Add#(bank_addr_w, bank_addr_ext_pad__, TAdd#(addr_w, 1))
+        Add#(bank_index_pad__, TLog#(n_banks), aw),
+        Add#(bank_aw, bank_addr_pad__, aw),
+        Add#(bank_index_ext_pad__, TLog#(n_banks), TAdd#(aw, 1)),
+        Add#(bank_aw, bank_addr_ext_pad__, TAdd#(aw, 1))
     );
 
-    BankedAddressMapper_ifc#(n_banks, addr_w, bank_addr_w) i_mapper <-
+    BankedAddressMapper_ifc#(n_banks, aw, bank_aw) i_mapper <-
         mkBankedAddressMapper(cfg);
 
-    Vector#(n_clients, BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w)) access_ports = ?;
+    Vector#(n_clients, BankedMemoryRWPort_ifc#(aw, dw, mw)) access_ports = ?;
 
     if(valueof(n_clients) <= valueof(n_memory_ports)) begin
         if(valueof(n_banks) == 1) begin
-            function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_direct_port(
+            function BankedMemoryRWPort_ifc#(aw, dw, mw) make_direct_port(
                     Integer client_index
                 );
                 return interface BankedMemoryRWPort_ifc;
-                    method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req);
+                    method Action request(BankedMemoryRequest_t#(aw, dw, mw) req);
                         let access = i_mapper.map_address(req.address);
                         memory[0].port[client_index].request(BankedMemoryRequest_t {
                             address   : access.address,
@@ -296,11 +296,11 @@ module mkBankedMemoryAccessor#(
             Vector#(n_clients, FIFOF#(Bit#(TLog#(n_banks)))) f_response_bank <-
                 replicateM(mkSizedFIFOF(cfg.outstanding_reads));
 
-            function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_direct_banked_port(
+            function BankedMemoryRWPort_ifc#(aw, dw, mw) make_direct_banked_port(
                     Integer client_index
                 );
                 return interface BankedMemoryRWPort_ifc;
-                    method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req)
+                    method Action request(BankedMemoryRequest_t#(aw, dw, mw) req)
                             if(f_response_bank[client_index].notFull);
                         let access = i_mapper.map_address(req.address);
                         memory[access.bank].port[client_index].request(BankedMemoryRequest_t {
@@ -313,7 +313,7 @@ module mkBankedMemoryAccessor#(
                             f_response_bank[client_index].enq(access.bank);
                     endmethod
 
-                    method ActionValue#(Bit#(data_w)) response();
+                    method ActionValue#(Bit#(dw)) response();
                         let bank = f_response_bank[client_index].first;
                         f_response_bank[client_index].deq;
                         let data <- memory[bank].port[client_index].response;
@@ -325,21 +325,21 @@ module mkBankedMemoryAccessor#(
             access_ports = genWith(make_direct_banked_port);
         end
     end else begin
-        Vector#(n_clients, FIFOF#(BankedMemoryRequest_t#(
-            addr_w, data_w, mask_w))) f_client_request <-
-            replicateM(mkSizedFIFOF(cfg.outstanding_reads));
-        Vector#(n_banks, Vector#(n_memory_ports, Vector#(n_clients, FIFOF#(
-            BankedMemoryRequest_t#(
-                bank_addr_w, data_w, mask_w))))) f_bank_request <-
-            replicateM(replicateM(replicateM(mkSizedFIFOF(cfg.outstanding_reads))));
+        Vector#(n_clients, FIFOF#(BankedMemoryRequest_t#(aw, dw, mw))) f_client_request <- replicateM(mkSizedFIFOF(cfg.outstanding_reads));
+        Vector#(n_banks, 
+            Vector#(n_memory_ports, 
+                Vector#(n_clients, 
+                    FIFOF#(BankedMemoryRequest_t#(bank_aw, dw, mw))
+                    )
+                )
+            ) f_bank_request <- replicateM(replicateM(replicateM(mkSizedFIFOF(cfg.outstanding_reads))));
 
-        Vector#(n_clients, FIFOF#(Bit#(TLog#(n_banks)))) f_response_bank <-
-            replicateM(mkSizedFIFOF(cfg.outstanding_reads));
+        Vector#(n_clients, FIFOF#(Bit#(TLog#(n_banks)))) f_response_bank <- replicateM(mkSizedFIFOF(cfg.outstanding_reads));
         Vector#(n_banks, Vector#(n_memory_ports, FIFOF#(
             Bit#(TLog#(n_clients))))) f_response_owner <-
             replicateM(replicateM(mkSizedFIFOF(cfg.outstanding_reads)));
         Vector#(n_banks, Vector#(n_memory_ports, Vector#(n_clients, FIFOF#(
-            Bit#(data_w))))) f_bank_response <-
+            Bit#(dw))))) f_bank_response <-
             replicateM(replicateM(replicateM(mkSizedFIFOF(cfg.outstanding_reads))));
 
         Vector#(n_banks, Vector#(n_memory_ports, Reg#(
@@ -408,13 +408,13 @@ module mkBankedMemoryAccessor#(
             end
         end
 
-        function BankedMemoryRWPort_ifc#(addr_w, data_w, mask_w) make_buffered_port(
+        function BankedMemoryRWPort_ifc#(aw, dw, mw) make_buffered_port(
                 Integer client_index
             );
             Integer memory_port_index = client_index % valueof(n_memory_ports);
 
             return interface BankedMemoryRWPort_ifc;
-                method Action request(BankedMemoryRequest_t#(addr_w, data_w, mask_w) req)
+                method Action request(BankedMemoryRequest_t#(aw, dw, mw) req)
                         if(f_client_request[client_index].notFull &&
                             f_response_bank[client_index].notFull);
                     let access = i_mapper.map_address(req.address);
@@ -423,7 +423,7 @@ module mkBankedMemoryAccessor#(
                         f_response_bank[client_index].enq(access.bank);
                 endmethod
 
-                method ActionValue#(Bit#(data_w)) response();
+                method ActionValue#(Bit#(dw)) response();
                     let bank = f_response_bank[client_index].first;
                     let data = f_bank_response[bank][memory_port_index][client_index].first;
                     f_response_bank[client_index].deq;
@@ -444,7 +444,7 @@ endmodule
 /* Direct dual-port BRAM accessor used by single-bank clients such as the tiler. */
 module mkBankedMemoryBRAM2Accessor#(
         BRAM_Configure bram_cfg
-    )(BankedMemoryAccessor_ifc#(2, addr_w, data_w, 1));
+    )(BankedMemoryAccessor_ifc#(2, aw, dw, 1));
 
     BankedMemoryConfig_t cfg = BankedMemoryConfig_t {
         address_base     : 0,
@@ -454,9 +454,9 @@ module mkBankedMemoryBRAM2Accessor#(
         mapping          : BANK_MAP_CONTIGUOUS
     };
 
-    BankedMemoryPort_ifc#(2, addr_w, data_w, 1) i_bank <-
+    BankedMemoryPort_ifc#(2, aw, dw, 1) i_bank <-
         mkBankedMemoryBRAM2Port(bram_cfg);
-    Vector#(1, BankedMemoryPort_ifc#(2, addr_w, data_w, 1)) banks =
+    Vector#(1, BankedMemoryPort_ifc#(2, aw, dw, 1)) banks =
         cons(i_bank, nil);
     let ifc <- mkBankedMemoryAccessor(banks, cfg);
     return ifc;
