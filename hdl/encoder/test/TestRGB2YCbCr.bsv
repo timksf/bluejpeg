@@ -22,6 +22,16 @@ String output_image_path = "../result.png"; //`RES_PATH;
 typedef 1920 InputWidth;
 typedef 1280 InputHeight;
 
+function Stmt axil_write_checked(AXI4_Lite_Master_Wr#(aw, dw) master, Bit#(aw) addr, Bit#(dw) data);
+    return seq
+        axi4_lite_write(master, addr, data);
+        action
+            let resp <- axi4_lite_write_response(master);
+            if(resp != OKAY) $finish(1);
+        endaction
+    endseq;
+endfunction
+
 
 module [Module] mkTestRGB2YCbCr(TestHandler);
 
@@ -80,13 +90,14 @@ module [Module] simpleTest(TestHandler);
     Stmt s = seq
         print_mod_pre_color_t_s("Start", GREEN);
         //configure coefficients
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_a_offs), pack(extend(conv_params.a)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_log2b_offs), pack(extend(conv_params.log2_b)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_c_offs), pack(extend(conv_params.c)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_d_offs), pack(extend(conv_params.d)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_e_offs), pack(extend(conv_params.e)));
+        axil_write_checked(config_wr, 'h0C, pack(extend(conv_params.a)));
+        axil_write_checked(config_wr, 'h10, pack(extend(conv_params.log2_b)));
+        axil_write_checked(config_wr, 'h14, pack(extend(conv_params.c)));
+        axil_write_checked(config_wr, 'h18, pack(extend(conv_params.d)));
+        axil_write_checked(config_wr, 'h1C, pack(extend(conv_params.e)));
+        axil_write_checked(config_wr, 'h24, 1);
         //start
-        axi4_lite_write(config_wr, fromInteger(cfg_start_offs), 1);
+        axil_write_checked(config_wr, 'h00, 1);
         //dispatch data
         action
             RGB_t rgb = RGB_t { r : 24, g : 12, b : 77 };
@@ -102,7 +113,7 @@ module [Module] simpleTest(TestHandler);
         action
             let res <- axis_rx.pkg.get();
             YCbCr_t ycbcr = unpack(res.data);
-            Bit#(32) ref_raw = rgb2ycbcr_model(24, 12, 77);
+            Bit#(32) ref_raw = rgb2ycbcr_ref(24, 12, 77);
             YCbCr_t ref_res = YCbCr_t { 
                 y:  unpack(truncate((ref_raw & 'hFF0000) >> 16)),
                 cb: unpack(truncate((ref_raw & 'hFF00) >> 8)),
@@ -112,15 +123,28 @@ module [Module] simpleTest(TestHandler);
         endaction
         rAXILRsp <= 0;
         while(!unpack(rAXILRsp[0])) par
-            axi4_lite_read(config_rd, fromInteger(cfg_finished_offs));
+            axi4_lite_read(config_rd, 'h04);
             action
                 let resp <- axi4_lite_read_response(config_rd);
                 rAXILRsp <= resp;
             endaction
         endpar
         print_s("Module signaled finished computation", GREEN);
+        action
+            if(!rgb2ycbcr.irq) begin
+                $display("ERROR: Completion IRQ was not asserted");
+                $finish(1);
+            end
+        endaction
+        axil_write_checked(config_wr, 'h20, 1);
+        action
+            if(rgb2ycbcr.irq) begin
+                $display("ERROR: Completion IRQ did not clear");
+                $finish(1);
+            end
+        endaction
         //read back some stats
-        axi4_lite_read(config_rd, fromInteger(cfg_pixel_ctr_offs));
+        axi4_lite_read(config_rd, 'h08);
         action
             let resp <- axi4_lite_read_response(config_rd);
             print_fmt($format("Converter processed %0d pixels", resp), GREEN);
@@ -251,13 +275,14 @@ module [Module] imageTest(TestHandler)
         print_s("Finished writing image to RAM", GREEN);
 
         //configure converter
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_a_offs), pack(extend(conv_params.a)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_log2b_offs), pack(extend(conv_params.log2_b)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_c_offs), pack(extend(conv_params.c)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_d_offs), pack(extend(conv_params.d)));
-        axi4_lite_write(config_wr, fromInteger(cfg_coeff_e_offs), pack(extend(conv_params.e)));
+        axil_write_checked(config_wr, 'h0C, pack(extend(conv_params.a)));
+        axil_write_checked(config_wr, 'h10, pack(extend(conv_params.log2_b)));
+        axil_write_checked(config_wr, 'h14, pack(extend(conv_params.c)));
+        axil_write_checked(config_wr, 'h18, pack(extend(conv_params.d)));
+        axil_write_checked(config_wr, 'h1C, pack(extend(conv_params.e)));
+        axil_write_checked(config_wr, 'h24, 1);
         //start
-        axi4_lite_write(config_wr, fromInteger(cfg_start_offs), 1);
+        axil_write_checked(config_wr, 'h00, 1);
 
         //now start the MM2S and S2MM systems
         mem_master_rd.server.request.put(rq_rd);
@@ -266,19 +291,32 @@ module [Module] imageTest(TestHandler)
         //wait for completion 
         rAXILRsp <= 0;
         while(!unpack(rAXILRsp[0])) par
-            axi4_lite_read(config_rd, fromInteger(cfg_finished_offs));
+            axi4_lite_read(config_rd, 'h04);
             action
                 let resp <- axi4_lite_read_response(config_rd);
                 rAXILRsp <= resp;
             endaction
         endpar
         print_s("Module signaled finished computation", GREEN);
+        action
+            if(!rgb2ycbcr.irq) begin
+                $display("ERROR: Completion IRQ was not asserted");
+                $finish(1);
+            end
+        endaction
+        axil_write_checked(config_wr, 'h20, 1);
+        action
+            if(rgb2ycbcr.irq) begin
+                $display("ERROR: Completion IRQ did not clear");
+                $finish(1);
+            end
+        endaction
 
         await(!mem_master_wr.active());
         print_s("Finished copying image", GREEN);
 
         //read back some stats
-        axi4_lite_read(config_rd, fromInteger(cfg_pixel_ctr_offs));
+        axi4_lite_read(config_rd, 'h08);
         action
             let resp <- axi4_lite_read_response(config_rd);
             print_fmt($format("Converter processed %0d pixels", resp), GREEN);

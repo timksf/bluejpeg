@@ -7,6 +7,8 @@ import SpecialFIFOs :: *;
 import UniqueWrappers :: *;
 
 import BlueAXI :: *;
+import BlueCSRAXI4LiteAdapter :: *;
+import BlueCSRCore :: *;
 
 import Types :: *;
 import PrintUtil :: *;
@@ -16,15 +18,6 @@ import Util :: *;
     This file contains the implementation of the rgb to ycbcr colorspace conversion.
     The module is supposed to be standalone and not part of the JPEG pipeline, so it has its own AXI interfaces.
 */
-
-Integer cfg_start_offs          = 'h00;
-Integer cfg_finished_offs       = 'h04;
-Integer cfg_pixel_ctr_offs      = 'h08;
-Integer cfg_coeff_a_offs        = 'h0C;
-Integer cfg_coeff_log2b_offs    = 'h10;
-Integer cfg_coeff_c_offs        = 'h14;
-Integer cfg_coeff_d_offs        = 'h18;
-Integer cfg_coeff_e_offs        = 'h1C;
 
 //interface for bus-placed module 
 interface RGB2YCbCr_ifc#(numeric type dw);
@@ -39,13 +32,18 @@ interface RGB2YCbCr_ifc#(numeric type dw);
     interface AXI4_Lite_Slave_Rd_Fab#(32, 32) fab_config_rd;
     (* prefix="S_AXI_cfg" *)
     interface AXI4_Lite_Slave_Wr_Fab#(32, 32) fab_config_wr;
+
+    (* always_ready, result="irq" *)
+    method Bool irq;
 endinterface
 
 //internal interface to the configuration registers
 interface RGB2YCbCrCfg_ifc#(numeric type coeff_width);
-    interface Reg#(Bool) start;
-    interface WriteOnly#(Bool) finished;
-    interface WriteOnly#(UInt#(32)) pixel_ctr;
+    method Action start_accepted();
+    method Action finish();
+    method Action pixel_ctr(UInt#(32) value);
+
+    interface ReadOnly#(Bool) start;
     interface ReadOnly#(RGB2YCbCr_params#(coeff_width)) coeffs;
 endinterface
 
@@ -65,43 +63,83 @@ typedef struct {
     Int#(w) e; //CC
 } RGB2YCbCr_params#(numeric type w) deriving(FShow, Eq, Bits);
 
-module [ConfigCtx#(32, 32)] rgb2ycbcrConfig(RGB2YCbCrCfg_ifc#(coeff_width));
+module [BlueCSRCtx_t#(32, 32)] rgb2ycbcr_csrs(RGB2YCbCrCfg_ifc#(coeff_width))
+    provisos(Add#(coeff_width, coeff_pad__, 32));
 
-    Reg#(Bool) rStart <- mkRegU;
-    Reg#(Bool) rFinished <- mkRegU;
-    Reg#(UInt#(32)) rPixelCtr <- mkRegU;
+    ReadOnly#(Bool)             rg_start;
+    ReadOnly#(Bool)             rg_finished;
+    ReadOnly#(UInt#(32))        rg_pixel_ctr;
 
-    Reg#(Int#(coeff_width)) rCoeff_A <- mkRegU;
-    Reg#(Int#(coeff_width)) rCoeff_Log2B <- mkRegU;
-    Reg#(Int#(coeff_width)) rCoeff_C <- mkRegU;
-    Reg#(Int#(coeff_width)) rCoeff_D <- mkRegU;
-    Reg#(Int#(coeff_width)) rCoeff_E <- mkRegU;
+    ReadOnly#(Int#(coeff_width)) rg_coeff_a;
+    ReadOnly#(Int#(coeff_width)) rg_coeff_log2b;
+    ReadOnly#(Int#(coeff_width)) rg_coeff_c;
+    ReadOnly#(Int#(coeff_width)) rg_coeff_d;
+    ReadOnly#(Int#(coeff_width)) rg_coeff_e;
 
-    //the access policy is as seen from AXI, so a write-only register can only be written from AXI
-    addRegWO(cfg_start_offs, rStart); //this should be clear-on-read over the device ifc for optimal convenience
+    PulseWire               pw_clear_start       <- mkPulseWire;
+    Wire#(Maybe#(Bool))      w_finished_update   <- mkDWire(tagged Invalid);
+    Wire#(Maybe#(UInt#(32))) w_pixel_ctr_update  <- mkDWire(tagged Invalid);
+    Wire#(Bool)              w_irq_done_event    <- mkDWire(False);
 
-    addRegRO(cfg_finished_offs, rFinished);
-    addRegRO(cfg_pixel_ctr_offs, rPixelCtr);
+    csr_regmap_def("RGB2YCbCr", "RGB to YCbCr converter register file.");
 
-    addRegWO(cfg_coeff_a_offs, rCoeff_A);
-    addRegWO(cfg_coeff_log2b_offs, rCoeff_Log2B);
-    addRegWO(cfg_coeff_c_offs, rCoeff_C);
-    addRegWO(cfg_coeff_d_offs, rCoeff_D);
-    addRegWO(cfg_coeff_e_offs, rCoeff_E);
+    csr_reg_def('h00, "CTRL",    "Control Register.");
+    rg_start <- csr_reg_hu(
+        'h00, False, 0,
+        pw_clear_start ? tagged Valid False : tagged Invalid,
+        "START", "Module Start", "Writing a 1 starts conversion. Hardware clears the field after accepting the command."
+    );
 
-    //the access policy here is for the device-facing interface
-    interface start = (rStart);
+    csr_reg_def('h04, "STS",     "Status Register.");
+    rg_finished <- csr_reg_ho('h04, False, 0, w_finished_update, "DONE", "Module Finished", "Indicates that the input frame has been converted.");
 
-    interface finished = regToWriteOnly(rFinished);
-    interface pixel_ctr = regToWriteOnly(rPixelCtr);
+    csr_reg_def('h08, "PERF",    "Pixel Counter Register.");
+    rg_pixel_ctr <- csr_reg_ho('h08, 0, 0, w_pixel_ctr_update, "PIX", "Pixel Counter", "Number of converted pixels in the current frame.");
+
+    csr_reg_def('h0C, "COEFFA",  "Luma red coefficient register.");
+    rg_coeff_a     <- csr_reg_wo('h0C, 0, 0, "A",     "Coefficient A",     "Scaled luma red coefficient.");
+
+    csr_reg_def('h10, "COEFFB",  "Coefficient scale register.");
+    rg_coeff_log2b <- csr_reg_wo('h10, 0, 0, "LOG2B", "Coefficient Scale", "Base-2 logarithm of the coefficient scale.");
+
+    csr_reg_def('h14, "COEFFC",  "Luma blue coefficient register.");
+    rg_coeff_c     <- csr_reg_wo('h14, 0, 0, "C",     "Coefficient C",     "Scaled luma blue coefficient.");
+
+    csr_reg_def('h18, "COEFFD",  "Cb coefficient register.");
+    rg_coeff_d     <- csr_reg_wo('h18, 0, 0, "D",     "Coefficient D",     "Scaled Cb coefficient.");
+
+    csr_reg_def('h1C, "COEFFE",  "Cr coefficient register.");
+    rg_coeff_e     <- csr_reg_wo('h1C, 0, 0, "E",     "Coefficient E",     "Scaled Cr coefficient.");
+
+    csr_reg_def('h20, "IRQ_STS", "Interrupt Status Register.");
+    csr_reg_def('h24, "IRQ_EN",  "Interrupt Enable Register.");
+    csr_irq(
+        'h20, 'h24, 0, 0, w_irq_done_event,
+        "DONE_IRQ", "Conversion Complete", "A completed conversion is pending acknowledgement."
+    );
+
+    method Action start_accepted();
+        pw_clear_start.send;
+        w_finished_update <= tagged Valid False;
+        w_pixel_ctr_update <= tagged Valid 0;
+    endmethod
+
+    method Action finish();
+        w_finished_update <= tagged Valid True;
+        w_irq_done_event <= True;
+    endmethod
+
+    method pixel_ctr(value) = w_pixel_ctr_update._write(tagged Valid value);
+
+    interface start = rg_start;
 
     interface ReadOnly coeffs;
         method _read = RGB2YCbCr_params {
-            a: rCoeff_A,
-            log2_b: rCoeff_Log2B,
-            c: rCoeff_C,
-            d: rCoeff_D,
-            e: rCoeff_E
+            a: rg_coeff_a,
+            log2_b: rg_coeff_log2b,
+            c: rg_coeff_c,
+            d: rg_coeff_d,
+            e: rg_coeff_e
         };
     endinterface
 
@@ -116,26 +154,25 @@ module [Module] mkRGB2YCbCrTop(RGB2YCbCr_ifc#(dw))
     AXI4_Stream_Rd#(dw, 0) axis_rd <- mkAXI4_Stream_Rd(1); //buffer size param
     AXI4_Stream_Wr#(dw, 0) axis_wr <- mkAXI4_Stream_Wr(1); //buffer size param
 
-    //config interface AXI4 Lite 
-    IntExtConfig_ifc#(32, 32, RGB2YCbCrCfg_ifc#(coeff_w)) config_ <- axi4LiteConfigFromContext(rgb2ycbcrConfig);
+    //config interface AXI4 Lite
+    BlueCSRAccess_ifc#(32, 32, 1, RGB2YCbCrCfg_ifc#(coeff_w)) csrs <- create_blue_csr(rgb2ycbcr_csrs, False);
+    let axi_csrs <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
 
     //actual colorspace converter
     NumProxy#(coeff_w) coeff_width = ?;
-    RGB2YCbCrConv_ifc conv <- mkRGB2YCbCrConv(coeff_width, config_.device_ifc.coeffs);
+    RGB2YCbCrConv_ifc conv <- mkRGB2YCbCrConv(coeff_width, csrs.internal.coeffs);
 
     Reg#(UInt#(32)) rInConv[2] <- mkCRegU(2);
     Reg#(UInt#(32)) rCtr <- mkRegU;
     Reg#(Bool) rLast <- mkRegU;
     Reg#(Bool) rRunning <- mkReg(False);
 
-    rule rinit if(config_.device_ifc.start() && !rRunning);
+    rule rinit if(csrs.internal.start() && !rRunning);
         rInConv[0] <= 0;
         rCtr <= 0;
         rRunning <= True;
         rLast <= False;
-        config_.device_ifc.pixel_ctr <= 0;
-        config_.device_ifc.finished <= False;
-        config_.device_ifc.start <= False;
+        csrs.internal.start_accepted();
     endrule
     
     //from the AXI stream to the converter module
@@ -152,12 +189,12 @@ module [Module] mkRGB2YCbCrTop(RGB2YCbCr_ifc#(dw))
     rule rfwd_out if(rRunning);
     	let ycbcr <- conv.data.response.get();
         let new_ctr = rCtr + 1;
-        config_.device_ifc.pixel_ctr <= new_ctr;
+        csrs.internal.pixel_ctr(new_ctr);
         rCtr <= new_ctr;
         rInConv[1] <= rInConv[1] - 1;
         Bool last = False;
         if(rLast && rInConv[1] == 1) begin
-            config_.device_ifc.finished <= True;
+            csrs.internal.finish();
             rRunning <= False;
             last = True;
         end
@@ -172,8 +209,9 @@ module [Module] mkRGB2YCbCrTop(RGB2YCbCr_ifc#(dw))
 
     interface fab_data_rd = axis_rd.fab;
     interface fab_data_wr = axis_wr.fab;
-    interface fab_config_rd = config_.bus_ifc.s_rd;
-    interface fab_config_wr = config_.bus_ifc.s_wr;
+    interface fab_config_rd = axi_csrs.s_rd;
+    interface fab_config_wr = axi_csrs.s_wr;
+    method irq = axi_csrs.irqs[0];
 endmodule
 
 module mkRGB2YCbCrConv#(NumProxy#(w) _, RGB2YCbCr_params#(w) params)(RGB2YCbCrConv_ifc)
