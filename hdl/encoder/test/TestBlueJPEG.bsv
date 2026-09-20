@@ -80,7 +80,7 @@ module [Module] test(TestHandler)
             _prx_qsc            : ?,
             _prx_dpw            : ?,
             en_tiler            : True,
-            double_buffer_tiler : False,
+            double_buffer_tiler : True,
             en_chroma           : True
         };
     BlueJPEG_ifc dut    <- mkBlueJPEG(jpeg_cfg);
