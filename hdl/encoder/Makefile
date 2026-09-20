@@ -36,6 +36,7 @@ ifeq ($(RUN_TEST),)
 # RUN_TEST=TestZigZag
 # RUN_TEST=TestMCUProc
 # RUN_TEST=TestRLE
+# RUN_TEST=TestJPEGBitstream
 RUN_TEST=TestBlueJPEG
 endif
 
