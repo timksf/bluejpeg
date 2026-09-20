@@ -12,7 +12,7 @@ import ZigZag :: *;
 
 //Complements encoded scan data with all markers and tables required for a
 //JPEG/JFIF compliant image:
-//  SOI -> APP0 -> DQT×(1|2) -> SOF0 -> DHT×(2|4) -> SOS -> scan data -> EOI
+//  SOI -> APP0 -> DQTx(1|2) -> SOF0 -> DHTx(2|4) -> SOS -> scan data -> EOI
 //
 //Scan data arrives via scan_data Put as Maybe#(Bit#(8)):
 //  tagged Valid byte  -  scan data byte (already byte-stuffed)

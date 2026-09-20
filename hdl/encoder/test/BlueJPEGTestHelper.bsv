@@ -3,7 +3,8 @@ package BlueJPEGTestHelper;
 import StmtFSM :: *;
 import PrintUtil :: *;
 
-import BlueCSR :: *;
+import BlueCSRCore :: *;
+import BlueCSRTb :: *;
 
 function Action bjpeg_expect_wr_ok(BlueCSRTbAccessor_ifc#(32) cfg_acc);
     action

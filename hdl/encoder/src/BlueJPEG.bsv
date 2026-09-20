@@ -10,7 +10,9 @@ import DefaultValue :: *;
 import ModuleCollect :: *;
 
 import BlueAXI :: *;
-import BlueCSR :: *;
+import BlueCSRAXI4LiteAdapter :: *;
+import BlueCSRCore :: *;
+import BlueCSRExport :: *;
 
 import Types :: *;
 import PrintUtil :: *;
@@ -135,7 +137,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     // ---- AXI-Lite config ----
 
-    BlueCSRAccess_ifc#(32, 32, BlueJPEGCfg_ifc) csrs <- create_blue_csr(blue_jpeg_csrs, False);
+    BlueCSRAccess_ifc#(32, 32, 0, BlueJPEGCfg_ifc) csrs <- create_blue_csr(blue_jpeg_csrs, False);
 
     RegMapDoc_t#(32) doc <- doc_blue_csr(blue_jpeg_csrs);
     messageM(doc.reg_defs);
@@ -390,6 +392,14 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         let mode   = csrs.internal.subsampling();
         let eff_mode = cfg.en_chroma ? mode : YCBCR_444;
 
+        if(width == 0 || height == 0 || width > fromInteger(valueOf(max_imw)))
+            cfg_valid = False;
+        if(width[2:0] != 0 || height[2:0] != 0)
+            cfg_valid = False;
+        if((eff_mode == YCBCR_422 || eff_mode == YCBCR_420) && width[3:0] != 0)
+            cfg_valid = False;
+        if(eff_mode == YCBCR_420 && height[3:0] != 0)
+            cfg_valid = False;
         if(!cfg.en_chroma && mode != YCBCR_444)
             cfg_valid = False;
 

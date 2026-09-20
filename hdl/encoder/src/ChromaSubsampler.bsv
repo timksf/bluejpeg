@@ -32,7 +32,7 @@ module mkChromaSubsampler#(NumProxy#(block_w) _)(ChromaSubsampler_ifc)
     Reg#(Bool)          rg_row_odd <- mkReg(False);
     Reg#(UInt#(8))      rg_prev    <- mkRegU;
 
-    function UInt#(8) avg2(UInt#(8) a, UInt#(8) b);
+    function UInt#(8) avg_2(UInt#(8) a, UInt#(8) b);
         UInt#(9) sum = zeroExtend(a) + zeroExtend(b) + 1;
         return truncate(sum >> 1);
     endfunction
@@ -66,13 +66,13 @@ module mkChromaSubsampler#(NumProxy#(block_w) _)(ChromaSubsampler_ifc)
 
     rule r_422_odd (rg_mode == YCBCR_422 && col_odd);
         let px = f_in.first; f_in.deq;
-        f_out.enq(avg2(rg_prev, px));
+        f_out.enq(avg_2(rg_prev, px));
         advance_col();
     endrule
 
     //4:2:0 -> horizontal and vertical averaging
-    //Line buffer: stores horizontal averages of even rows (block_w/2 entries)
-    RegFile#(Bit#(line_addr_w), UInt#(8)) line_buf <- mkRegFileFull;
+    //Keep the unrounded pair sum so the four-pixel average is rounded only once.
+    RegFile#(Bit#(line_addr_w), UInt#(9)) line_buf <- mkRegFileFull;
 
     rule r_420_even_col (rg_mode == YCBCR_420 && !col_odd);
         let px = f_in.first; f_in.deq;
@@ -82,16 +82,16 @@ module mkChromaSubsampler#(NumProxy#(block_w) _)(ChromaSubsampler_ifc)
 
     rule r_420_odd_even_row (rg_mode == YCBCR_420 && col_odd && !rg_row_odd);
         let px = f_in.first; f_in.deq;
-        let h_avg = avg2(rg_prev, px);
-        line_buf.upd(pair_idx, h_avg);
+        UInt#(9) pair_sum = zeroExtend(rg_prev) + zeroExtend(px);
+        line_buf.upd(pair_idx, pair_sum);
         advance_col();
     endrule
 
     rule r_420_odd_odd_row (rg_mode == YCBCR_420 && col_odd && rg_row_odd);
         let px = f_in.first; f_in.deq;
-        let h_avg = avg2(rg_prev, px);
-        let v_avg = avg2(h_avg, line_buf.sub(pair_idx));
-        f_out.enq(v_avg);
+        UInt#(9) pair_sum = zeroExtend(rg_prev) + zeroExtend(px);
+        UInt#(10) sum = zeroExtend(pair_sum) + zeroExtend(line_buf.sub(pair_idx)) + 2;
+        f_out.enq(truncate(sum >> 2));
         advance_col();
     endrule
 

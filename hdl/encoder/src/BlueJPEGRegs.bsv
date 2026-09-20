@@ -4,7 +4,7 @@ import FIFO :: *;
 import GetPut :: *;
 import SpecialFIFOs :: *;
 
-import BlueCSR :: *;
+import BlueCSRCore :: *;
 
 import Types :: *;
 import TableStorage :: *;
@@ -56,8 +56,11 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
 
     Reg#(Bool)              rg_start;
     Reg#(Bit#(1))           rg_done;
-    Reg#(Bit#(1))           rg_error;
-    Reg#(Bool)              rg_inv_cfg;
+    ReadOnly#(Bit#(1))      rg_error;
+    ReadOnly#(Bool)         rg_inv_cfg;
+
+    PulseWire               pw_error   <- mkPulseWire;
+    PulseWire               pw_inv_cfg <- mkPulseWire;
 
     Reg#(Bool)              rg_ready;
     Reg#(Bool)              rg_cg_busy;
@@ -112,8 +115,14 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     rg_ready    <- csr_reg_ro( 'h08, False,   0, "RDY",   "Module Ready",    "Indicates whether module is ready for processing.");
     rg_cg_busy  <- csr_reg_ro( 'h08, False,   1, "CGB",   "Codegen Busy",    "Indicates whether huffman table codegen is running.");
     rg_done     <- csr_reg_ro( 'h08, 'b0,     4, "DONE",  "Module Done",     "Indicates whether processing has finished for current image.");
-    rg_error    <- csr_reg_w1c('h08, 'b0,    16, "ERR",   "Module Error",    "Indicates whether an error occurred processing the current image.");
-    rg_inv_cfg  <- csr_reg_w1c('h08, False,  17, "INV",   "Invalid Config",  "Indicates an invalid encoder configuration.");
+    rg_error <- csr_reg_w1c(
+        'h08, 'b0, 16, pw_error ? tagged Valid 1 : tagged Invalid,
+        "ERR", "Module Error", "Indicates whether an error occurred processing the current image."
+    );
+    rg_inv_cfg <- csr_reg_w1c(
+        'h08, False, 17, pw_inv_cfg ? tagged Valid True : tagged Invalid,
+        "INV", "Invalid Config", "Indicates an invalid encoder configuration."
+    );
 
 
     csr_reg_def('h0C, "IMSZ", "Image Size.");
@@ -161,8 +170,8 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     method perf_rst         = action rg_perf_cycles <= 0; rg_perf_pixels <= 0; rg_perf_byteso <= 0; endaction;
 
     method table_sts(r, c)  = action rg_ready <= r; rg_cg_busy <= c;    endaction;
-    method error            = action rg_error       <= 1;               endaction;
-    method invalid_cfg      = action rg_inv_cfg     <= True;            endaction;
+    method error            = pw_error.send;
+    method invalid_cfg      = pw_inv_cfg.send;
     method finish           = action rg_done        <= 1;               endaction;
     method clear_cg_trig    = action rg_cg_trigger  <= False;           endaction;
 

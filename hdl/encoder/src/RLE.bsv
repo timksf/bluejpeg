@@ -94,8 +94,11 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
                 f_out.enq(tagged AC ACRun_t { run: truncate(rg_zero_run), val: val });
                 rg_zero_run <= 0;
                 
-                if (rg_idx == 63) begin rg_idx <= 0; f_comp.deq; end
-                else              rg_idx <= rg_idx + 1;
+                if (rg_idx == 63) begin 
+                    rg_idx <= 0; f_comp.deq; 
+                end else begin
+                    rg_idx <= rg_idx + 1;
+                end
             end
         end
     endrule
@@ -111,8 +114,11 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
             rg_zero_run <= 0;
             rg_stall_val <= tagged Invalid; //clear stall
             
-            if (rg_idx == 63) begin rg_idx <= 0; f_comp.deq; end
-            else              rg_idx <= rg_idx + 1;
+            if (rg_idx == 63) begin 
+                rg_idx <= 0; f_comp.deq; 
+            end else begin
+                rg_idx <= rg_idx + 1;
+            end
         end
     endrule
 

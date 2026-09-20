@@ -70,8 +70,7 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _, Bool double_buffer)(Imag
     FIFO#(t) f_line     <- mkFIFO;
     FIFO#(t) f_block    <- mkFIFO;
 
-    BankedMemoryAccessor_ifc#(2, memory_addrw, bpp, 1) i_pixels <-
-        mkBankedMemoryBRAM2Accessor(bram_cfg);
+    BankedMemoryAccessor_ifc#(2, memory_addrw, bpp, 1) i_pixels <- mkBankedMemoryBRAM2Accessor(bram_cfg);
 
     Reg#(Bit#(line_w))          rg_imgw             <- mkRegU;
     Reg#(Bit#(buffer_countw))   rg_buf_threshold    <- mkRegU;

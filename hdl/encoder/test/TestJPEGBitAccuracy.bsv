@@ -6,7 +6,8 @@ import Connectable :: *;
 import Clocks :: *;
 
 import BlueAXI :: *;
-import BlueCSR :: *;
+import BlueCSRCore :: *;
+import BlueCSRTb :: *;
 import AXI4_Lite_Test :: *;
 import BlueJPEGTestHelper :: *;
 

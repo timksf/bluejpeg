@@ -139,9 +139,9 @@ module mkQuantize_RT#(NumProxy#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#(b
     Reg#(Bit#(6))   rg_pxcnt  <- mkReg(0);
     FIFO#(PixType_t) f_mode   <- mkSizedFIFO(4);
 
-    FIFO#(Int#(bits)) f_table_pending <- mkPipelineFIFO;
-    FIFO#(QuantMul_t#(bits, bits_frac)) f_mul <- mkPipelineFIFO;
-    FIFO#(Int#(bits_mul)) f_prod <- mkPipelineFIFO;
+    FIFO#(Int#(bits))                   f_table_pending <- mkPipelineFIFO;
+    FIFO#(QuantMul_t#(bits, bits_frac)) f_mul           <- mkPipelineFIFO;
+    FIFO#(Int#(bits_mul))               f_prod          <- mkPipelineFIFO;
 
     Reg#(QuantTableIdx_t) rg_tableidx <- mkReg(QuantTableIdx_t { pt: Luma, idx: 0 });
     Wire#(Int#(32)) w_mult <- mkWire;

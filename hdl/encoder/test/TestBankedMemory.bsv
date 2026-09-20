@@ -2,6 +2,7 @@ package TestBankedMemory;
 
 import BRAM :: *;
 import DefaultValue :: *;
+import RegFile :: *;
 import StmtFSM :: *;
 import Vector :: *;
 
@@ -16,6 +17,70 @@ typedef 3 SharedBankAddrWidth;
 typedef 32 DataWidth;
 typedef 4 MaskWidth;
 
+module mkTestMemory2(BankedMemoryPort_ifc#(1, 2, 2, DataWidth, 1));
+
+    RegFile#(Bit#(2), Bit#(DataWidth)) i_memory <- mkRegFileFull;
+    Reg#(Bit#(2)) rg_read_address <- mkRegU;
+
+    function BankedMemoryPhysicalRWPort_ifc#(2, DataWidth, 1) make_port(
+            Integer port_index
+        );
+        return interface BankedMemoryPhysicalRWPort_ifc;
+            method request_ready = True;
+
+            method ActionValue#(Maybe#(Bit#(DataWidth))) request(
+                    BankedMemoryRequest_t#(2, DataWidth, 1) req
+                );
+                if(req.write)
+                    i_memory.upd(req.address, req.data);
+                else
+                    rg_read_address <= req.address;
+                return tagged Invalid;
+            endmethod
+
+            method ActionValue#(Bit#(DataWidth)) response();
+                return i_memory.sub(rg_read_address);
+            endmethod
+        endinterface;
+    endfunction
+
+    interface port = genWith(make_port);
+
+endmodule
+
+module mkTestBankedMemoryStructural(Empty);
+
+    BRAM_Configure cfg_bram = defaultValue;
+    cfg_bram.memorySize = 4;
+
+    BankedMemoryConfig_t direct_cfg = BankedMemoryConfig_t {
+        address_base: 0,
+        memory_size : 4,
+        bank_depth  : 4,
+        mapping     : BANK_MAP_CONTIGUOUS
+    };
+
+    BankedMemoryConfig_t ping_cfg = BankedMemoryConfig_t {
+        address_base: 0,
+        memory_size : 8,
+        bank_depth  : 4,
+        mapping     : BANK_MAP_CONTIGUOUS
+    };
+
+    BankedMemoryPort_ifc#(2, 1, 2, DataWidth, MaskWidth) i_wide_bank <-
+        mkBankedMemoryBRAM2PortBE(cfg_bram);
+    Vector#(1, BankedMemoryPort_ifc#(2, 1, 2, DataWidth, MaskWidth)) wide_banks =
+        cons(i_wide_bank, nil);
+    BankedMemoryAccessor_ifc#(1, 3, DataWidth, MaskWidth) i_c_lt_p <-
+        mkBankedMemoryAccessor(wide_banks, direct_cfg);
+
+    Vector#(2, BankedMemoryPort_ifc#(1, 0, 2, DataWidth, MaskWidth)) ping_banks <-
+        replicateM(mkBankedMemoryLUTRAM1PortBE);
+    BankedMemoryAccessor_ifc#(2, 3, DataWidth, MaskWidth) i_ping_pong <-
+        mkBankedMemoryAccessor(ping_banks, ping_cfg);
+
+endmodule
+
 module [Module] mkTestBankedMemory(TestHandler);
 
     function print_s = print_mod_pre_color_t_s;
@@ -28,11 +93,10 @@ module [Module] mkTestBankedMemory(TestHandler);
         address_base     : 4,
         memory_size      : 32,
         bank_depth       : 16,
-        outstanding_reads: 4,
         mapping          : BANK_MAP_INTERLEAVED
     };
 
-    Vector#(2, BankedMemoryPort_ifc#(2, BankAddrWidth, DataWidth, MaskWidth)) i_banks <-
+    Vector#(2, BankedMemoryPort_ifc#(2, 1, BankAddrWidth, DataWidth, MaskWidth)) i_banks <-
         replicateM(mkBankedMemoryBRAM2PortBE(bank_bram_cfg));
     BankedMemoryAccessor_ifc#(2, AddrWidth, DataWidth, MaskWidth) dut <-
         mkBankedMemoryAccessor(i_banks, bank_cfg);
@@ -46,13 +110,12 @@ module [Module] mkTestBankedMemory(TestHandler);
         address_base     : 0,
         memory_size      : 16,
         bank_depth       : 16,
-        outstanding_reads: 1,
         mapping          : BANK_MAP_CONTIGUOUS
     };
 
-    BankedMemoryPort_ifc#(2, 4, DataWidth, MaskWidth) i_direct_bank <-
+    BankedMemoryPort_ifc#(2, 1, 4, DataWidth, MaskWidth) i_direct_bank <-
         mkBankedMemoryBRAM2PortBE(direct_bram_cfg);
-    Vector#(1, BankedMemoryPort_ifc#(2, 4, DataWidth, MaskWidth)) direct_banks =
+    Vector#(1, BankedMemoryPort_ifc#(2, 1, 4, DataWidth, MaskWidth)) direct_banks =
         cons(i_direct_bank, nil);
     BankedMemoryAccessor_ifc#(2, 4, DataWidth, MaskWidth) direct_dut <-
         mkBankedMemoryAccessor(direct_banks, direct_cfg);
@@ -61,7 +124,6 @@ module [Module] mkTestBankedMemory(TestHandler);
         address_base     : 3,
         memory_size      : 12,
         bank_depth       : 6,
-        outstanding_reads: 2,
         mapping          : BANK_MAP_CONTIGUOUS
     };
     BankedAddressMapper_ifc#(2, 5, 3) i_contiguous_mapper <-
@@ -74,21 +136,65 @@ module [Module] mkTestBankedMemory(TestHandler);
         address_base     : 0,
         memory_size      : 32,
         bank_depth       : 8,
-        outstanding_reads: 4,
         mapping          : BANK_MAP_INTERLEAVED
     };
 
     Vector#(4, BankedMemoryPort_ifc#(
-        1, SharedBankAddrWidth, DataWidth, MaskWidth)) i_shared_banks <-
+        1, 1, SharedBankAddrWidth, DataWidth, MaskWidth)) i_shared_banks <-
         replicateM(mkBankedMemoryBRAM1PortBE(shared_bram_cfg));
     BankedMemoryAccessor_ifc#(3, SharedAddrWidth, DataWidth, MaskWidth) shared_dut <-
         mkBankedMemoryAccessor(i_shared_banks, shared_cfg);
 
     Vector#(4, BankedMemoryPort_ifc#(
-        2, SharedBankAddrWidth, DataWidth, MaskWidth)) i_shared_dual_banks <-
+        2, 1, SharedBankAddrWidth, DataWidth, MaskWidth)) i_shared_dual_banks <-
         replicateM(mkBankedMemoryBRAM2PortBE(shared_bram_cfg));
-    BankedMemoryAccessor_ifc#(4, SharedAddrWidth, DataWidth, MaskWidth) shared_dual_dut <-
+    BankedMemoryAccessor_ifc#(3, SharedAddrWidth, DataWidth, MaskWidth) shared_dual_dut <-
         mkBankedMemoryAccessor(i_shared_dual_banks, shared_cfg);
+
+    BankedMemoryConfig_t comb_cfg = BankedMemoryConfig_t {
+        address_base: 0,
+        memory_size : 12,
+        bank_depth  : 4,
+        mapping     : BANK_MAP_INTERLEAVED
+    };
+
+    Vector#(3, BankedMemoryPort_ifc#(1, 0, 2, DataWidth, MaskWidth)) i_comb_banks <-
+        replicateM(mkBankedMemoryLUTRAM1PortBE);
+    BankedMemoryAccessor_ifc#(4, 4, DataWidth, MaskWidth) comb_dut <-
+        mkBankedMemoryAccessor(i_comb_banks, comb_cfg);
+
+    BankedMemoryConfig_t scalar_cfg = BankedMemoryConfig_t {
+        address_base: 0,
+        memory_size : 4,
+        bank_depth  : 4,
+        mapping     : BANK_MAP_CONTIGUOUS
+    };
+
+    BankedMemoryPort_ifc#(1, 0, 2, DataWidth, MaskWidth) i_scalar_bank <-
+        mkBankedMemoryLUTRAM1PortBE;
+    Vector#(1, BankedMemoryPort_ifc#(1, 0, 2, DataWidth, MaskWidth)) scalar_banks =
+        cons(i_scalar_bank, nil);
+    BankedMemoryAccessor_ifc#(1, 2, DataWidth, MaskWidth) scalar_dut <-
+        mkBankedMemoryAccessor(scalar_banks, scalar_cfg);
+
+    BankedMemoryConfig_t ping_cfg = BankedMemoryConfig_t {
+        address_base: 0,
+        memory_size : 8,
+        bank_depth  : 4,
+        mapping     : BANK_MAP_CONTIGUOUS
+    };
+
+    Vector#(2, BankedMemoryPort_ifc#(1, 0, 2, DataWidth, MaskWidth)) i_ping_banks <-
+        replicateM(mkBankedMemoryLUTRAM1PortBE);
+    BankedMemoryAccessor_ifc#(2, 3, DataWidth, MaskWidth) ping_dut <-
+        mkBankedMemoryAccessor(i_ping_banks, ping_cfg);
+
+    BankedMemoryPort_ifc#(1, 2, 2, DataWidth, 1) i_latency_2_bank <-
+        mkTestMemory2;
+    Vector#(1, BankedMemoryPort_ifc#(1, 2, 2, DataWidth, 1)) latency_2_banks =
+        cons(i_latency_2_bank, nil);
+    BankedMemoryAccessor_ifc#(1, 2, DataWidth, 1) latency_2_dut <-
+        mkBankedMemoryAccessor(latency_2_banks, scalar_cfg);
 
     Reg#(UInt#(32)) rg_cycle      <- mkReg(0);
     Reg#(UInt#(32)) rg_read_start <- mkReg(0);
@@ -205,7 +311,7 @@ module [Module] mkTestBankedMemory(TestHandler);
             end
         endaction
 
-        /* One lane may pipeline reads to different banks; responses stay ordered. */
+        /* A second read may occupy the request skid until the first is consumed. */
         dut.port[0].request(read_req(4));
         dut.port[0].request(read_req(5));
         action
@@ -243,18 +349,16 @@ module [Module] mkTestBankedMemory(TestHandler);
             endaction
         endpar
 
-        /* Four logical ports share the two physical ports of one dual-port bank. */
+        /* C=P+1 clients share the two physical ports of one dual-port bank. */
         par
             shared_dual_dut.port[0].request(write_req(0, 'h30303030, 'b1111));
             shared_dual_dut.port[1].request(write_req(4, 'h41414141, 'b1111));
             shared_dual_dut.port[2].request(write_req(8, 'h52525252, 'b1111));
-            shared_dual_dut.port[3].request(write_req(12, 'h63636363, 'b1111));
         endpar
         par
             shared_dual_dut.port[0].request(read_req(0));
             shared_dual_dut.port[1].request(read_req(4));
             shared_dual_dut.port[2].request(read_req(8));
-            shared_dual_dut.port[3].request(read_req(12));
         endpar
         par
             action
@@ -269,10 +373,6 @@ module [Module] mkTestBankedMemory(TestHandler);
                 let data <- shared_dual_dut.port[2].response();
                 if(data != 'h52525252) $finish();
             endaction
-            action
-                let data <- shared_dual_dut.port[3].response();
-                if(data != 'h63636363) $finish();
-            endaction
         endpar
 
         /* Sustained same-bank traffic must make progress on every logical port. */
@@ -281,7 +381,8 @@ module [Module] mkTestBankedMemory(TestHandler);
         rg_fairness_active <= False;
         action
             for(Integer client = 0; client < 3; client = client + 1) begin
-                if(rg_fairness_accepts[client] <= 12) begin
+                if(rg_fairness_accepts[client] < 20 ||
+                        rg_fairness_accepts[client] > 23) begin
                     print_fmt($format("Logical port %0d starved after %0d accepted requests",
                         client, rg_fairness_accepts[client]), RED);
                     $finish();
@@ -310,6 +411,86 @@ module [Module] mkTestBankedMemory(TestHandler);
         action
             let data <- direct_dut.port[1].response();
             if(data != 'hcafef00d) $finish();
+        endaction
+
+        /* L=0 covers decode, arbitration, memory, and response muxing in one cycle. */
+        par
+            scalar_dut.port[0].request(write_req(2, 'hfacecafe, 'b1111));
+            ping_dut.port[0].request(write_req(1, 'h0a0b0c0d, 'b1111));
+            ping_dut.port[1].request(write_req(5, 'h1a1b1c1d, 'b1111));
+            comb_dut.port[0].request(write_req(0, 'h01020304, 'b1111));
+            comb_dut.port[1].request(write_req(1, 'h11121314, 'b1111));
+            comb_dut.port[2].request(write_req(2, 'h21222324, 'b1111));
+        endpar
+        latency_2_dut.port[0].request(BankedMemoryRequest_t {
+            address   : 1,
+            data      : 'h76543210,
+            write_mask: 1,
+            write     : True
+        });
+        action
+            rg_read_start <= rg_cycle;
+            latency_2_dut.port[0].request(BankedMemoryRequest_t {
+                address   : 1,
+                data      : 0,
+                write_mask: 0,
+                write     : False
+            });
+        endaction
+        action
+            let data <- latency_2_dut.port[0].response();
+            if(data != 'h76543210 || rg_cycle - rg_read_start != 2) begin
+                print_fmt($format("Fixed L=2 response returned after %0d cycles",
+                    rg_cycle - rg_read_start), RED);
+                $finish();
+            end
+        endaction
+        par
+            scalar_dut.port[0].request(read_req(2));
+            action
+                let data <- scalar_dut.port[0].response();
+                if(data != 'hfacecafe) begin
+                    print_s("1/1/1 combinational access added a router cycle", RED);
+                    $finish();
+                end
+            endaction
+        endpar
+        par
+            ping_dut.port[0].request(read_req(1));
+            ping_dut.port[1].request(read_req(5));
+            action
+                let data <- ping_dut.port[0].response();
+                if(data != 'h0a0b0c0d) $finish();
+            endaction
+            action
+                let data <- ping_dut.port[1].response();
+                if(data != 'h1a1b1c1d) $finish();
+            endaction
+        endpar
+        par
+            comb_dut.port[0].request(read_req(0));
+            comb_dut.port[1].request(read_req(1));
+            comb_dut.port[2].request(read_req(2));
+            action
+                let data <- comb_dut.port[0].response();
+                if(data != 'h01020304) $finish();
+            endaction
+            action
+                let data <- comb_dut.port[1].response();
+                if(data != 'h11121314) $finish();
+            endaction
+            action
+                let data <- comb_dut.port[2].response();
+                if(data != 'h21222324) $finish();
+            endaction
+        endpar
+
+        /* A delayed consumer uses one response skid; writes remain eligible. */
+        scalar_dut.port[0].request(read_req(2));
+        scalar_dut.port[0].request(write_req(1, 'h12345678, 'b1111));
+        action
+            let data <- scalar_dut.port[0].response();
+            if(data != 'hfacecafe) $finish();
         endaction
 
         print_s("Finished successfully", GREEN);

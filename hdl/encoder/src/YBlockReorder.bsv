@@ -58,9 +58,10 @@ module mkYBlockReorder#(NumProxy#(max_blk_cols) _, Bool buffer_in)(YBlockReorder
     Reg#(Bit#(6))   rg_pix_idx  <- mkReg(0);      //pixel index within current block (0..63)
 
     //output phase for odd rows: False = reading stored pair, True = forwarding live pair
-    Reg#(Bool)      rg_out_live <- mkReg(False);
-    Reg#(Bit#(13))  rg_out_blk  <- mkReg(0);      //output block index
-    Reg#(Bit#(6))   rg_out_pix  <- mkReg(0);      //output pixel index within block
+    Reg#(Bool)      rg_out_live     <- mkReg(False);
+    Reg#(Bit#(13))  rg_out_blk      <- mkReg(0);      //output block index
+    Reg#(Bit#(6))   rg_out_pix      <- mkReg(0);      //output pixel index within block
+    Reg#(Bool)      rg_read_pending <- mkReg(False);
 
     //address for a pixel within a stored block-row
     function Bit#(bram_addr_w) bram_addr(Bit#(13) blk, Bit#(6) pix);
@@ -102,18 +103,20 @@ module mkYBlockReorder#(NumProxy#(max_blk_cols) _, Bool buffer_in)(YBlockReorder
 
     //4:2:0, odd block-row, stored phase: read stored blocks from BRAM
     //emit two consecutive stored blocks, then switch to live
-    rule r_read_req (rg_mode == YCBCR_420 && rg_row_odd && !rg_out_live);
+    rule r_read_req (rg_mode == YCBCR_420 && rg_row_odd && !rg_out_live && !rg_read_pending);
         bram.portA.request.put(BRAMRequest {
             write: False,
             responseOnWrite: False,
             address: bram_addr(rg_out_blk, rg_out_pix),
             datain: ?
         });
+        rg_read_pending <= True;
     endrule
 
-    rule r_read_resp (rg_mode == YCBCR_420 && rg_row_odd && !rg_out_live);
+    rule r_read_resp (rg_mode == YCBCR_420 && rg_row_odd && !rg_out_live && rg_read_pending);
         let px <- bram.portA.response.get();
         f_out.enq(px);
+        rg_read_pending <= False;
 
         if (rg_out_pix == 63) begin
             rg_out_pix <= 0;
@@ -151,23 +154,25 @@ module mkYBlockReorder#(NumProxy#(max_blk_cols) _, Bool buffer_in)(YBlockReorder
     endrule
 
     method Action configure(SubsamplingMode_t mode, Bit#(13) blk_cols);
-        rg_mode     <= mode;
-        rg_blk_cols <= blk_cols;
-        rg_row_odd  <= False;
-        rg_blk_idx  <= 0;
-        rg_pix_idx  <= 0;
-        rg_out_live <= False;
-        rg_out_blk  <= 0;
-        rg_out_pix  <= 0;
+        rg_mode         <= mode;
+        rg_blk_cols     <= blk_cols;
+        rg_row_odd      <= False;
+        rg_blk_idx      <= 0;
+        rg_pix_idx      <= 0;
+        rg_out_live     <= False;
+        rg_out_blk      <= 0;
+        rg_out_pix      <= 0;
+        rg_read_pending <= False;
     endmethod
 
     method Action rewind();
-        rg_row_odd  <= False;
-        rg_blk_idx  <= 0;
-        rg_pix_idx  <= 0;
-        rg_out_live <= False;
-        rg_out_blk  <= 0;
-        rg_out_pix  <= 0;
+        rg_row_odd      <= False;
+        rg_blk_idx      <= 0;
+        rg_pix_idx      <= 0;
+        rg_out_live     <= False;
+        rg_out_blk      <= 0;
+        rg_out_pix      <= 0;
+        rg_read_pending <= False;
     endmethod
 
     interface pixel_in  = toPut(f_in);

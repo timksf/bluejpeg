@@ -1,223 +1,163 @@
 # Banked memory
 
-`BankedMemory.bsv` presents several physical memory banks as one address range
-with multiple logical request ports. The number of logical clients, the number
-of banks, and the number of physical ports on each bank are independent.
+`BankedMemory.bsv` presents independently implemented memory banks as one
+address range with multiple logical clients. The bank count (`N`), physical
+ports per bank (`P`), client count (`C`), and fixed backend read latency (`L`)
+are independent compile-time parameters.
 
-In particular, having fewer clients than banks does not prevent two clients
-from selecting the same bank. With two clients and four banks, both clients may
-access bank 2 in the same cycle. A single-port bank queues and serializes those
-requests; a dual-port bank can issue both together.
+The router has one invariant:
 
-## Structure
+> A conflict-free request reaches a physical memory port in the cycle in which
+> the client calls `request()`. Storage is used only for a real conflict or
+> delayed response consumption.
 
-The main types have distinct roles:
+## Interfaces
 
-| Type or parameter | Meaning |
+| Type | Role |
 | --- | --- |
-| `BankedMemoryAccessor_ifc#(n_clients, ...)` | Logical request/response ports used by clients |
-| `Vector#(n_banks, ...)` | Independently accessible physical banks |
-| `BankedMemoryPort_ifc#(n_memory_ports, ...)` | Physical read/write ports available on every bank |
-| `BankedMemoryConfig_t` | Address range, mapping mode, bank capacity, and queue depth |
+| `BankedMemoryAccessor_ifc#(C, ...)` | Logical client request/response ports |
+| `BankedMemoryPort_ifc#(P, L, ...)` | One physical bank and its latency contract |
+| `BankedMemoryPhysicalRWPort_ifc` | Technology-adapter request/response boundary |
+| `BankedMemoryConfig_t` | Address range, bank depth, and mapping mode |
 
-For a contended configuration, a request follows this path:
+`BankedMemoryPhysicalRWPort_ifc.request_ready()` reports whether that physical
+port can accept work in the current cycle. `request()` returns a
+`Maybe#(Bit#(dw))`:
 
-```text
-logical port -> per-client FIFO -> address mapper
-             -> per-bank/per-physical-port FIFO -> round-robin arbiter
-             -> physical bank port
-```
+- For `L=0`, a read must return `tagged Valid data` from `request()` in the same
+  cycle. A write returns `tagged Invalid`.
+- For `L>0`, `request()` returns `tagged Invalid`; read data must be available
+  from `response()` exactly `L` cycles later.
 
-Each logical port has its own input FIFO, so different logical ports can call
-`request()` in the same cycle even when all addresses map to one bank. Each
-physical port of each bank has an independent round-robin arbiter. A logical
-port that remains queued therefore cannot be starved by another continuously
-requesting logical port in the same arbitration group.
+The router tracks the winning client alongside a delayed read in an `L`-stage
+metadata pipeline. Variable-latency or transactional memories must be adapted
+outside this router to a fixed-latency contract.
 
-When `n_clients <= n_memory_ports`, no sharing is required: logical port `i`
-uses physical port `i` directly. This preserves the low-latency path used by
-the image tiler. In a contended configuration, logical port `i` is assigned to
-physical port `i % n_memory_ports`; clients assigned to the same physical port
-are scheduled round-robin. Different banks always arbitrate independently.
+## Request path and arbitration
 
-Read responses are returned through the logical port that issued the read and
-remain in that port's request order, including when consecutive reads select
-different banks. Writes do not produce responses.
+Every client has a live request wire and one pending conflict register. There
+is no request FIFO and no sequential stage in the uncontended path.
+
+For every cycle, the router:
+
+1. Uses a client's pending request, or otherwise its live request.
+2. Maps all active addresses to banks and local addresses.
+3. Independently selects up to `P` distinct clients for every bank.
+4. Calls the selected physical bank ports directly.
+5. Captures only live requests that did not win.
+
+Each bank has one round-robin pointer. Its `P` winners are selected in rotating
+priority order and the pointer advances past the final winner. Consequently,
+fully contended clients receive approximately one grant per `ceil(C/P)` grant
+rounds. A pending request cannot be bypassed by a later request from the same
+client because that client's logical request method remains backpressured until
+the pending register clears.
+
+There is no `C <= P` versus `C > P` architecture split and no permanent
+`client % P` assignment. With a two-port bank, any two requesting clients can
+win together. Requests to different banks issue independently, including the
+`N=2, P=1, C=2` ping-pong case.
+
+## Response flow and ordering
+
+Each client has at most one read in flight and one response skid register. A
+return can bypass that register directly into a simultaneous `response()`
+call; otherwise it occupies the register until consumed. No response FIFO is
+instantiated.
+
+While a read response is outstanding, writes remain eligible if there is no
+older pending request. A subsequent read may occupy the client's pending
+request register and blocks all still-later requests. Request issue order and
+read response order are therefore preserved per client.
+
+For an `L=0` backend, address decode, bank selection, arbitration, local-address
+selection, memory read, and response muxing are combinational. In BSV, a caller
+that wants a same-cycle response normally places `request()` and `response()`
+in separately schedulable rules so the compiler can order producer, router,
+and consumer. If the response is not consumed in that cycle, the response skid
+captures it.
 
 ## Address mapping
 
-Both mappings first calculate:
+Both mappings first compute `offset = address - address_base`.
+
+Interleaved mapping uses:
 
 ```text
-offset = address - address_base
+bank          = offset % N
+local_address = offset / N
 ```
 
-For `BANK_MAP_INTERLEAVED`:
-
-```text
-bank          = offset % n_banks
-local_address = offset / n_banks
-```
-
-For `BANK_MAP_CONTIGUOUS`:
+Contiguous mapping uses:
 
 ```text
 bank          = offset / bank_depth
 local_address = offset % bank_depth
 ```
 
-For four banks of depth four, with `address_base = 0` and
-`memory_size = 16`, the mappings are:
+Interleaving spreads adjacent accesses across banks. Contiguous mapping is
+suited to ping-pong and double-buffer storage where each bank owns one region.
+Constant power-of-two divisors are optimized to bit selection by synthesis.
 
-| Global address | Interleaved `(bank, local)` | Contiguous `(bank, local)` |
-| ---: | ---: | ---: |
-| 0 | `(0, 0)` | `(0, 0)` |
-| 1 | `(1, 0)` | `(0, 1)` |
-| 2 | `(2, 0)` | `(0, 2)` |
-| 3 | `(3, 0)` | `(0, 3)` |
-| 4 | `(0, 1)` | `(1, 0)` |
-| 8 | `(0, 2)` | `(2, 0)` |
-| 12 | `(0, 3)` | `(3, 0)` |
-| 15 | `(3, 3)` | `(3, 3)` |
+`in_range(address)` checks `[address_base, address_base + memory_size)`. Callers
+must not submit out-of-range addresses.
 
-Interleaving is useful when adjacent logical addresses should spread across
-banks. Contiguous mapping is useful when each bank should own one consecutive
-address region.
+The mapper checks these configuration properties at elaboration:
 
-`in_range(address)` reports whether an address is in
-`[address_base, address_base + memory_size)`. The accessor does not reject an
-out-of-range request automatically; the caller must check when that is needed.
+- `N`, `P`, and `C` are at least one through the module's numeric provisos.
+- `address_base` is non-negative.
+- `memory_size` and `bank_depth` are greater than zero.
+- The configured global range fits `aw`.
+- `bank_depth` fits the physical bank address width.
+- `memory_size <= N * bank_depth`, so a valid mapped address cannot truncate
+  to a nonexistent bank or physical location.
 
-## Single-port banks: two clients, four banks
+## Backends
 
-This interleaved configuration has four banks, one physical port per bank, and
-two logical clients. Each bank stores four words.
+| Constructor | Ports | Read latency | Write mask |
+| --- | ---: | ---: | --- |
+| `mkBankedMemoryLUTRAM1Port` | 1 | 0 | No (`mw=1`) |
+| `mkBankedMemoryLUTRAM1PortBE` | 1 | 0 | Yes |
+| `mkBankedMemoryBRAM1Port` | 1 | 1 | No (`mw=1`) |
+| `mkBankedMemoryBRAM1PortBE` | 1 | 1 | Yes |
+| `mkBankedMemoryBRAM2Port` | 2 | 1 | No (`mw=1`) |
+| `mkBankedMemoryBRAM2PortBE` | 2 | 1 | Yes |
 
-```bsv
-BRAM_Configure bram_cfg = defaultValue;
-bram_cfg.memorySize = 4;
+`mkBankedMemoryPortAdapter` attaches a chosen numeric latency to a vector of
+custom physical ports, for example an asynchronous SRAM macro (`L=0`) or a
+pipelined SRAM macro (`L>=1`). `mkBankedMemoryBRAM2Accessor` remains the
+single-bank/two-client convenience constructor used by the image tiler.
 
-BankedMemoryConfig_t cfg = BankedMemoryConfig_t {
-    address_base     : 0,
-    memory_size      : 16,
-    bank_depth       : 4,
-    outstanding_reads: 4,
-    mapping          : BANK_MAP_INTERLEAVED
-};
+## Collision contract
 
-Vector#(4, BankedMemoryPort_ifc#(1, 2, 32, 4)) banks <-
-    replicateM(mkBankedMemoryBRAM1PortBE(bram_cfg));
-BankedMemoryAccessor_ifc#(2, 4, 32, 4) memory <-
-    mkBankedMemoryAccessor(banks, cfg);
-```
+The router arbitrates ports, not individual addresses. It deliberately does
+not manufacture coherence for simultaneous accesses to one local address.
 
-Addresses 0 and 4 both map to bank 0 (`(0, 0)` and `(0, 1)`). These calls may
-therefore occur together:
+- Read/read returns whatever two independent backend reads define.
+- Read/write data is backend-defined (old data, new data, or undefined).
+- Write/write final data is backend-defined and may be undefined.
 
-```bsv
-par
-    memory.port[0].request(BankedMemoryRequest_t {
-        address   : 0,
-        data      : 'h11111111,
-        write_mask: 'b1111,
-        write     : True
-    });
-    memory.port[1].request(BankedMemoryRequest_t {
-        address   : 4,
-        data      : 'h22222222,
-        write_mask: 'b1111,
-        write     : True
-    });
-endpar
-```
+Code requiring deterministic same-address collision behavior must provide it
+in the physical backend adapter or prevent the collision before the router.
 
-Both requests enter separate client queues. Because bank 0 is single-port, its
-arbiter issues one request and then the other. Under sustained traffic the
-grant sequence alternates between ports 0 and 1; neither can starve.
-
-The same hardware can use contiguous mapping by changing only `mapping`. In
-that case, addresses 8 and 9 both select bank 2 and are serialized in the same
-way.
-
-Requests to different banks do not interfere. For example, interleaved
-addresses 0 and 1 select banks 0 and 1, so both single-port banks can issue in
-parallel.
-
-## Dual-port banks: four clients, four banks
-
-Replacing each backend with `mkBankedMemoryBRAM2PortBE` gives every bank two
-physical ports. The example below also exposes four logical clients, so each
-physical port fairly shares two clients when all four target one bank.
+## Example
 
 ```bsv
 BRAM_Configure bram_cfg = defaultValue;
 bram_cfg.memorySize = 4;
 
 BankedMemoryConfig_t cfg = BankedMemoryConfig_t {
-    address_base     : 32,
-    memory_size      : 16,
-    bank_depth       : 4,
-    outstanding_reads: 4,
-    mapping          : BANK_MAP_CONTIGUOUS
+    address_base: 0,
+    memory_size : 16,
+    bank_depth  : 4,
+    mapping     : BANK_MAP_INTERLEAVED
 };
 
-Vector#(4, BankedMemoryPort_ifc#(2, 2, 32, 4)) banks <-
+Vector#(4, BankedMemoryPort_ifc#(2, 1, 2, 32, 4)) banks <-
     replicateM(mkBankedMemoryBRAM2PortBE(bram_cfg));
-BankedMemoryAccessor_ifc#(4, 6, 32, 4) memory <-
+BankedMemoryAccessor_ifc#(5, 4, 32, 4) memory <-
     mkBankedMemoryAccessor(banks, cfg);
 ```
 
-Global addresses 40 through 43 select bank 2. If logical ports 0 through 3
-all request that range together, the expected grant pattern is:
-
-| Arbitration round | Bank 2 physical port 0 | Bank 2 physical port 1 |
-| ---: | ---: | ---: |
-| 0 | logical port 0 | logical port 1 |
-| 1 | logical port 2 | logical port 3 |
-| 2 | logical port 0 | logical port 1 |
-
-Thus the bank issues up to two accesses per cycle. Contention is serialized
-only among clients sharing a physical port. The round-robin pointer advances
-after each grant, so a continuously queued client progresses.
-
-With only two logical clients and the same dual-port banks, both clients use
-the direct path. They may select the same bank and issue simultaneously on its
-two physical ports.
-
-The mapping and backend choices are orthogonal. Using the configurations above,
-the representative same-bank cases are:
-
-| Physical bank | Mapping | Example global addresses | Result for two clients |
-| --- | --- | --- | --- |
-| Single-port | Interleaved, base 0 | 0 and 4 -> bank 0 | Accepted together, issued serially |
-| Single-port | Contiguous, base 0 | 8 and 9 -> bank 2 | Accepted together, issued serially |
-| Dual-port | Interleaved, base 0 | 0 and 4 -> bank 0 | Both can issue together |
-| Dual-port | Contiguous, base 32 | 40 and 41 -> bank 2 | Both can issue together |
-
-## Backend choices
-
-| Constructor | Physical ports per bank | Byte enable |
-| --- | ---: | --- |
-| `mkBankedMemoryBRAM1Port` | 1 | No; `mask_w = 1` |
-| `mkBankedMemoryBRAM1PortBE` | 1 | Yes |
-| `mkBankedMemoryBRAM2Port` | 2 | No; `mask_w = 1` |
-| `mkBankedMemoryBRAM2PortBE` | 2 | Yes |
-
-`mkBankedMemoryBRAM2Accessor` is a convenience constructor for one dual-port
-bank with two direct logical ports. It is the configuration used by
-`ImageTilingEngine`.
-
-## Configuration constraints and behavior
-
-- `outstanding_reads` must be greater than zero. In a contended configuration
-  it also sizes internal request, owner, and response queues.
-- `bank_depth` must match the capacity of each backend bank. Ensure
-  `memory_size <= n_banks * bank_depth`.
-- `addr_w` must represent the configured global address range, and
-  `bank_addr_w` must represent every local bank address.
-- Each logical port accepts at most one request per cycle. Backpressure is
-  applied when its queues or response tracking are full.
-- Do not rely on backend-specific behavior for simultaneous writes to the same
-  local address through both ports of a dual-port BRAM.
-- The provided BRAM adapters request responses only for reads. A custom backend
-  must likewise retain each read response until `response()` consumes it.
+This is a four-bank, dual-port-per-bank, five-client router. `C=P+3` only
+changes how often conflicts occur; it does not select a queued architecture.
