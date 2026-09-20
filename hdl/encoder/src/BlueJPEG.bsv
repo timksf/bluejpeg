@@ -92,10 +92,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         Add#(TLog#(TMul#(max_imw, 8)), m__, TLog#(TMul#(2, TMul#(max_imw, 8)))),
         Add#(TLog#(TMul#(max_imw, 8)), n__, TLog#(TAdd#(TMul#(max_imw, 8), 1))),
 
-        // -- mkYBlockReorder: max_blk_cols = max_imw / 64 (8×8 blocks across image width).
-        //    BRAM stores max_blk_cols × 64 Y pixels; address width = ceil(log2(that)).
-        //    Supports non-power-of-2 max widths (e.g. 2560).
-        Div#(max_imw, 64, max_blk_cols),
+        // -- Reorder buffers need one entry per 8-pixel block column, so max_blk_cols
+        //    is max_imw / 8. The 64 pixels in an 8×8 block determine buffer depth,
+        //    not the number of horizontal block columns.
+        Div#(max_imw, 8, max_blk_cols),
         NumAlias#(bram_addr_w, TLog#(TMul#(max_blk_cols, 64))),
         Add#(g__, bram_addr_w, 32),
 
@@ -140,7 +140,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     BlueCSRAccess_ifc#(32, 32, 0, BlueJPEGCfg_ifc) csrs <- create_blue_csr(blue_jpeg_csrs, False);
 
     RegMapDoc_t#(32) doc <- doc_blue_csr(blue_jpeg_csrs);
-    messageM(doc.reg_defs);
+    // messageM(doc.reg_defs);
 
     //wrap csrs into axi4l slave
     let axi_csrs <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
@@ -420,7 +420,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             YCBCR_420: begin mcu_cols = (blk_cols + 1) >> 1;   mcu_rows = (blk_rows + 1) >> 1;   end
         endcase
 
-        rg_state        <= cfg_valid ? S_RUNNING : S_IDLE;
+        rg_state        <= cfg_valid ? S_CONFIGURE : S_IDLE;
         rg_mcu_w        <= mcu_cols;
         rg_mcu_h        <= mcu_rows;
         rg_mcu_x        <= 0;
@@ -429,10 +429,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         rg_du_pix       <= 0;
 
         if(cfg_valid) begin
-            if(cfg.en_tiler) begin
+            if(cfg.en_tiler)
                 img_tiler.set_img_width(truncate(width));
-                img_tiler.start();
-            end
 
             du_disp.set_mode(eff_mode);
             y_reord.configure(eff_mode, truncate(blk_cols));
@@ -441,12 +439,18 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             cr_reord_cb.configure(eff_mode, truncate(blk_cols));
             cr_reord_cr.configure(eff_mode, truncate(blk_cols));
             fwriter.configure(width, height, eff_mode);
-
-            fwriter.start();
-            csrs.internal.perf_rst();
         end else begin
             csrs.internal.invalid_cfg();
         end
+    endrule
+
+    // Start one cycle after configuration so submodules observe their new registers.
+    rule r_configure (rg_state == S_CONFIGURE);
+        if(cfg.en_tiler)
+            img_tiler.start();
+        fwriter.start();
+        csrs.internal.perf_rst();
+        rg_state <= S_RUNNING;
     endrule
 
     rule rperf (rg_state == S_RUNNING);
