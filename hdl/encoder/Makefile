@@ -63,7 +63,7 @@ EXTRA_FLAGS+=-I $(PWD)/src/BDPI -I $(PWD)/../../dep/BlueSY/src -Xc++ -std=c++23 
 # EXTRA_FLAGS+=-Wno-format-overflow -Wno-dangling-else
 
 # Flags added to simulator execution
-RUN_FLAGS+=#-V dump.vcd 
+RUN_FLAGS+=-V dump.vcd 
 #-F -A
 
 # Add additional parameters for IP-XACT generation. Passed directly to Vivado.

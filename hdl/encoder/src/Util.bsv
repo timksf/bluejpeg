@@ -243,4 +243,25 @@ function Action print_du(DU_t#(t, w, h) mcu, String name, TermColor c) provisos(
     endaction
 endfunction
 
+function Get#(t) guard_get(Get#(t) source, Bool cond);
+    return (interface Get;
+        method get if(cond) = source.get;
+    endinterface);
+endfunction
+
+function Put#(t) guard_put(Put#(t) sink, Bool cond);
+    return (interface Put;
+        method put if (cond) = sink.put;
+    endinterface);
+endfunction
+
+function Put#(t) expand_put(Put#(t) sink, Action a);
+    return (interface Put;
+        method Action put(t x);
+            sink.put(x);
+            a;
+        endmethod
+    endinterface);
+endfunction
+
 endpackage

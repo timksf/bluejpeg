@@ -14,18 +14,25 @@ import ImageTilingEngine :: *;
 module [Module] mkDCT1D_16b(DCT1D_ifc#(16));
     NumProxy#(12) f_scale = ?;
     DCT1D_ifc#(16) ifc();
-    mkDCT1D#(f_scale, False, False) __int(ifc);
+    mkDCT1D#(f_scale, False, True) __int(ifc);
     return ifc;
 endmodule
 
 
-module [Module] mkDCT2D_12b(DCT2D_ifc#(12));
-    NumProxy#(8) f_scale = ?;
-    DCT2D_ifc#(12) ifc();
-    mkDCT2D#(f_scale, False) __int(ifc);
+module [Module] mkDCT1D_12b(DCT1D_ifc#(12));
+    NumProxy#(12) f_scale = ?;
+    DCT1D_ifc#(12) ifc();
+    mkDCT1D#(f_scale, False, True) __int(ifc);
     return ifc;
 endmodule
 
+
+module [Module] mkDCT1D_12b_rigid(DCT1D_ifc#(12));
+    NumProxy#(12) f_scale = ?;
+    DCT1D_ifc#(12) ifc();
+    mkDCT1D_rigid#(f_scale, False, False) __int(ifc);
+    return ifc;
+endmodule
 
 module [Module] mkDCT2D_Optimized_12b(DCT2DOpt_ifc#(12));
     NumProxy#(8) f_scale = ?;
