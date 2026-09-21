@@ -11,8 +11,7 @@ import BlueJPEG :: *;
 import DCT2D_Optimized :: *;
 import ImageTilingEngine :: *;
 
-(* synthesize *)
-module mkDCT1D_16b(DCT1D_ifc#(16));
+module [Module] mkDCT1D_16b(DCT1D_ifc#(16));
     NumProxy#(12) f_scale = ?;
     DCT1D_ifc#(16) ifc();
     mkDCT1D#(f_scale, False, False) __int(ifc);
@@ -20,8 +19,7 @@ module mkDCT1D_16b(DCT1D_ifc#(16));
 endmodule
 
 
-(* synthesize *)
-module mkDCT2D_12b(DCT2D_ifc#(12));
+module [Module] mkDCT2D_12b(DCT2D_ifc#(12));
     NumProxy#(8) f_scale = ?;
     DCT2D_ifc#(12) ifc();
     mkDCT2D#(f_scale, False) __int(ifc);
@@ -29,28 +27,25 @@ module mkDCT2D_12b(DCT2D_ifc#(12));
 endmodule
 
 
-(* synthesize *)
-module mkDCT2D_Optimized_12b(DCT2DOpt_ifc#(12));
+module [Module] mkDCT2D_Optimized_12b(DCT2DOpt_ifc#(12));
     NumProxy#(8) f_scale = ?;
     DCT2DOpt_ifc#(12) ifc();
-    mkDCT2D_Opt#(f_scale, False, True, False) __int(ifc);
+    mkDCT2D_Opt#(f_scale, False, True, False, True) __int(ifc);
     return ifc;
 endmodule
 
 
-(* synthesize *)
-module mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
+module [Module] mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
     NumProxy#(12) f_scale = ?;
     DCT2DOpt_ifc#(14) ifc();
-    mkDCT2D_Opt#(f_scale, False, True, False) __int(ifc);
+    mkDCT2D_Opt#(f_scale, False, True, False, True) __int(ifc);
     return ifc;
 endmodule
 
 
-(* synthesize *)
-module mkDUProc_16b(DUProc_t#(16));
+module [Module] mkDUProc_16b(DUProc_t#(16));
 
-    //this module is used for utilization analysis
+    //this module [Module] is used for utilization analysis
     //for simplicity, use the same clock for the DCT
 
     let clk <- exposeCurrentClock;
@@ -77,8 +72,7 @@ module mkDUProc_16b(DUProc_t#(16));
 endmodule
 
 
-(* synthesize *)
-module mkImageTilingEngine_1920(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
+module [Module] mkImageTilingEngine_1920(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
     NumProxy#(1920) max_width = ?;
     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
     mkImageTilingEngine#(max_width, False) __int(ifc);
@@ -86,7 +80,7 @@ module mkImageTilingEngine_1920(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
 endmodule
 
 // (* synthesize *)
-// module mkImageTilingEngine_2560(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
+// module [Module] mkImageTilingEngine_2560(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
 //     NumProxy#(2560) max_width = ?;
 //     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
 //     mkImageTilingEngine#(max_width, False) __int(ifc);
@@ -94,15 +88,15 @@ endmodule
 // endmodule
 
 // (* synthesize *)
-// module mkImageTilingEngine_3840(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
+// module [Module] mkImageTilingEngine_3840(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
 //     NumProxy#(3840) max_width = ?;
 //     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
 //     mkImageTilingEngine#(max_width, False) __int(ifc);
 //     return ifc;
 // endmodule
 
-(* synthesize, default_clock_osc="aclk", default_reset="aresetn" *)
-module mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+(* default_clock_osc="aclk", default_reset="aresetn" *)
+module [Module] mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;
@@ -132,8 +126,8 @@ module mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 endmodule
 
 
-(* synthesize, default_clock_osc="aclk", default_reset="aresetn" *)
-module mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+(* default_clock_osc="aclk", default_reset="aresetn" *)
+module [Module] mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;
@@ -163,8 +157,8 @@ module mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 endmodule
 
 
-(* synthesize, default_clock_osc="aclk", default_reset="aresetn" *)
-module mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+(* default_clock_osc="aclk", default_reset="aresetn" *)
+module [Module] mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;
@@ -194,8 +188,8 @@ module mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 endmodule
 
 
-(* synthesize, default_clock_osc="aclk", default_reset="aresetn" *)
-module mkBlueJPEGGrayTop_720_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+(* default_clock_osc="aclk", default_reset="aresetn" *)
+module [Module] mkBlueJPEGGrayTop_720_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;

@@ -77,9 +77,9 @@ RUN_FLAGS+=#-V dump.vcd
 VERILOG_SIM:=iverilog
 
 # custom TCL flow
-# PART=xcku3p-ffvb676-2-e
-PART=xc7a35tcpg236-1
-SCRIPT=$(CURDIR)/src/synth.tcl
+PART=xcku3p-ffvb676-2-e
+# PART=xc7a35tcpg236-1
+SCRIPT=$(CURDIR)/src/script/synth.tcl
 CONSTRAINTS=$(CURDIR)/src/constr.tcl
 
 
