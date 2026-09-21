@@ -30,7 +30,7 @@ typedef 32 WordWidth;
 typedef 2560 MaxImgWidth;
 typedef 16 DCTScale;
 typedef 16 QuantScale;
-typedef 16 DPw;
+typedef 8 PixelWidth;
 
 module mkBackpressuredAXI4StreamRd#(Integer bufferSize)(AXI4_Stream_Rd#(datawidth, userwidth))
     provisos(Div#(datawidth, 8, keepwidth));
@@ -119,14 +119,14 @@ module [Module] test(TestHandler)
     let cur_clk <- exposeCurrentClock;
     let cur_rst <- exposeCurrentReset;
 
-    BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, DPw) jpeg_cfg =
+    BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, PixelWidth) jpeg_cfg =
         BlueJPEGCfg_t {
             slow_clock          : cur_clk,
             slow_reset          : cur_rst,
             _prx_miw            : ?,
             _prx_dsc            : ?,
             _prx_qsc            : ?,
-            _prx_dpw            : ?,
+            _prx_pixw           : ?,
             en_tiler            : True,
             double_buffer_tiler : False,
             en_chroma           : False

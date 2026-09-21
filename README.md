@@ -15,6 +15,7 @@ a ready-to-use core.
 | `max_img_width` | Maximum supported image width; affects BRAM sizing | 1920       |
 | `dct_scale`     | Internal DCT fixed-point bit width                 | 12, 14, 16 |
 | `quant_scale`   | Quantization arithmetic bit width                  | 12, 14, 16 |
+| `pixel_width`   | Input component sample width (currently JPEG: 8)   | 8          |
 
 ### Runtime configuration (AXI4-Lite)
 

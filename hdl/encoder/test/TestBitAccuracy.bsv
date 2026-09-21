@@ -18,7 +18,8 @@ import TableStorage :: *;
 
 import "BDPI" function ActionValue#(Bit#(1024)) mcu_proc_ref(Bit#(1024) input_flat, Bool luma_not_chroma, Bool optimized_dct);
 
-typedef 16 DPw;
+typedef 8  PixelWidth;
+typedef 16 DCTWidth;
 
 //
 // Bit-accuracy regression test.
@@ -58,7 +59,7 @@ module [Module] mkTestBitAccuracy(TestHandler);
         dct_safe_arith   : False
     };
 
-    DUProc_t#(DPw) dut <- mkDUProc(dut_cfg, clocked_by fast_clock, reset_by fast_reset);
+    DUProcLegacy_t#(PixelWidth, DCTWidth) dut <- mkDUProc(dut_cfg, clocked_by fast_clock, reset_by fast_reset);
     TableStorage_ifc#(12) tables <- mkTableStorage(quant_scale, True, clocked_by fast_clock, reset_by fast_reset);
 
     // --- Synchronization ---
@@ -74,8 +75,8 @@ module [Module] mkTestBitAccuracy(TestHandler);
     Reg#(Bit#(7)) rg_count_in   <- mkReg(0, clocked_by fast_clock, reset_by fast_reset);
     Reg#(Bit#(7)) rg_count_out  <- mkReg(0, clocked_by fast_clock, reset_by fast_reset);
 
-    Reg#(Vector#(64, Int#(DPw))) rg_mcu_in   <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
-    Reg#(Vector#(64, Int#(DPw))) rg_mcu_out  <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
+    Reg#(Vector#(64, UInt#(PixelWidth))) rg_mcu_in  <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
+    Reg#(Vector#(64, Int#(DCTWidth)))    rg_mcu_out <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
     Reg#(Bit#(1024))             rg_input_flat <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
     Reg#(Bool)                   rg_is_luma   <- mkReg(True, clocked_by fast_clock, reset_by fast_reset);
 
@@ -91,12 +92,12 @@ module [Module] mkTestBitAccuracy(TestHandler);
 
             // Generate random block data
             action
-                Vector#(64, Int#(DPw)) block_1d = newVector;
+                Vector#(64, UInt#(PixelWidth)) block_1d = newVector;
                 Vector#(64, Int#(16)) ref_input = newVector;
                 for (Integer i = 0; i < 64; i = i + 1) begin
                     let pix <- rand_pix();
                     Int#(16) pix_i16 = unpack(zeroExtend(pack(pix)));
-                    block_1d[i] = truncate(pix_i16);
+                    block_1d[i] = truncate(pix);
                     ref_input[i] = pix_i16;
                 end
                 rg_mcu_in    <= block_1d;
@@ -127,12 +128,12 @@ module [Module] mkTestBitAccuracy(TestHandler);
                 Vector#(64, Int#(16)) ref_out = unpack(ref_packed);
 
                 // Compute max absolute difference
-                Int#(DPw) max_diff = 0;
+                Int#(DCTWidth) max_diff = 0;
                 Bit#(32) mismatch_count = 0;
                 for (Integer i = 0; i < 64; i = i + 1) begin
-                    Int#(DPw) hw_val  = rg_mcu_out[i];
-                    Int#(DPw) ref_val = truncate(ref_out[i]);
-                    Int#(DPw) diff = (hw_val > ref_val) ? hw_val - ref_val : ref_val - hw_val;
+                    Int#(DCTWidth) hw_val  = rg_mcu_out[i];
+                    Int#(DCTWidth) ref_val = truncate(ref_out[i]);
+                    Int#(DCTWidth) diff = (hw_val > ref_val) ? hw_val - ref_val : ref_val - hw_val;
                     if (diff > max_diff) max_diff = diff;
                     if (diff != 0) mismatch_count = mismatch_count + 1;
                 end
@@ -147,8 +148,8 @@ module [Module] mkTestBitAccuracy(TestHandler);
 
                     // Print first few mismatching coefficients for debugging
                     for (Integer i = 0; i < 64; i = i + 1) begin
-                        Int#(DPw) hw_v  = rg_mcu_out[i];
-                        Int#(DPw) ref_v = truncate(ref_out[i]);
+                        Int#(DCTWidth) hw_v  = rg_mcu_out[i];
+                        Int#(DCTWidth) ref_v = truncate(ref_out[i]);
                         if (hw_v != ref_v)
                             print_fmt($format("  [%0d] hw=%0d ref=%0d", i, hw_v, ref_v), YELLOW);
                     end

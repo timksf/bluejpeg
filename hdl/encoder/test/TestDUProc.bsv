@@ -19,8 +19,8 @@ import TableStorage :: *;
 
 import "BDPI" function ActionValue#(Bit#(1024)) mcu_proc_ref(Bit#(1024) input_flat, Bool luma_not_chroma, Bool optimized_dct);
 
-//datapath width
-typedef 14 DPw;
+typedef 8  PixelWidth;
+typedef 14 DCTWidth;
 
 module [Module] mkTestDUProc(TestHandler);
 
@@ -48,7 +48,7 @@ module [Module] mkTestDUProc(TestHandler);
         dct_safe_arith   : False
     };
 
-    DUProc_t#(DPw) dut <- mkDUProc(dut_cfg, clocked_by fast_clock, reset_by fast_reset);
+    DUProcLegacy_t#(PixelWidth, DCTWidth) dut <- mkDUProc(dut_cfg, clocked_by fast_clock, reset_by fast_reset);
     TableStorage_ifc#(12) tables <- mkTableStorage(quant_scale, True, clocked_by fast_clock, reset_by fast_reset);
 
     //synchronization of FSM start and stop
@@ -63,8 +63,8 @@ module [Module] mkTestDUProc(TestHandler);
     Reg#(Bit#(7)) rg_count_in  <- mkReg(0, clocked_by fast_clock, reset_by fast_reset);
     Reg#(Bit#(7)) rg_count_out <- mkReg(0, clocked_by fast_clock, reset_by fast_reset);
 
-    Reg#(Vector#(64, Int#(DPw))) rg_mcu_in  <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
-    Reg#(Vector#(64, Int#(DPw))) rg_mcu_out <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
+    Reg#(Vector#(64, UInt#(PixelWidth))) rg_mcu_in  <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
+    Reg#(Vector#(64, Int#(DCTWidth)))    rg_mcu_out <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
     Reg#(Bit#(1024))            input_flat <- mkRegU(clocked_by fast_clock, reset_by fast_reset);
 
     mkConnection(dut.qtable, tables.quant_scaled);
@@ -75,7 +75,7 @@ module [Module] mkTestDUProc(TestHandler);
         while(rg_counter < 10) seq
             dut.du_mode.put(Luma);
             action
-                Vector#(64, Int#(DPw)) block_1d = newVector;
+                Vector#(64, UInt#(PixelWidth)) block_1d = newVector;
                 Vector#(64, Int#(16)) ref_input = newVector;
 
                 // block_1d = vec(
@@ -104,7 +104,7 @@ module [Module] mkTestDUProc(TestHandler);
                     let pix <- rand_pix();
 
                     Int#(16) pix_i16    = unpack(zeroExtend(pack(pix)));
-                    block_1d[i]         = truncate(pix_i16);
+                    block_1d[i]         = truncate(pix);
                     ref_input[i]        = pix_i16;
                 end
                 
@@ -134,28 +134,28 @@ module [Module] mkTestDUProc(TestHandler);
                 let ref_out_packed <- mcu_proc_ref(input_flat, True, !dut_cfg.dct_safe_arith);
                 Vector#(64, Int#(16)) ref_out = unpack(ref_out_packed);
                 
-                function Int#(DPw) calc_diff(Integer i);
-                    Int#(DPw) hw_val     = rg_mcu_out[i];
-                    Int#(DPw) ref_val    = truncate(ref_out[i]);
+                function Int#(DCTWidth) calc_diff(Integer i);
+                    Int#(DCTWidth) hw_val     = rg_mcu_out[i];
+                    Int#(DCTWidth) ref_val    = truncate(ref_out[i]);
                     return (hw_val > ref_val) ? hw_val - ref_val : ref_val - hw_val;
                 endfunction
-                Vector#(64, Int#(DPw)) diffs = genWith(calc_diff);
-                function Int#(DPw) max_func(Int#(DPw) a, Int#(DPw) b) = (a > b) ? a : b;
-                Int#(DPw) max_diff = fold(max_func, diffs);
+                Vector#(64, Int#(DCTWidth)) diffs = genWith(calc_diff);
+                function Int#(DCTWidth) max_func(Int#(DCTWidth) a, Int#(DCTWidth) b) = (a > b) ? a : b;
+                Int#(DCTWidth) max_diff = fold(max_func, diffs);
 
                 print_mod_pre_color_t_f($format("Test %0d, max error: %0d", rg_counter, max_diff), WHITE);
                 
                 if (max_diff > 5 || verbose) begin
-                    Vector#(8, Vector#(8, Int#(DPw))) blk_in = newVector;
+                    Vector#(8, Vector#(8, UInt#(PixelWidth))) blk_in = newVector;
                     for (Integer r = 0; r < 8; r = r + 1) begin
                         for (Integer c = 0; c < 8; c = c + 1) begin
                             blk_in[r][c] = rg_mcu_in[r * 8 + c];
                         end
                     end
 
-                    Vector#(64, Int#(DPw)) ref_out_12b = map(truncate, ref_out);
+                    Vector#(64, Int#(DCTWidth)) ref_out_dct = map(truncate, ref_out);
                     print_du(DU_t { block: blk_in }, "Input MCU", BLUE);
-                    print_fmt($format("Reference : ") + fshow(ref_out_12b), CYAN);
+                    print_fmt($format("Reference : ") + fshow(ref_out_dct), CYAN);
                     print_fmt($format("DUT Output: ") + fshow(rg_mcu_out), YELLOW);
                 end
                 

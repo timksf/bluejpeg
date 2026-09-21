@@ -41,6 +41,13 @@ module [Module] mkDCT2D_Optimized_12b(DCT2DOpt_ifc#(12));
     return ifc;
 endmodule
 
+module [Module] mkDCT2D_Optimized_rigid(DCT2DOptRigid_ifc#(8));
+    NumProxy#(12) f_scale = ?;
+    DCT2DOptRigid_ifc#(8) ifc();
+    mkDCT2D_Opt_rigid#(f_scale, False, True, False, False) __int(ifc);
+    return ifc;
+endmodule
+
 
 module [Module] mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
     NumProxy#(12) f_scale = ?;
@@ -50,7 +57,7 @@ module [Module] mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
 endmodule
 
 
-module [Module] mkDUProc_16b(DUProc_t#(16));
+module [Module] mkDUProc_16b(DUProcLegacy_t#(8, 16));
 
     //this module [Module] is used for utilization analysis
     //for simplicity, use the same clock for the DCT
@@ -73,8 +80,34 @@ module [Module] mkDUProc_16b(DUProc_t#(16));
         dct_safe_arith   : False
     };
 
-    DUProc_t#(16) ifc();
+    DUProcLegacy_t#(8, 16) ifc();
     mkDUProc#(mcuproc_cfg) __int(ifc);
+    return ifc;
+endmodule
+
+
+module [Module] mkDUProc_Opt_8b(DUProc_t#(8));
+
+    let clk <- exposeCurrentClock;
+    let rst <- exposeCurrentReset;
+
+    NumProxy#(12) dct_scale     = ?;
+    NumProxy#(12) quant_scale   = ?;
+
+    let du_proc_cfg = DUProcCfg {
+        slow_clock       : clk,
+        slow_reset       : rst,
+        buffer_in        : True,
+        _dct_scale       : dct_scale,
+        scale_in_dct     : False,
+        transpose_in_dct : False,
+        _q_scale         : quant_scale,
+        debug            : False,
+        dct_safe_arith   : False
+    };
+
+    DUProc_t#(8) ifc();
+    mkDUProc_Opt#(du_proc_cfg) __int(ifc);
     return ifc;
 endmodule
 
@@ -103,7 +136,7 @@ endmodule
 // endmodule
 
 (* default_clock_osc="aclk", default_reset="aresetn" *)
-module [Module] mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+module [Module] mkBlueJPEGTop_1920_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;
@@ -113,7 +146,7 @@ module [Module] mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
     NumProxy#(1920) maximw = ?;
     NumProxy#(12)   fscale = ?;
-    NumProxy#(16)   dpw = ?;
+    NumProxy#(8)    pixel_width = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
         slow_clock          : dct_clock,
@@ -121,9 +154,9 @@ module [Module] mkBlueJPEGTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_miw            : maximw,
         _prx_dsc            : fscale,
         _prx_qsc            : fscale,
-        _prx_dpw            : dpw,
+        _prx_pixw           : pixel_width,
         en_tiler            : True,
-        double_buffer_tiler : False,
+        double_buffer_tiler : True,
         en_chroma           : True
     };
     BlueJPEG_ifc ifc();
@@ -134,7 +167,7 @@ endmodule
 
 
 (* default_clock_osc="aclk", default_reset="aresetn" *)
-module [Module] mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+module [Module] mkBlueJPEGTop_2560_12_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;
@@ -144,7 +177,7 @@ module [Module] mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
     NumProxy#(2560) maximw = ?;
     NumProxy#(12)   fscale = ?;
-    NumProxy#(16)   dpw = ?;
+    NumProxy#(8)    pixel_width = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
         slow_clock          : dct_clock,
@@ -152,7 +185,7 @@ module [Module] mkBlueJPEGTop_2560_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_miw            : maximw,
         _prx_dsc            : fscale,
         _prx_qsc            : fscale,
-        _prx_dpw            : dpw,
+        _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : False,
         en_chroma           : True
@@ -165,7 +198,7 @@ endmodule
 
 
 (* default_clock_osc="aclk", default_reset="aresetn" *)
-module [Module] mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+module [Module] mkBlueJPEGGrayTop_1920_12_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;
@@ -175,7 +208,7 @@ module [Module] mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
     NumProxy#(1920) maximw = ?;
     NumProxy#(12)   fscale = ?;
-    NumProxy#(16)   dpw = ?;
+    NumProxy#(8)    pixel_width = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
         slow_clock          : dct_clock,
@@ -183,7 +216,7 @@ module [Module] mkBlueJPEGGrayTop_1920_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_miw            : maximw,
         _prx_dsc            : fscale,
         _prx_qsc            : fscale,
-        _prx_dpw            : dpw,
+        _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : False,
         en_chroma           : False
@@ -196,7 +229,7 @@ endmodule
 
 
 (* default_clock_osc="aclk", default_reset="aresetn" *)
-module [Module] mkBlueJPEGGrayTop_720_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
+module [Module] mkBlueJPEGGrayTop_720_12_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;
@@ -206,7 +239,7 @@ module [Module] mkBlueJPEGGrayTop_720_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
 
     NumProxy#(720) maximw = ?;
     NumProxy#(12)   fscale = ?;
-    NumProxy#(16)   dpw = ?;
+    NumProxy#(8)    pixel_width = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
         slow_clock          : dct_clock,
@@ -214,7 +247,7 @@ module [Module] mkBlueJPEGGrayTop_720_12_12_16#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_miw            : maximw,
         _prx_dsc            : fscale,
         _prx_qsc            : fscale,
-        _prx_dpw            : dpw,
+        _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : False,
         en_chroma           : False

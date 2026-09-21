@@ -30,7 +30,7 @@ typedef 32 WordWidth;
 typedef 2560 MaxImgWidth;
 typedef 16 DCTScale;
 typedef 16 QuantScale;
-typedef 16 DPw;
+typedef 8 PixelWidth;
 
 
 module [Module] mkTestBlueJPEGGray(TestHandler);
@@ -71,14 +71,14 @@ module [Module] test(TestHandler)
     let cur_rst <- exposeCurrentReset;
 
     // ---- DUT: BlueJPEG ----
-    BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, DPw) jpeg_cfg = 
+    BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, PixelWidth) jpeg_cfg =
         BlueJPEGCfg_t {
             slow_clock          : cur_clk,
             slow_reset          : cur_rst,
             _prx_miw            : ?,
             _prx_dsc            : ?,
             _prx_qsc            : ?,
-            _prx_dpw            : ?,
+            _prx_pixw           : ?,
             en_tiler            : True,
             double_buffer_tiler : False,
             en_chroma           : False

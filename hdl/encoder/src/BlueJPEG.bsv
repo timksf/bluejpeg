@@ -2,6 +2,7 @@ package BlueJPEG;
 
 import FIFO :: *;
 import FIFOF :: *;
+import Assert :: *;
 import GetPut :: *;
 import Connectable :: *;
 import ClientServer :: *;
@@ -52,7 +53,7 @@ typedef struct {
     NumProxy#(max_img_width)    _prx_miw;
     NumProxy#(dct_scale)        _prx_dsc;
     NumProxy#(quant_scale)      _prx_qsc;
-    NumProxy#(datapath_width)   _prx_dpw;
+    NumProxy#(pixel_width)      _prx_pixw;
     Bool en_tiler;
     Bool double_buffer_tiler;
     Bool en_chroma;
@@ -60,7 +61,7 @@ typedef struct {
     numeric type max_img_width,
     numeric type dct_scale,
     numeric type quant_scale,
-    numeric type datapath_width
+    numeric type pixel_width
 );
 
 typedef enum { S_IDLE, S_CONFIGURE, S_RUNNING, S_FLUSH, S_DONE } FrameState_t deriving(Eq, Bits, FShow);
@@ -73,10 +74,16 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         max_imw,
         dct_scale,
         quant_scale,
-        dpw
+        pixel_bits
     ) cfg)(BlueJPEG_ifc) provisos(
         // -- quant_scale fits in 32 bits (mkTableStorage, mkDUProc via mkQuantize_RT)
         Add#(a__, quant_scale, 32),
+
+        // -- JPEG component samples are 8 bits
+        Add#(0, pixel_bits, 8),
+
+        // -- DCT2D widens centered samples by 7 bits
+        NumAlias#(dct_bits, TAdd#(pixel_bits, 7)),
 
         // -- mkImageTilingEngine: line-width counter fits in BRAM address width (always true)
         Add#(c__, TLog#(max_imw), TLog#(TMul#(max_imw, 8))),
@@ -104,17 +111,20 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         Add#(b__, TLog#(TMul#(max_blk_cols, 16)), 32),
 
         // -- mkHuffEncoder:
-        //dpw >= 1
-        //dpw <= 32
+        //dct_bits >= 1
+        //dct_bits <= 32
         //flog2
         //truncate in calc_magnitude
-        Add#(1, d__, dpw),
-        Add#(h__, dpw, 32),
-        Add#(dpw, i__, TExp#(TLog#(dpw))),
-        Add#(4, j__, TLog#(dpw)),
-
-        Add#(k__, 8, dpw)
+        Add#(1, d__, dct_bits),
+        Add#(h__, dct_bits, 32),
+        Add#(dct_bits, i__, TExp#(TLog#(dct_bits))),
+        Add#(4, j__, TLog#(dct_bits))
     );
+
+    staticAssert(valueOf(dct_scale) > 0, "BlueJPEG DCT scale must be greater than zero");
+    staticAssert(valueOf(quant_scale) > 0, "BlueJPEG quantization scale must be greater than zero");
+    staticAssert(valueOf(quant_scale) <= 32, "BlueJPEG quantization scale must not exceed 32 bits");
+    staticAssert(valueOf(pixel_bits) == 8, "BlueJPEG pixel width must be 8 bits");
 
     function print_s = print_mod_pre_color_t_s;
 
@@ -130,7 +140,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         transpose_in_dct : False,
         _q_scale         : cfg._prx_qsc,
         debug            : False,
-        dct_safe_arith   : True
+        dct_safe_arith   : False
     };
 
     NumProxy#(max_blk_cols) _prx_mbc = ?;
@@ -175,10 +185,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     FIFO#(UInt#(8))                         f_du_pixels <- mkFIFO;
 
-    DUProc_t#(dpw)                          du_proc   <- mkDUProc(du_proc_cfg);
+    DUProc_t#(pixel_bits)                    du_proc   <- mkDUProc_Opt(du_proc_cfg);
 
-    RLE_ifc#(dpw)                           rle       <- mkRLE();
-    HuffEncoder_ifc#(dpw)                   huff      <- mkHuffEncoder();
+    RLE_ifc#(dct_bits)                      rle       <- mkRLE();
+    HuffEncoder_ifc#(dct_bits)              huff      <- mkHuffEncoder();
     JPEGBitstream_ifc                       stuffer   <- mkJPEGBitstream(False);
 
     JPEGFramewriter_ifc                     fwriter   <- mkJPEGFramewriter(cfg.en_chroma);
@@ -222,8 +232,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     end
 
     // DU processing pipeline (Server chain)
-    // dispatcher outputs UInt#(8), DUProc expects Int#(dpw) - convert
-    // (pixel dispatch is handled by r_disp_to_duproc below, which also tracks DU boundaries)
+    // Pixel dispatch is handled by r_disp_to_duproc below, which also tracks DU boundaries.
     mkConnection(du_proc.data.response, rle.data.request);
     mkConnection(rle.data.response,     huff.data.request);
     mkConnection(huff.data.response,    stuffer.data.request);
@@ -333,7 +342,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     rule r_disp_to_duproc (rg_state == S_RUNNING);
         let p = f_du_pixels.first;
         f_du_pixels.deq;
-        du_proc.data.request.put(unpack(extend(pack(p))));
+        du_proc.data.request.put(p);
 
         let n_du = cfg.en_chroma ? dus_per_mcu(rg_mode) : fromInteger(1);
         Bool end_of_mcu = !cfg.en_chroma || (rg_mcu_phase == n_du - 1);
