@@ -20,6 +20,13 @@ interface DCT2DOpt_ifc#(numeric type bits);
     interface Server#(Vector#(8, Int#(bits)), Vector#(8, Int#(bits))) data;
 endinterface
 
+// bits is B, the signed width of a centered JPEG sample
+interface DCT2DOptRigid_ifc#(numeric type bits);
+    method Action rewind();
+    method Bool overflow();
+    interface Server#(Vector#(8, Int#(bits)), Vector#(8, Int#(TAdd#(bits, 7)))) data;
+endinterface
+
 module mkDCT2D_Opt#(NumProxy#(frac_bits) f_scale, Bool buffer_in, Bool omit_scaling, Bool transpose_output, Bool dct_safe_arith)(DCT2DOpt_ifc#(bits));
 
     FIFO#(Vector#(8, Int#(bits))) f_in;
@@ -45,6 +52,58 @@ module mkDCT2D_Opt#(NumProxy#(frac_bits) f_scale, Bool buffer_in, Bool omit_scal
     
     //col DCT
     mkConnection(tp0.transposed, dct_col.data.request);
+
+    //output directly or transpose again
+    if (!transpose_output) begin
+        mkConnection(dct_col.data.response, toPut(f_out));
+    end else begin
+        mkConnection(dct_col.data.response, tp1.original);
+        mkConnection(tp1.transposed, toPut(f_out));
+    end
+
+    method Action rewind();
+        tp0.rewind();
+        if (transpose_output) tp1.rewind();
+    endmethod
+
+    method overflow = dct_row.overflow || dct_col.overflow;
+
+    interface data = toGPServer(f_in, f_out);
+
+endmodule
+
+module mkDCT2D_Opt_rigid#(NumProxy#(frac_bits) f_scale, Bool buffer_in, Bool omit_scaling, Bool transpose_output, Bool dct_safe_arith)(DCT2DOptRigid_ifc#(bits));
+
+    FIFO#(Vector#(8, Int#(bits)))            f_in;
+    FIFO#(Vector#(8, Int#(TAdd#(bits, 7)))) f_out <- mkFIFO;
+
+    if(buffer_in)
+        f_in <- mkFIFO;
+    else
+        f_in <- mkBypassFIFO;
+
+    DCT1D_ifc#(TAdd#(bits, 4)) dct_row <- mkDCT1D_rigid(f_scale, !omit_scaling, dct_safe_arith);
+    DCT1D_ifc#(TAdd#(bits, 7)) dct_col <- mkDCT1D_rigid(f_scale, !omit_scaling, dct_safe_arith);
+
+    TransposeBufferOpt_ifc#(Int#(TAdd#(bits, 4))) tp0 <- mkTransposeBufferOpt;
+    TransposeBufferOpt_ifc#(Int#(TAdd#(bits, 7))) tp1 = ?;
+    if (transpose_output) tp1 <- mkTransposeBufferOpt;
+
+    //row DCT
+    rule r_row_dct_input;
+        let row = f_in.first;
+        f_in.deq;
+        dct_row.data.request.put(map(signExtend, row));
+    endrule
+
+    //transpose
+    mkConnection(dct_row.data.response, tp0.original);
+
+    //col DCT
+    rule r_col_dct_input;
+        let col <- tp0.transposed.get;
+        dct_col.data.request.put(map(signExtend, col));
+    endrule
 
     //output directly or transpose again
     if (!transpose_output) begin

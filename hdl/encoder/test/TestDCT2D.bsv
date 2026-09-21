@@ -29,7 +29,7 @@ module [Module] mkTestDCT2D(TestHandler);
         print_s("Testing mkDCT2D...", BLUE);
         t1.go();
         while(!t1.done()) action endaction
-        print_s("Testing mkDCT2D_Opt...", BLUE);
+        print_s("Testing mkDCT2D_Opt_rigid...", BLUE);
         t2.go();
         while(!t2.done()) action endaction
     endseq;
@@ -51,7 +51,8 @@ module [Module] test(TestHandler);
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
-    DCT2D_ifc#(12) dut <- mkDCT2D_12b;
+    NumProxy#(12) dct_scale = ?;
+    DCT2D_ifc#(12) dut <- mkDCT2D(dct_scale, False);
     
     Reg#(Bit#(32)) rg_counter <- mkReg(0);
     Reg#(Bit#(32)) rg_errors <- mkReg(0);
@@ -141,7 +142,8 @@ module [Module] testOpt(TestHandler);
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
-    DCT2DOpt_ifc#(12) dut <- mkDCT2D_Optimized_12b;
+    NumProxy#(12) dct_scale = ?;
+    DCT2DOptRigid_ifc#(8) dut <- mkDCT2D_Opt_rigid(dct_scale, False, True, False, False);
     
     Reg#(Bit#(32)) rg_counter <- mkReg(0);
     Reg#(Bit#(32)) rg_errors <- mkReg(0);
@@ -152,15 +154,15 @@ module [Module] testOpt(TestHandler);
     Reg#(Bit#(4)) rg_count_in  <- mkReg(0);
     Reg#(Bit#(4)) rg_count_out <- mkReg(0);
     
-    Reg#(DU_t#(Int#(12), 8, 8)) rg_mcu_in <- mkRegU;
-    Reg#(DU_t#(Int#(12), 8, 8)) rg_mcu_out <- mkRegU;
+    Reg#(DU_t#(Int#(8), 8, 8))  rg_mcu_in  <- mkRegU;
+    Reg#(DU_t#(Int#(15), 8, 8)) rg_mcu_out <- mkRegU;
 
     Stmt test_seq = seq
         dut.rewind();
         while(rg_counter < 10) seq
             dut.rewind(); //TODO automatic rewind
             action
-                Vector#(8, Vector#(8, Int#(12))) block_2d = newVector;
+                Vector#(8, Vector#(8, Int#(8))) block_2d = newVector;
 
                 for(Integer i=0; i<8; i=i+1)
                     for(Integer j=0; j<8; j=j+1) begin
@@ -169,7 +171,7 @@ module [Module] testOpt(TestHandler);
                         block_2d[i][j] = truncate(pix_i16 - 128); //random pixel then mean shift
                     end
                 
-                DU_t#(Int#(12), 8, 8) mcu = DU_t { block: block_2d };
+                DU_t#(Int#(8), 8, 8) mcu = DU_t { block: block_2d };
                 rg_mcu_in <= mcu;
                 
                 //store for reference calc
@@ -202,20 +204,20 @@ module [Module] testOpt(TestHandler);
                 let res_tp = transpose_mcu(rg_mcu_out); 
                 let hw_block = res_tp.block;
                 
-                DU_t#(Int#(12), 8, 8) ref_ = DU_t { block: map(map(truncate), ref_out) };
+                DU_t#(Int#(16), 8, 8) ref_ = DU_t { block: ref_out };
 
                 Bool res_match = True;
 
-                function Int#(12) calc_diff(Integer idx);
+                function Int#(16) calc_diff(Integer idx);
                     Integer r = idx / 8;
                     Integer c = idx % 8;
-                    Int#(12) hw_val = hw_block[r][c];
-                    Int#(12) ref_val = ref_.block[r][c];
+                    Int#(16) hw_val = signExtend(hw_block[r][c]);
+                    Int#(16) ref_val = ref_.block[r][c];
                     return (hw_val > ref_val) ? hw_val - ref_val : ref_val - hw_val;
                 endfunction
-                Vector#(64, Int#(12)) diffs = genWith(calc_diff);
-                function Int#(12) max_func(Int#(12) a, Int#(12) b) = (a > b) ? a : b;
-                Int#(12) max_diff = fold(max_func, diffs);
+                Vector#(64, Int#(16)) diffs = genWith(calc_diff);
+                function Int#(16) max_func(Int#(16) a, Int#(16) b) = (a > b) ? a : b;
+                Int#(16) max_diff = fold(max_func, diffs);
 
                 print_mod_pre_color_t_f($format("Test %0d, max error: %0d", rg_counter, max_diff), WHITE);
                 
