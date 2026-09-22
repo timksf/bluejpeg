@@ -134,7 +134,6 @@ module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) proviso
     
     Bit#(2) blocks_rdy = rg_blocks_written - rg_blocks_read;
 
-    (* descending_urgency = "r_read_out, r_write_in" *)
     rule r_write_in (blocks_rdy < 2);
         let val = f_in.first; f_in.deq;
         

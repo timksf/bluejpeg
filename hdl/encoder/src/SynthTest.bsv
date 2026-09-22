@@ -7,7 +7,9 @@ import Types :: *;
 import DCT1D :: *;
 import DCT2D :: *;
 import DUProc :: *;
+import ZigZag :: *;
 import BlueJPEG :: *;
+import TransposeBuffer :: *;
 import DCT2D_Optimized :: *;
 import ImageTilingEngine :: *;
 
@@ -53,6 +55,18 @@ module [Module] mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
     NumProxy#(12) f_scale = ?;
     DCT2DOpt_ifc#(14) ifc();
     mkDCT2D_Opt#(f_scale, False, True, False, True) __int(ifc);
+    return ifc;
+endmodule
+
+module [Module] mkZigZag_16(Zigzag_ifc#(16));
+    Zigzag_ifc#(16) ifc();
+    mkZigZag_Opt#(False, True) __int(ifc);
+    return ifc;
+endmodule
+
+module [Module] mkTransposeBuffer_16(TransposeBufferOpt_ifc#(Bit#(16)));
+    TransposeBufferOpt_ifc#(Bit#(16)) ifc();
+    mkTransposeBufferOpt __int(ifc);
     return ifc;
 endmodule
 
@@ -157,7 +171,7 @@ module [Module] mkBlueJPEGTop_1920_12#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : True,
-        en_chroma           : True
+        en_chroma           : False
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
