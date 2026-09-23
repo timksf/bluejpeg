@@ -115,8 +115,8 @@ module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) proviso
         f_in <- mkBypassFIFO;
 
     //ping-pong buffer using RegFile to infer LUTRAMs
-    RegFile#(Bit#(6), Int#(bits)) buf0 <- mkRegFile(0, 63);
-    RegFile#(Bit#(6), Int#(bits)) buf1 <- mkRegFile(0, 63);
+    RegFile#(Bit#(6), Int#(bits)) buf0 <- mkRegFileWCF(0, 63);
+    RegFile#(Bit#(6), Int#(bits)) buf1 <- mkRegFileWCF(0, 63);
 
     Reg#(Bit#(6)) rg_write_idx  <- mkReg(0);
     Reg#(Bit#(6)) rg_read_idx   <- mkReg(0);
@@ -126,15 +126,18 @@ module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) proviso
     Reg#(Bit#(1)) rg_read_bank  <- mkReg(0);
     
     //prevent under or overflow
-    Reg#(Bit#(2)) rg_blocks_written <- mkReg(0);
-    Reg#(Bit#(2)) rg_blocks_read    <- mkReg(0);
+    Reg#(Bit#(2)) rg_blocks_rdy <- mkReg(0);
+    PulseWire pw_block_written <- mkPulseWire;
+    PulseWire pw_block_read    <- mkPulseWire;
 
     function Bit#(6) toBit6(Integer x) = fromInteger(x);
     Vector#(64, Bit#(6)) zigzag_map = map(toBit6, zigzag_indices(transposed));
     
-    Bit#(2) blocks_rdy = rg_blocks_written - rg_blocks_read;
+    rule r_update_blocks (pw_block_written || pw_block_read);
+        rg_blocks_rdy <= rg_blocks_rdy + (pw_block_written ? 1 : 0) - (pw_block_read ? 1 : 0);
+    endrule
 
-    rule r_write_in (blocks_rdy < 2);
+    rule r_write_in (rg_blocks_rdy < 2);
         let val = f_in.first; f_in.deq;
         
         if (rg_write_bank == 0) buf0.upd(rg_write_idx, val);
@@ -143,13 +146,13 @@ module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) proviso
         if (rg_write_idx == 63) begin
             rg_write_idx    <= 0;
             rg_write_bank   <= ~rg_write_bank;
-            rg_blocks_written <= rg_blocks_written + 1;
+            pw_block_written.send();
         end else begin
             rg_write_idx    <= rg_write_idx + 1;
         end
     endrule
 
-    rule r_read_out (blocks_rdy > 0);
+    rule r_read_out (rg_blocks_rdy > 0);
         Bit#(6) read_idx = zigzag_map[rg_read_idx];
         
         Int#(bits) val = (rg_read_bank == 0) ? buf0.sub(read_idx) : buf1.sub(read_idx);
@@ -158,7 +161,7 @@ module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) proviso
         if (rg_read_idx == 63) begin
             rg_read_idx     <= 0;
             rg_read_bank    <= ~rg_read_bank;
-            rg_blocks_read  <= rg_blocks_read + 1;
+            pw_block_read.send();
         end else begin
             rg_read_idx     <= rg_read_idx + 1;
         end
