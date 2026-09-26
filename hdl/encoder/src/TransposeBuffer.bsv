@@ -99,6 +99,22 @@ interface TransposeBufferOpt_ifc#(type t);
     interface Get#(Vector#(8, t)) transposed;
 endinterface
 
+/*
+    
+    Skewed/diagonal buffering lets us write an entire row at once - but also read an entire
+    row at once.
+
+    Bank 0: [ r0_0 r1_7 r2_6 r3_5 r4_4 r5_3 r6_2 r7_1 ; XX XX XX XX XX XX XX XX ]
+    Bank 1: [ r0_1 r1_0 r2_7 r3_6 r4_5 r5_4 r6_3 r7_2 ; XX XX XX XX XX XX XX XX ]
+    Bank 2: [ r0_2 r1_1 r2_0 r3_7 r4_6 r5_5 r6_4 r7_3 ; XX XX XX XX XX XX XX XX ]
+    Bank 3: [ r0_3 r1_2 r2_1 r3_0 r4_7 r5_6 r6_5 r7_4 ; XX XX XX XX XX XX XX XX ]
+    Bank 4: [ r0_4 r1_3 r2_2 r3_1 r4_0 r5_7 r6_6 r7_5 ; XX XX XX XX XX XX XX XX ]
+    Bank 5: [ r0_5 r1_4 r2_3 r3_2 r4_1 r5_0 r6_7 r7_6 ; XX XX XX XX XX XX XX XX ]
+    Bank 6: [ r0_6 r1_5 r2_4 r3_3 r4_2 r5_1 r6_0 r7_7 ; XX XX XX XX XX XX XX XX ]
+    Bank 7: [ r0_7 r1_6 r2_5 r3_4 r4_3 r5_2 r6_1 r7_0 ; XX XX XX XX XX XX XX XX ]
+
+*/
+
 //optimized version of transpose buffer working on line-granularity for input/output
 module mkTransposeBufferOpt(TransposeBufferOpt_ifc#(t)) provisos(Bits#(t, __st));
 
@@ -116,22 +132,6 @@ module mkTransposeBufferOpt(TransposeBufferOpt_ifc#(t)) provisos(Bits#(t, __st))
     Reg#(Bit#(2)) rg_blocks_read    <- mkReg(0);
 
     Bit#(2) blocks_rdy = rg_blocks_written - rg_blocks_read;
-
-    /*
-        
-        Skewed/diagonal buffering lets us write an entire row at once - but also read an entire
-        row at once.
-
-        Bank 0: [ r0_0 r1_7 r2_6 r3_5 r4_4 r5_3 r6_2 r7_1 ; XX XX XX XX XX XX XX XX ]
-        Bank 1: [ r0_1 r1_0 r2_7 r3_6 r4_5 r5_4 r6_3 r7_2 ; XX XX XX XX XX XX XX XX ]
-        Bank 2: [ r0_2 r1_1 r2_0 r3_7 r4_6 r5_5 r6_4 r7_3 ; XX XX XX XX XX XX XX XX ]
-        Bank 3: [ r0_3 r1_2 r2_1 r3_0 r4_7 r5_6 r6_5 r7_4 ; XX XX XX XX XX XX XX XX ]
-        Bank 4: [ r0_4 r1_3 r2_2 r3_1 r4_0 r5_7 r6_6 r7_5 ; XX XX XX XX XX XX XX XX ]
-        Bank 5: [ r0_5 r1_4 r2_3 r3_2 r4_1 r5_0 r6_7 r7_6 ; XX XX XX XX XX XX XX XX ]
-        Bank 6: [ r0_6 r1_5 r2_4 r3_3 r4_2 r5_1 r6_0 r7_7 ; XX XX XX XX XX XX XX XX ]
-        Bank 7: [ r0_7 r1_6 r2_5 r3_4 r4_3 r5_2 r6_1 r7_0 ; XX XX XX XX XX XX XX XX ]
-
-    */
 
     method Action rewind();
         rg_wr_buf <= 0;
