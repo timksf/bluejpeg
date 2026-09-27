@@ -35,9 +35,19 @@
                     cocotbext-axi
                     pytest
                 ]);
+            architecture-tex = pkgs.texlive.combine {
+                inherit (pkgs.texlive)
+                    scheme-small
+                    latexmk
+                    standalone
+                    xcolor
+                    pgf;
+            };
             in { 
                 devShell = with pkgs; pkgs.mkShellNoCC {
                     packages = [python] ++ (with pkgs; [
+                        architecture-tex
+                        poppler-utils
                         xorg.libX11.dev
                         libpng
                         libz

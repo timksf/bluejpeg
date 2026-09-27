@@ -2,6 +2,7 @@ package SynthTest;
 
 import Clocks :: *;
 
+import RLE :: *;
 import Util :: *;
 import Types :: *;
 import DCT1D :: *;
@@ -70,6 +71,11 @@ module [Module] mkTransposeBuffer_16(TransposeBufferOpt_ifc#(Bit#(16)));
     return ifc;
 endmodule
 
+module [Module] mkRLE_16(RLE_ifc#(16));
+    RLE_ifc#(16) ifc();
+    mkRLE __int(ifc);
+    return ifc;
+endmodule
 
 module [Module] mkDUProc_16b(DUProcLegacy_t#(8, 16));
 

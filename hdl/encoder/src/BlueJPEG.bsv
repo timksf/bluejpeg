@@ -185,13 +185,13 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     FIFO#(UInt#(8))                         f_du_pixels <- mkFIFO;
 
-    DUProc_t#(pixel_bits)                    du_proc   <- mkDUProc_Opt(du_proc_cfg);
+    DUProc_t#(pixel_bits)                   du_proc     <- mkDUProc_Opt(du_proc_cfg);
 
-    RLE_ifc#(dct_bits)                      rle       <- mkRLE();
-    HuffEncoder_ifc#(dct_bits)              huff      <- mkHuffEncoder();
-    JPEGBitstream_ifc                       stuffer   <- mkJPEGBitstream(False);
+    RLE_ifc#(dct_bits)                      rle         <- mkRLE();
+    HuffEncoder_ifc#(dct_bits)              huff        <- mkHuffEncoder();
+    JPEGBitstream_ifc                       stuffer     <- mkJPEGBitstream(False);
 
-    JPEGFramewriter_ifc                     fwriter   <- mkJPEGFramewriter(cfg.en_chroma);
+    JPEGFramewriter_ifc                     fwriter     <- mkJPEGFramewriter(cfg.en_chroma);
 
     // ---- Table Client <-> Server connections ----
 
