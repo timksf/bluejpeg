@@ -1,0 +1,21 @@
+# LaTeX / latexmk build intermediates. Keep the source and published PDF.
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.synctex(busy)
+*.out
+*.toc
+*.lof
+*.lot
+*.xdv
+*.dvi
+*.nav
+*.snm
+*.vrb
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+*.latexmk

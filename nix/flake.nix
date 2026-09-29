@@ -40,6 +40,7 @@
                     scheme-small
                     latexmk
                     standalone
+                    helvetic
                     xcolor
                     pgf;
             };

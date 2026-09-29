@@ -9,5 +9,5 @@ nix --extra-experimental-features 'nix-command flakes' develop ./nix \
   assets/architecture/bluejpeg-architecture.tex
 ```
 
-The flake provides `latexmk`, TikZ/PGF, the standalone document class, and
+The flake provides `latexmk`, TikZ/PGF, the standalone document class, Helvetica, and
 Poppler (`pdftoppm`/`pdfinfo`) for render-based review.

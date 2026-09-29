@@ -1,31 +1,33 @@
 \documentclass[tikz,border=8pt]{standalone}
 
 \usepackage[T1]{fontenc}
-\usepackage{lmodern}
+\usepackage{helvet}
 \usepackage{xcolor}
 \usetikzlibrary{arrows.meta,backgrounds,calc,fit,matrix,positioning,shapes.geometric}
 
-\definecolor{bjFunctionalFill}{HTML}{E8F1FB}
-\definecolor{bjFunctionalEdge}{HTML}{3973A8}
-\definecolor{bjBufferFill}{HTML}{E7F5EA}
-\definecolor{bjBufferEdge}{HTML}{438A56}
-\definecolor{bjTableFill}{HTML}{FFF1D6}
-\definecolor{bjTableEdge}{HTML}{B7791F}
-\definecolor{bjControlFill}{HTML}{F0E8FA}
-\definecolor{bjControlEdge}{HTML}{7653A6}
-\definecolor{bjExternalFill}{HTML}{ECEFF3}
-\definecolor{bjExternalEdge}{HTML}{59636F}
-\definecolor{bjRegionFill}{HTML}{F8FAFC}
-\definecolor{bjRegionEdge}{HTML}{7A8694}
-\definecolor{bjData}{HTML}{34495E}
-\definecolor{bjControl}{HTML}{7653A6}
-\definecolor{bjLookup}{HTML}{B7791F}
-\definecolor{bjClock}{HTML}{B23A48}
+% Muted categorical colors keep block types readable without the brighter
+% pastel treatment; typography and square outlines carry the schematic style.
+\definecolor{bjFunctionalFill}{HTML}{DFEAF3}
+\definecolor{bjFunctionalEdge}{HTML}{3F6D91}
+\definecolor{bjBufferFill}{HTML}{E1EEE6}
+\definecolor{bjBufferEdge}{HTML}{477968}
+\definecolor{bjTableFill}{HTML}{F6ECD9}
+\definecolor{bjTableEdge}{HTML}{9A7638}
+\definecolor{bjControlFill}{HTML}{E9E6F2}
+\definecolor{bjControlEdge}{HTML}{69618A}
+\definecolor{bjExternalFill}{HTML}{FFFFFF}
+\definecolor{bjExternalEdge}{HTML}{41474C}
+\definecolor{bjRegionFill}{HTML}{FFFFFF}
+\definecolor{bjRegionEdge}{HTML}{737A80}
+\definecolor{bjData}{HTML}{29333B}
+\definecolor{bjControl}{HTML}{69618A}
+\definecolor{bjLookup}{HTML}{9A7638}
+\definecolor{bjClock}{HTML}{A45140}
 
 \tikzset{
   font=\sffamily,
   major/.style={
-    rectangle, rounded corners=1.5pt, draw=bjFunctionalEdge,
+    rectangle, draw=bjFunctionalEdge,
     fill=bjFunctionalFill, line width=0.9pt, align=center,
     minimum height=12mm, minimum width=25mm, inner sep=4pt
   },
@@ -47,7 +49,7 @@
     minimum width=30mm, inner sep=4pt
   },
   controlblock/.style={
-    rectangle, rounded corners=1.5pt, draw=bjControlEdge,
+    rectangle, draw=bjControlEdge,
     fill=bjControlFill, line width=0.9pt, align=center,
     minimum height=12mm, minimum width=30mm, inner sep=4pt
   },
@@ -62,30 +64,30 @@
     minimum width=22mm, inner sep=4pt
   },
   subsystem/.style={
-    rectangle, rounded corners=2pt, draw=bjRegionEdge,
+    rectangle, draw=bjRegionEdge,
     fill=bjRegionFill, fill opacity=0.34, text opacity=1,
     dashed, line width=0.9pt, inner sep=7pt
   },
   datapath/.style={
-    -{Stealth[length=3.2mm,width=2.4mm]}, draw=bjData,
-    line width=2.0pt, line cap=rect, line join=round
+    -{Stealth[length=2.6mm,width=1.9mm]}, draw=bjData,
+    line width=1.4pt, line cap=rect, line join=miter
   },
   controlconn/.style={
     -{Diamond[open,length=2.4mm,width=2.1mm]}, draw=bjControl,
-    draw opacity=0.78, densely dashed, line width=0.8pt,
+    draw opacity=0.9, densely dashed, line width=0.8pt,
     line cap=rect, line join=round
   },
   controlbidir/.style={
     {Diamond[open,length=2.4mm,width=2.1mm]}-{Diamond[open,length=2.4mm,width=2.1mm]},
-    draw=bjControl, draw opacity=0.78, densely dashed, line width=0.8pt,
+    draw=bjControl, draw opacity=0.9, densely dashed, line width=0.8pt,
     line cap=rect, line join=round
   },
   configspine/.style={
-    draw=bjControl, draw opacity=0.72, densely dashed, line width=0.95pt,
+    draw=bjControl, draw opacity=0.9, densely dashed, line width=0.95pt,
     line cap=rect, line join=round
   },
   sequencespine/.style={
-    draw=bjControl, draw opacity=0.72, densely dashed, line width=0.95pt,
+    draw=bjControl, draw opacity=0.9, densely dashed, line width=0.95pt,
     line cap=rect, line join=round
   },
   lookupconn/.style={
@@ -96,7 +98,7 @@
   clockconn/.style={
     -{Stealth[length=2.6mm,width=2.0mm]},
     draw=bjClock, dash pattern=on 5pt off 2pt on 1pt off 2pt,
-    draw opacity=0.72, line width=0.8pt, line cap=rect, line join=round
+    draw opacity=0.9, line width=0.8pt, line cap=rect, line join=round
   },
   moduleboundary/.style={
     rectangle, draw=bjData, line width=1.35pt, line cap=rect,
@@ -432,8 +434,8 @@
       text=bjExternalEdge, scale=\LegendScale, transform shape]
   (legendtitle) at ($(legenditems.north west)+(0,2mm)$) {Legend};
 \begin{scope}[on background layer]
-  \node[rectangle, rounded corners=3pt,
-        draw=bjExternalEdge!65, fill=bjExternalFill!70!white,
+  \node[rectangle,
+        draw=bjExternalEdge!65, fill=white,
         line width=0.55pt, fit=(legendtitle)(legenditems),
         inner xsep=2.5mm, inner ysep=2mm] (legendpanel) {};
 \end{scope}
