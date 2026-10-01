@@ -27,6 +27,8 @@ interface ImageTilingEngine_ifc#(type t, numeric type mcu_w, numeric type mcu_h)
 
     method Action set_img_width(Bit#(13) x);
     method Action start();
+    //Stop after the final block has drained so the next frame can start.
+    method Action stop();
 endinterface
 
 
@@ -221,6 +223,10 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _, Bool double_buffer)(Imag
         for(Integer buffer_index = 0; buffer_index < 2; buffer_index = buffer_index + 1)
             rg_buf_ready[buffer_index] <= False;
     endaction;
+
+    method Action stop();
+        rg_running <= False;
+    endmethod
 
     interface line_in   = toPut(f_line);
     interface block_out = toGet(f_block);

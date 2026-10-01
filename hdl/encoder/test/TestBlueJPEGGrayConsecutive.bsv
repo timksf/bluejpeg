@@ -31,7 +31,7 @@ typedef 8 PixelWidth;
 
 module [Module] mkTestBlueJPEGGrayConsecutive(TestHandler);
 
-    let t1 <- test;
+    let t1 <- mkBlueJPEGConsecutiveTest(False, False);
 
     Stmt s = seq
         t1.go();
@@ -50,7 +50,7 @@ module [Module] mkTestBlueJPEGGrayConsecutive(TestHandler);
 
 endmodule
 
-module [Module] test(TestHandler)
+module [Module] mkBlueJPEGConsecutiveTest#(Bool en_chroma, Bool double_buffer_tiler)(TestHandler)
     provisos(
         NumAlias#(n_pixels, TMul#(InputWidth, InputHeight)),
         NumAlias#(ram_words, 'd3_000_000)
@@ -71,8 +71,8 @@ module [Module] test(TestHandler)
             _prx_qsc            : ?,
             _prx_pixw           : ?,
             en_tiler            : True,
-            double_buffer_tiler : False,
-            en_chroma           : False
+            double_buffer_tiler : double_buffer_tiler,
+            en_chroma           : en_chroma
         };
     BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
     let csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
@@ -95,6 +95,7 @@ module [Module] test(TestHandler)
     Reg#(Bool)      rg_finished     <- mkReg(False);
     Reg#(UInt#(32)) rg_out_count    <- mkReg(0);
     Reg#(UInt#(32)) rg_total_count  <- mkReg(0);
+    Reg#(UInt#(32)) rg_first_frame_bytes <- mkReg(0);
     Reg#(UInt#(32)) rg_pixel_idx    <- mkReg(0);
     Reg#(UInt#(32)) rg_frame_idx    <- mkReg(0);
     Reg#(UInt#(32)) rg_watchdog     <- mkReg(0);
@@ -107,7 +108,7 @@ module [Module] test(TestHandler)
         if (rg_watchdog > 2_000_000) begin
             print_fmt($format("ERROR: frame %0d timed out after %0d cycles",
                 rg_frame_idx + 1, rg_watchdog), RED);
-            $finish();
+            $fatal(1);
         end
         rg_watchdog <= rg_watchdog + 1;
     endrule
@@ -142,16 +143,25 @@ module [Module] test(TestHandler)
 
     Stmt collect_output = seq
         action
-            let fd <- $fopen(output_jpeg_path, "wb");
+            let fd <- $fopen(en_chroma ? "../result_color_consecutive.jpg" : output_jpeg_path, "wb");
             if (fd == InvalidFile) begin
                 print_s("ERROR: cannot open output file", RED);
-                $finish();
+                $fatal(1);
             end
             rg_out_file <= fd;
         endaction
         while (!rg_finished) action
             let pkg <- axis_out.pkg.get();
             Bit#(8) b = pkg.data;
+            if(rg_frame_idx > 0) begin
+                let first_word <- read_word_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count));
+                Bit#(8) first_byte = truncate(pack(first_word));
+                if(rg_out_count >= rg_first_frame_bytes || b != first_byte) begin
+                    print_fmt($format("ERROR: repeated frame differs at byte %0d: got %02x, expected %02x",
+                        rg_out_count, b, first_byte), RED);
+                    $fatal(1);
+                end
+            end
             write_word_SimRAM(
                 rg_ram_ptr,
                 out_base_addr + extend(rg_total_count),
@@ -161,6 +171,12 @@ module [Module] test(TestHandler)
             rg_out_count <= rg_out_count + 1;
             rg_total_count <= rg_total_count + 1;
             if (pkg.last) begin
+                if(rg_frame_idx == 0)
+                    rg_first_frame_bytes <= rg_out_count + 1;
+                else if(rg_out_count + 1 != rg_first_frame_bytes) begin
+                    print_s("ERROR: repeated frame byte count differs", RED);
+                    $fatal(1);
+                end
                 print_fmt($format("Frame %0d TLAST, bytes: %0d",
                     rg_frame_idx + 1, rg_out_count + 1), GREEN);
                 rg_finished <= True;
@@ -213,20 +229,21 @@ module [Module] test(TestHandler)
         fsm_wait_ready.start();
         await(fsm_wait_ready.done());
 
-        print_s("Generating luma Huffman codes...", YELLOW);
+        print_s("Generating Huffman codes...", YELLOW);
         bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 0);
         bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 2);
-        print_s("Luma Huffman code generation complete", GREEN);
+        if(en_chroma) seq
+            bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 1);
+            bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 3);
+        endseq
+        print_s("Huffman code generation complete", GREEN);
 
-        print_s("Configuring grayscale mode...", YELLOW);
+        print_s("Configuring image dimensions...", YELLOW);
         action
             Bit#(16) img_height = fromInteger(valueof(InputHeight));
             Bit#(16) img_width  = fromInteger(valueof(InputWidth));
             i_cfg_acc.write_reg_req("IMSZ", {img_height, img_width});
         endaction
-        bjpeg_expect_wr_ok(i_cfg_acc);
-
-        i_cfg_acc.write_reg_req("SUBS", 0);
         bjpeg_expect_wr_ok(i_cfg_acc);
 
         for (rg_frame_idx <= 0;
@@ -255,14 +272,15 @@ module [Module] test(TestHandler)
                 if (rg_out_count == 0) begin
                     print_fmt($format("ERROR: frame %0d produced no bytes",
                         rg_frame_idx + 1), RED);
-                    $finish();
+                    $fatal(1);
                 end
             endaction
         endseq
 
-        print_fmt($format("Two consecutive grayscale JPEG frames complete, total bytes: %0d",
+        print_fmt($format("Two byte-identical JPEG frames complete, total bytes: %0d",
             rg_total_count), GREEN);
-        print_fmt($format("=== TestBlueJPEGGrayConsecutive PASSED ==="), GREEN);
+        print_fmt($format("=== BlueJPEG consecutive frames PASSED (chroma=%0d, double_buffer=%0d) ===",
+            en_chroma, double_buffer_tiler), GREEN);
     endseq;
 
     FSM fsm_test <- mkFSM(main);

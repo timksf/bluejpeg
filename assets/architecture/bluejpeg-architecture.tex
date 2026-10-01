@@ -123,17 +123,7 @@
 
 \node[major, minimum width=22mm, right=10mm of axisrd] (tiler) {Image tiling\\engine};
 \node[major, minimum width=20mm, right=16mm of tiler] (splitter) {Channel\\splitter};
-\node[major, minimum width=21mm, right=10mm of splitter] (yreorder) {Y block\\reorder};
-
-\node[major, minimum width=21mm, above=12mm of yreorder] (cbsub) {Cb\\subsample};
-\node[major, minimum width=21mm, below=12mm of yreorder] (crsub) {Cr\\subsample};
-\node[major, minimum width=21mm, above=8mm of cbsub] (cbreorder) {Cb block\\reorder};
-\node[major, minimum width=21mm, below=8mm of crsub] (crreorder) {Cr block\\reorder};
-\node[fifo, minimum width=14mm, right=7mm of cbreorder] (cbfifo) {64-slot\\FIFO};
-\node[fifo, minimum width=14mm, right=7mm of crreorder] (crfifo) {64-slot\\FIFO};
-
-\node[mux, anchor=west]
-  (dispatcher) at ($(cbfifo.east |- yreorder.east)+(7mm,0)$) {};
+\node[mux, right=28mm of splitter] (dispatcher) {};
 \node[font=\sffamily\bfseries, rotate=90] at (dispatcher.center)
   {DU dispatcher};
 \node[fifo, minimum width=16mm, right=10mm of dispatcher] (dufifo) {DU pixel\\FIFO};
@@ -157,22 +147,11 @@
 \draw[datapath] (saxis.east) -- node[signal, above] {[23:0]} (axisrd.west);
 \draw[datapath] (axisrd.east) -- node[signal, above] {[23:0]} (tiler.west);
 \draw[datapath] (tiler.east) -- node[signal, above] {YCbCr [23:0]} (splitter.west);
-\draw[datapath] (splitter.east) -- node[signal, above] {Y [7:0]} (yreorder.west);
-\draw[datapath] (splitter.east) -- ++(4mm,0) coordinate (cbcorner) -- node[signal, midway, left] {Cb [7:0]} (cbcorner |- cbsub.west) -- (cbsub.west);
-\draw[datapath] (splitter.east) -- ++(4mm,0) coordinate (crcorner) -- node[signal, midway, left] {Cr [7:0]} (crcorner |- crsub.west) -- (crsub.west);
-\draw[datapath] (cbsub.north) -- node[signal, right] {[7:0]} (cbreorder.south);
-\draw[datapath] (crsub.south) -- node[signal, right] {[7:0]} (crreorder.north);
-\draw[datapath] (cbreorder.east) -- node[signal, above] {[7:0]} (cbfifo.west);
-\draw[datapath] (crreorder.east) -- node[signal, below] {[7:0]} (crfifo.west);
-\draw[datapath] (yreorder.east) -- node[signal, above] {Y [7:0]} (dispatcher.west);
+\draw[datapath] (splitter.east) -- node[signal, above] {Y [7:0]} (dispatcher.west);
 \coordinate (cbdispatchin) at ($(dispatcher.west)+(0,9mm)$);
 \coordinate (crdispatchin) at ($(dispatcher.west)+(0,-9mm)$);
-\draw[datapath] (cbfifo.east) -- ++(1mm,0) coordinate (cbdispatchcorner) --
-  node[signal, midway, left] {Cb [7:0]}
-  (cbdispatchcorner |- cbdispatchin) -- (cbdispatchin);
-\draw[datapath] (crfifo.east) -- ++(1mm,0) coordinate (crdispatchcorner) --
-  node[signal, midway, left] {Cr [7:0]}
-  (crdispatchcorner |- crdispatchin) -- (crdispatchin);
+\draw[datapath] (splitter.north) |- node[signal, above, near end] {Cb [7:0]} (cbdispatchin);
+\draw[datapath] (splitter.south) |- node[signal, below, near end] {Cr [7:0]} (crdispatchin);
 \draw[datapath] (dispatcher.east) -- node[signal, above] {[7:0]} (dufifo.west);
 
 \draw[datapath] (dufifo.east) -- node[signal, above] {[7:0]} (meanshift.west);
@@ -192,8 +171,7 @@
 % Spatial grouping: front end, DUProc, entropy coding, and frame output.
 % ----------------------------------------------------------------------------
 \begin{scope}[on background layer]
-  \node[subsystem, fit=(tiler)(splitter)(cbsub)(crsub)(cbreorder)(crreorder)
-        (cbfifo)(crfifo)(yreorder)(dispatcher), inner xsep=5mm, inner ysep=8mm]
+  \node[subsystem, fit=(tiler)(splitter)(dispatcher), inner xsep=5mm, inner ysep=8mm]
         (frontend) {};
   \node[subsystem, fit=(meanshift)(gear1)(dct)(gear8)(quant)(zigzag),
         inner xsep=5mm, inner ysep=12mm] (duproc) {};
@@ -223,14 +201,13 @@
 % ----------------------------------------------------------------------------
 \coordinate (controlgap) at ($(zigzag.east)!0.5!(rle.west)$);
 \node[controlblock, minimum width=42mm, minimum height=58mm, anchor=south] (csrs)
-  at ($(yreorder.north)+(0,77mm)$) {};
+  at ($(splitter.north)+(0,60mm)$) {};
 \node[font=\sffamily\bfseries, anchor=north] at ($(csrs.north)+(0,-3mm)$)
   {BlueCSR RegFile};
 \node[csrrow, anchor=north] (csrctrl) at ($(csrs.north)+(0,-10mm)$) {CTRL};
 \node[csrrow, below=0mm of csrctrl] (csrsts) {STS};
 \node[csrrow, below=0mm of csrsts] (csrimsz) {IMSZ};
-\node[csrrow, below=0mm of csrimsz] (csrsubs) {SUBS};
-\node[csrrow, below=0mm of csrsubs] (csrcgen) {CGEN};
+\node[csrrow, below=0mm of csrimsz] (csrcgen) {CGEN};
 \node[csrrow, below=0mm of csrcgen] (csrperf) {PERF};
 \node[controlblock, minimum width=39mm, minimum height=20mm, right=46mm of csrs] (fsm)
   {\textbf{Frame Control FSM}\\\scriptsize IDLE $\rightarrow$ CONFIGURE $\rightarrow$ RUNNING\\[-1pt]
@@ -248,7 +225,7 @@
         (controlplane) {};
 \end{scope}
 \node[regionlabel, text=bjControlEdge, anchor=north west]
-  at ($(controlplane.north west)+(2mm,-2mm)$) {Global Control};
+  at ($(controlplane.north west)+(2mm,-5mm)$) {Global Control};
 
 \draw[datapath] (saxicfg.east) -- node[signal, above] {AXI-Lite [31:0]} (axicfg.west);
 \draw[datapath] (axicfg.east) -- node[signal, above] {CSR R/W [31:0]} (csrs.west);
@@ -258,12 +235,10 @@
 \coordinate (ctrlturnx) at ($(csrs.east)+(39mm,0)$);
 \coordinate (ststurnx) at ($(csrs.east)+(36mm,0)$);
 \coordinate (imszturnx) at ($(csrs.east)+(33mm,0)$);
-\coordinate (substurnx) at ($(csrs.east)+(30mm,0)$);
 \coordinate (perfturnx) at ($(csrs.east)+(30mm,0)$);
 \coordinate (fsmctrl) at ($(fsm.west)+(0,8mm)$);
 \coordinate (fsmsts) at ($(fsm.west)+(0,4mm)$);
 \coordinate (fsmimsz) at (fsm.west);
-\coordinate (fsmsubs) at ($(fsm.west)+(0,-4mm)$);
 \coordinate (fsmperf) at ($(fsm.west)+(0,-8mm)$);
 
 \draw[controlconn] (csrctrl.east) --
@@ -276,9 +251,6 @@
 \draw[controlconn] (csrimsz.east) --
   node[signal, midway, above, text=bjControl] {width / height}
   (csrimsz.east -| imszturnx) -- (fsmimsz -| imszturnx) -- (fsmimsz);
-\draw[controlconn] (csrsubs.east) --
-  node[signal, midway, above, text=bjControl] {subsampling / mode}
-  (csrsubs.east -| substurnx) -- (fsmsubs -| substurnx) -- (fsmsubs);
 \draw[controlconn] (fsmperf) -- (fsmperf -| perfturnx) --
   (csrperf.east -| perfturnx) --
   node[signal, midway, below, text=bjControl] {performance counters}
@@ -293,19 +265,13 @@
 \draw[controlconn] (fsm.south) -- (sequencefeed);
 \draw[sequencespine] (sequenceleft) -- (sequenceright);
 % \node[signal, anchor=south, text=bjControl]
-%   at ($(sequencefeed)+(0,2mm)$) {FSM spine: CTRL / IMSZ / SUBS};
+%   at ($(sequencefeed)+(0,2mm)$) {FSM spine: CTRL / IMSZ};
 
 \coordinate (frontendctl) at (tiler |- frontend.north);
 \coordinate (frontendtap) at (tiler |- sequencelevel);
 \draw[controlconn] (frontendtap) -- (frontendctl);
 \node[signal, anchor=south, text=bjControl]
-  at ($(frontendtap)+(0,1mm)$) {IMSZ [15:0] / SUBS [1:0] / CTRL start};
-
-\coordinate (duprocctl) at ($(duproc.north west)+(24mm,0)$);
-\coordinate (duproctap) at (duprocctl |- sequencelevel);
-\draw[controlconn] (duproctap) -- (duprocctl);
-\node[signal, anchor=south, text=bjControl]
-  at ($(duproctap)+(0,1mm)$) {SUBS mode};
+  at ($(frontendtap)+(0,1mm)$) {IMSZ [15:0] / CTRL start};
 
 \coordinate (entropyctl) at (entropy.north);
 \coordinate (entropytap) at (entropy |- sequencelevel);
@@ -317,7 +283,7 @@
 \coordinate (frametap) at (frameout |- sequencelevel);
 \draw[controlconn] (frametap) -- (framectl);
 \node[signal, anchor=south, text=bjControl]
-  at ($(frametap)+(0,1mm)$) {IMSZ / SUBS / CTRL start};
+  at ($(frametap)+(0,1mm)$) {IMSZ / CTRL start};
 
 % Scan completion returns upward into the same global sequencing plane.
 \coordinate (scandonetap) at (stuffer |- sequencelevel);

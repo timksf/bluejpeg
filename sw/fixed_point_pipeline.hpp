@@ -31,6 +31,15 @@ namespace fixedpoint_pipeline {
         };
     }
 
+    //Truncating DCT arithmetic used by the optimized hardware pipeline.
+    template<int dct_scale, int bits = 16>
+    auto make_fixed_dct_optimized() {
+        using coeff = jpeg_fixedpoint::coeff_t<bits>;
+        return [](std::span<coeff, 64> in, std::span<coeff, 64> out) {
+            jpeg_fixedpoint::dct2d_fixed_optimized<dct_scale, bits>(in, out);
+        };
+    }
+
     //returns a lambda satisfying quantize_block_fn.
     //computes scaled multipliers from the raw Q-table (absorbing AAN factors) at each call,
     //then applies fixed-point quantization per coefficient.

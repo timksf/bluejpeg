@@ -208,8 +208,8 @@ module [Module] test(TestHandler)
         // ---- phase 2: run SW reference encoder ----
         print_s("Running SW reference encoder...", YELLOW);
         action
-            // subsampling_mode=1 -> YCBCR_422 (matching HW config below)
-            let n <- jpeg_encode_ref(input_image_path, 1, rg_ram_ptr, ref_out_base);
+            // Full-resolution chroma, matching the hardware.
+            let n <- jpeg_encode_ref(input_image_path, 0, rg_ram_ptr, ref_out_base);
             rg_ref_bytes <= n;
         endaction
         print_fmt($format("SW reference: %0d bytes", rg_ref_bytes), GREEN);
@@ -234,10 +234,6 @@ module [Module] test(TestHandler)
             Bit#(16) img_width  = fromInteger(valueof(InputWidth));
             i_cfg_acc.write_reg_req("IMSZ", {img_height, img_width});
         endaction
-        bjpeg_expect_wr_ok(i_cfg_acc);
-
-        // SUBSAMPLING: 4:2:2 = 1
-        i_cfg_acc.write_reg_req("SUBS", 1);
         bjpeg_expect_wr_ok(i_cfg_acc);
 
         // ---- phase 6: start encoder ----
@@ -294,7 +290,10 @@ module [Module] test(TestHandler)
         if (rg_cmp_pass)
             print_fmt($format("=== TestJPEGBitAccuracy PASSED === (%0d bytes match)", rg_out_count), GREEN);
         else
-            print_fmt($format("=== TestJPEGBitAccuracy FAILED ==="), RED);
+            action
+                print_fmt($format("ERROR: TestJPEGBitAccuracy FAILED"), RED);
+                $fatal(1);
+            endaction
     endseq;
 
     FSM fsm_test <- mkFSM(main);

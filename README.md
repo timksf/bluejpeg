@@ -6,7 +6,7 @@ synthesizable Verilog JPEG encoders tailored to specific hardware-budget and
 image-size requirements - change a few compile-time parameters, rebuild, and get
 a ready-to-use core.
 
-![System Design](assets/system.drawio.png)
+[Hardware architecture diagram](assets/architecture/bluejpeg-architecture.pdf)
 
 ### Compile-time parameters
 
@@ -17,15 +17,19 @@ a ready-to-use core.
 | `quant_scale`   | Quantization arithmetic bit width                  | 12, 14, 16 |
 | `pixel_width`   | Input component sample width (currently JPEG: 8)   | 8          |
 
+The hardware supports full-resolution 4:4:4 colour or compile-time grayscale.
+The DU frontend is tiler → channel splitter → dispatcher.
+
 ### Runtime configuration (AXI4-Lite)
 
 | Offset | Register | Description                                    |
 | ------ | -------- | ---------------------------------------------- |
-| 0x00   | CTRL     | `[0]` start, `[1]` done, `[2]` error           |
-| 0x04   | STATUS   | `[0]` tables ready, `[1]` codegen busy         |
-| 0x08   | IMG_SIZE | `[15:0]` width, `[31:16]` height               |
-| 0x0C   | SUBSAMP  | `[1:0]` mode (0 = 4:4:4, 1 = 4:2:2, 2 = 4:2:0) |
-| 0x10   | CODEGEN  | `[1:0]` table type, `[31]` trigger             |
+| 0x00   | MIV      | Module ID and version                          |
+| 0x04   | CTRL     | `[0]` start                                    |
+| 0x08   | STS      | `[0]` ready, `[1]` codegen busy, `[4]` done, `[16]` error, `[17]` invalid config |
+| 0x0C   | IMSZ     | `[15:0]` width, `[31:16]` height                 |
+| 0x14   | CGEN     | `[1:0]` table type, `[31]` trigger               |
+| 0x30–0x38 | PERF  | Cycles, input pixels, output bytes              |
 | 0x100+ | TABLE WR | Quantization / Huffman table data writes       |
 
 ---
@@ -36,9 +40,7 @@ a ready-to-use core.
 
 - [x] 8×8 block tiling - `mkImageTilingEngine` (BRAM line-buffer, configurable max width, optional double buffering)
 - [x] Channel splitting - `mkChannelSplitter` (Y / Cb / Cr)
-- [x] DU dispatch - `mkDUDispatcher` (interleaves blocks per subsampling mode)
-- [x] Y block reorder - `mkYBlockReorder` (MCU pairing for 4:2:0)
-- [x] Chroma subsampling - `mkChromaSubsampler`
+- [x] DU dispatch - `mkDUDispatcher` (one Y, Cb, Cr block per 8×8 MCU; internal chroma FIFOs)
 - [x] Image Tiler optional (can be implemented with 2D DMA engines)
 
 #### DU processing (`mkDUProc`)
@@ -77,7 +79,7 @@ a ready-to-use core.
 - [ ] Working verilog simulation for all testbenches (VPI imports still fail)
 - [ ] Hardware verification on FPGA
 - [ ] Better configuration mechanism (presets / config package instead of raw `numeric type` parameters)
-- [ ] Grayscale-only mode (always 3-component)
+- [x] Grayscale-only mode (`en_chroma=False`)
 - [ ] Parallel MCU encoding (pipeline is serial)
 - [ ] Arithmetic coding (Huffman only for now)
 
@@ -89,8 +91,8 @@ The `sw/` directory contains a C++23 reference JPEG encoder.  It is also used
 during simulation for per-stage verification via Bluespec DPI (BDPI), see
 `hdl/encoder/src/BDPI/jpeg_references.cpp`.
 
-**Status:** work-in-progress - the reference is not yet bit-exact with the
-hardware pipeline and the code is not well organized.
+**Status:** work-in-progress. `TestJPEGBitAccuracy` checks byte-for-byte agreement
+with the optimized hardware at DCT/quantization scales of 12, using 4:4:4 colour.
 
 ```sh
 cd sw && mkdir build && cd build

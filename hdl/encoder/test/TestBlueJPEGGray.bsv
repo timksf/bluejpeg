@@ -226,10 +226,6 @@ module [Module] test(TestHandler)
         endaction
         bjpeg_expect_wr_ok(i_cfg_acc);
 
-        // SUBSAMPLING: 4:4:4 = 0 (required when chroma is disabled)
-        i_cfg_acc.write_reg_req("SUBS", 0);
-        bjpeg_expect_wr_ok(i_cfg_acc);
-
         // ---- phase 5: start encoder ----
         print_s("Starting grayscale BlueJPEG encoder...", YELLOW);
         action

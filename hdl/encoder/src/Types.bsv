@@ -45,12 +45,6 @@ typedef struct {
     Bool        last;
 } HuffCode_t deriving(Eq, Bits, FShow);
 
-typedef enum { 
-    YCBCR_444 = 0, 
-    YCBCR_422 = 1, 
-    YCBCR_420 = 2 
-} SubsamplingMode_t deriving(Eq, Bits, FShow);
-
 typedef struct {
     Bit#(16) code;
     Bit#(5)  size;

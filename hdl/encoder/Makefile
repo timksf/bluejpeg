@@ -27,7 +27,7 @@ ifeq ($(RUN_TEST),)
 # RUN_TEST=TestRGB2YCbCr
 # RUN_TEST=TestAXIMM2S
 # RUN_TEST=TestImageTiling
-# RUN_TEST=TestSubsamplingModes
+# RUN_TEST=TestDUDispatcher
 # RUN_TEST=TestBankedMemory
 # RUN_TEST=TestTransposeBuffer
 # RUN_TEST=TestDCT1D
@@ -37,6 +37,7 @@ ifeq ($(RUN_TEST),)
 # RUN_TEST=TestMCUProc
 # RUN_TEST=TestRLE
 # RUN_TEST=TestJPEGBitstream
+# RUN_TEST=TestBlueJPEGConsecutive
 RUN_TEST=TestBlueJPEG
 endif
 

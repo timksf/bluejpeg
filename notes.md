@@ -7,7 +7,7 @@
    trade-offs.  Ideally the configuration interface should be improved beyond
    raw `numeric type` parameters (e.g. a small config file or package that
    bundles a named preset).
-2. **Runtime tunability** - Quantization tables and subsampling mode are
+2. **Runtime tunability** - Quantization and Huffman tables are
    selectable at runtime via the AXI4-Lite register interface, allowing
    quality/bandwidth trade-offs without re-synthesis.
 3. **Hardware verification** - Validate the generated Verilog on real FPGA

@@ -253,9 +253,6 @@ module [Module] test(TestHandler)
         endaction
         bjpeg_expect_wr_ok(i_cfg_acc);
 
-        i_cfg_acc.write_reg_req("SUBS", 0);
-        bjpeg_expect_wr_ok(i_cfg_acc);
-
         print_s("Starting grayscale BlueJPEG encoder with output backpressure...", YELLOW);
         action
             let start_bit <- i_cfg_acc.field_bit("CTRL", "START");

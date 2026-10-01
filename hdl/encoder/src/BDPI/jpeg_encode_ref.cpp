@@ -2,8 +2,8 @@
     BDPI reference encoder: runs the full SW bit-accurate JPEG encoder
     and stores the resulting bytes into SimRAM for comparison with HW output.
 
-    Uses dct_scale=16, q_scale=16 to match the top-level BlueJPEG instantiation
-    in TestBlueJPEG / TestJPEGBitAccuracy (DCTScale=16, QuantScale=16).
+    Uses dct_scale=12, q_scale=12 and a 15-bit coefficient path to match
+    TestJPEGBitAccuracy's optimized BlueJPEG pipeline (8-bit samples + 7 bits).
 */
 
 #include "jpeg_fixed_point.hpp"
@@ -23,7 +23,7 @@
 #include <vector>
 #include <ranges>
 
-static constexpr int DPW        = 16;
+static constexpr int DPW        = 15;
 static constexpr int DCT_SCALE  = 12;
 static constexpr int Q_SCALE    = 12;
 
@@ -58,7 +58,7 @@ extern "C" {
         auto reordered_pixels = ppm::bmp2ppm_pixels(img);
         auto img_ycbcr = reordered_pixels | std::views::transform(rgb2ycbcr);
 
-        // Map subsampling mode (matches BSV SubsamplingMode_t enum)
+        // Map the software reference sampling code.
         subsampling_t ss;
         switch (subsampling_mode) {
             case 0:  ss = subsampling_t::YCBCR_444; break;
@@ -72,8 +72,8 @@ extern "C" {
         std::copy(std::begin(jpegencode::std_luma_quant),   std::end(jpegencode::std_luma_quant), luma_q);
         std::copy(std::begin(jpegencode::std_chroma_quant), std::end(jpegencode::std_chroma_quant), chroma_q);
 
-        //build fixed-point pipeline callables (dct_scale=16, q_scale=16)
-        auto dct_fn     = fixedpoint_pipeline::make_fixed_dct<DCT_SCALE, DPW>();
+        //The hardware uses dct_safe_arith=False: wrapping adds and truncating multiplies.
+        auto dct_fn     = fixedpoint_pipeline::make_fixed_dct_optimized<DCT_SCALE, DPW>();
         auto quant_fn   = fixedpoint_pipeline::make_fixed_quantize<Q_SCALE, DPW>();
         auto reorder_fn = fixedpoint_pipeline::make_zigzag<DPW>();
 

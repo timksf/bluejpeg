@@ -46,7 +46,7 @@ function HuffTableType_t dht_htt(Bit#(2) tbl);
 endfunction
 
 interface JPEGFramewriter_ifc;
-    method Action configure(Bit#(16) width, Bit#(16) height, SubsamplingMode_t mode);
+    method Action configure(Bit#(16) width, Bit#(16) height);
     method Action start();
     method Bool done();
 
@@ -69,7 +69,6 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //configuration
     Reg#(Bit#(16))          rg_width  <- mkRegU;
     Reg#(Bit#(16))          rg_height <- mkRegU;
-    Reg#(SubsamplingMode_t) rg_mode   <- mkRegU;
 
     //byte counter within current state
     Reg#(UInt#(9)) rg_cnt <- mkReg(0);
@@ -133,11 +132,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //SOF0: grayscale uses 1 component, color uses 3 components.
     function Bit#(8) sof0_byte(UInt#(9) idx);
-        Bit#(8) sampfac = case (rg_mode)
-            YCBCR_444: 'h11;
-            YCBCR_422: 'h21;
-            YCBCR_420: 'h22;
-        endcase;
+        Bit#(8) sampfac = 'h11;
         if(!en_chroma) begin
             return case (idx)
                 0:  'hFF; 1:  'hC0;                     //SOF0 marker
@@ -382,10 +377,9 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     endrule
 
 
-    method Action configure(Bit#(16) width, Bit#(16) height, SubsamplingMode_t mode);
+    method Action configure(Bit#(16) width, Bit#(16) height);
         rg_width  <= width;
         rg_height <= height;
-        rg_mode   <= mode;
     endmethod
 
     method Action start() if (rg_state == IDLE || rg_state == DONE);

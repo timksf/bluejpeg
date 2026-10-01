@@ -45,7 +45,6 @@ interface BlueJPEGCfg_ifc;
     interface ReadOnly#(Bool)               start;
     interface ReadOnly#(Bit#(16))           img_width;
     interface ReadOnly#(Bit#(16))           img_height;
-    interface ReadOnly#(SubsamplingMode_t)  subsampling;
     interface ReadOnly#(Bool)               codegen_trig;
     interface ReadOnly#(HuffTableType_t)    codegen_type;
 
@@ -70,8 +69,6 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
 
     Reg#(Bit#(16))          rg_imw;
     Reg#(Bit#(16))          rg_imh;
-
-    Reg#(SubsamplingMode_t) rg_subs;
 
     Reg#(Bit#(32))          rg_perf_cycles;
     Reg#(Bit#(32))          rg_perf_pixels;
@@ -128,10 +125,6 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     csr_reg_def('h0C, "IMSZ", "Image Size.");
     rg_imw <- csr_reg_rw('h0C, 0,  0, "IMW", "Image Width",   "");
     rg_imh <- csr_reg_rw('h0C, 0, 16, "IMH", "Image Height",  "");
-    
-    
-    csr_reg_def('h10, "SUBS", "Subsampling Mode.");
-    rg_subs <- csr_reg_rw('h10, YCBCR_444, 0, "SUBS", "Subsampling Mode", "Controls subsampling mode used during encoding. 00=444, 01=422, 10=420");
 
 
     csr_reg_def('h14, "CGEN", "Huffman Codegen Config.");
@@ -178,7 +171,6 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     interface start         = reg_to_read_only(rg_start);
     interface img_width     = reg_to_read_only(rg_imw);
     interface img_height    = reg_to_read_only(rg_imh);
-    interface subsampling   = reg_to_read_only(rg_subs);
     interface codegen_trig  = reg_to_read_only(rg_cg_trigger);
     interface codegen_type  = reg_to_read_only(rg_cg_table_t);
 
