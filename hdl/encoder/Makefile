@@ -78,7 +78,8 @@ EXTRA_FLAGS+=-I $(PWD)/src/BDPI -I $(PWD)/../../dep/BlueSY/src -Xc++ -std=c++23 
 VERILOG_SIM:=iverilog
 
 # custom TCL flow
-PART=xcku3p-ffvb676-2-e
+# PART=xcku3p-ffvb676-2-e
+PART=xc7a200tfbg484-2
 # PART=xc7a35tcpg236-1
 SCRIPT=$(CURDIR)/src/script/synth.tcl
 CONSTRAINTS=$(CURDIR)/src/constr.tcl

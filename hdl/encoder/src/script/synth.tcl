@@ -18,3 +18,5 @@ place_design
 report_timing_summary -file $project_dir/${project_name}_tim2.rpt
 report_utilization -file $project_dir/${project_name}_util2.rpt
 puts "Finished place_design"
+
+write_checkpoint -force $project_dir/${project_name}_place.dcp

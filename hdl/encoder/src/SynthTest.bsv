@@ -10,6 +10,7 @@ import DCT2D :: *;
 import DUProc :: *;
 import ZigZag :: *;
 import BlueJPEG :: *;
+import JPEGBitstream :: *;
 import TransposeBuffer :: *;
 import DCT2D_Optimized :: *;
 import ImageTilingEngine :: *;
@@ -131,6 +132,12 @@ module [Module] mkDUProc_Opt_8b(DUProc_t#(8));
     return ifc;
 endmodule
 
+module [Module] mkJPEGBitstream_Syn(JPEGBitstream_ifc);
+    JPEGBitstream_ifc ifc();
+    mkJPEGBitstream#(False) __int(ifc);
+    return ifc;
+endmodule
+
 
 module [Module] mkImageTilingEngine_1920(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
     NumProxy#(1920) max_width = ?;
@@ -177,7 +184,7 @@ module [Module] mkBlueJPEGTop_1920_12#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : True,
-        en_chroma           : False
+        en_chroma           : True
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
