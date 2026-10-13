@@ -200,8 +200,6 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     // ---- control state ----
 
     Reg#(FrameState_t)          rg_state    <- mkReg(S_IDLE);
-    Reg#(Bit#(16))              rg_width    <- mkRegU;
-    Reg#(Bit#(16))              rg_height   <- mkRegU;
 
     //DU counting: tracks phase through interleaved MCU scan
     Reg#(Bit#(16))              rg_mcu_w    <- mkRegU;
@@ -345,8 +343,6 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             cfg_valid = False;
         if(width[2:0] != 0 || height[2:0] != 0)
             cfg_valid = False;
-        rg_width  <= width;
-        rg_height <= height;
 
         //safe division
         Bit#(16) blk_cols = (width  + 7) >> 3;
