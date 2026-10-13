@@ -31,6 +31,8 @@ function PerfCounter_ifc#(n) reg_to_perfc(Reg#(Bit#(n)) r);
 endfunction
 
 interface BlueJPEGCfg_ifc;
+    method Action clear_start();
+    method Action clear_done();
     method Action finish();
     method Action error();
     method Action invalid_cfg();
@@ -53,13 +55,16 @@ endinterface
 
 module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
 
-    Reg#(Bool)              rg_start;
-    Reg#(Bit#(1))           rg_done;
+    ReadOnly#(Bool)         rg_start;
+    ReadOnly#(Bit#(1))      rg_done;
     ReadOnly#(Bit#(1))      rg_error;
     ReadOnly#(Bool)         rg_inv_cfg;
 
     PulseWire               pw_error   <- mkPulseWire;
     PulseWire               pw_inv_cfg <- mkPulseWire;
+
+    PulseWire               pw_clear_start <- mkPulseWire;
+    Wire#(Maybe#(Bit#(1)))  w_done_update  <- mkDWire(tagged Invalid);
 
     Reg#(Bool)              rg_ready;
     Reg#(Bool)              rg_cg_busy;
@@ -105,18 +110,24 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
 
 
     csr_reg_def('h04, "CTRL", "Control Register.");
-    rg_start <- csr_reg_rw('h04, False, 0, "START", "Module Start", "Writing a 1 kicks off processing if codegen is finished.");
+    rg_start <- csr_reg_hu(
+        'h04, False, 0, pw_clear_start ? tagged Valid False : tagged Invalid,
+        "START", "Module Start", "Writing 1 requests processing; hardware clears the request when accepted or rejected."
+    );
     
 
     csr_reg_def('h08, "STS", "Status Register.");
     rg_ready    <- csr_reg_ro( 'h08, False,   0, "RDY",   "Module Ready",    "Indicates whether module is ready for processing.");
     rg_cg_busy  <- csr_reg_ro( 'h08, False,   1, "CGB",   "Codegen Busy",    "Indicates whether huffman table codegen is running.");
-    rg_done     <- csr_reg_ro( 'h08, 'b0,     4, "DONE",  "Module Done",     "Indicates whether processing has finished for current image.");
-    rg_error <- csr_reg_w1c(
+    rg_done     <- csr_reg_ho(
+        'h08, 'b0, 4, w_done_update,
+        "DONE", "Module Done", "Set on frame completion and cleared when a new frame is accepted."
+    );
+    rg_error    <- csr_reg_w1c(
         'h08, 'b0, 16, pw_error ? tagged Valid 1 : tagged Invalid,
         "ERR", "Module Error", "Indicates whether an error occurred processing the current image."
     );
-    rg_inv_cfg <- csr_reg_w1c(
+    rg_inv_cfg  <- csr_reg_w1c(
         'h08, False, 17, pw_inv_cfg ? tagged Valid True : tagged Invalid,
         "INV", "Invalid Config", "Indicates an invalid encoder configuration."
     );
@@ -165,10 +176,12 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     method table_sts(r, c)  = action rg_ready <= r; rg_cg_busy <= c;    endaction;
     method error            = pw_error.send;
     method invalid_cfg      = pw_inv_cfg.send;
-    method finish           = action rg_done        <= 1;               endaction;
+    method clear_start      = pw_clear_start.send;
+    method clear_done       = action w_done_update <= tagged Valid 0; endaction;
+    method finish           = action w_done_update <= tagged Valid 1; endaction;
     method clear_cg_trig    = action rg_cg_trigger  <= False;           endaction;
 
-    interface start         = reg_to_read_only(rg_start);
+    interface start         = rg_start;
     interface img_width     = reg_to_read_only(rg_imw);
     interface img_height    = reg_to_read_only(rg_imh);
     interface codegen_trig  = reg_to_read_only(rg_cg_trigger);

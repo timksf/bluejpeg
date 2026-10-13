@@ -107,10 +107,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         Add#(4, j__, TLog#(dct_bits))
     );
 
-    staticAssert(valueOf(dct_scale) > 0, "BlueJPEG DCT scale must be greater than zero");
-    staticAssert(valueOf(quant_scale) > 0, "BlueJPEG quantization scale must be greater than zero");
-    staticAssert(valueOf(quant_scale) <= 32, "BlueJPEG quantization scale must not exceed 32 bits");
-    staticAssert(valueOf(pixel_bits) == 8, "BlueJPEG pixel width must be 8 bits");
+    staticAssert(valueOf(dct_scale) > 0,        "BlueJPEG DCT scale must be greater than zero");
+    staticAssert(valueOf(quant_scale) > 0,      "BlueJPEG quantization scale must be greater than zero");
+    staticAssert(valueOf(quant_scale) <= 32,    "BlueJPEG quantization scale must not exceed 32 bits");
+    staticAssert(valueOf(pixel_bits) == 8,      "BlueJPEG pixel width must be 8 bits");
 
     function print_s = print_mod_pre_color_t_s;
 
@@ -131,13 +131,12 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     // ---- AXI-Lite config ----
 
-    BlueCSRAccess_ifc#(32, 32, 0, BlueJPEGCfg_ifc) csrs <- create_blue_csr(blue_jpeg_csrs, False);
+    BlueCSRAccess_ifc#(32, 32, 0, BlueJPEGCfg_ifc)  csrs        <- create_blue_csr(blue_jpeg_csrs, False);
+    BlueCSR_AXI4Lite_ifc#(32, 32, 0)                axi_csrs    <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
 
+    //optional documentations generation for CSRs
     RegMapDoc_t#(32) doc <- doc_blue_csr(blue_jpeg_csrs);
     // messageM(doc.reg_defs);
-
-    //wrap csrs into axi4l slave
-    let axi_csrs <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
 
     // ---- sub-module instantiation ----
     TableStorage_ifc#(quant_scale)          tables      <- mkTableStorage(cfg._prx_qsc, True);
@@ -149,7 +148,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     if(cfg.en_tiler) begin
         img_tiler   <- mkImageTilingEngine(cfg._prx_miw, cfg.double_buffer_tiler);
     end
-    ChannelSplitter_ifc                     ch_splt     <- mkChannelSplitter;
+    ChannelSplitter_ifc                     ch_splt     <- mkChannelSplitter();
     DUDispatcher_ifc                        du_disp     = ?;
     if(cfg.en_chroma) begin
         du_disp <- mkDUDispatcher;
@@ -158,11 +157,9 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     FIFO#(UInt#(8))                         f_du_pixels <- mkFIFO;
 
     DUProc_t#(pixel_bits)                   du_proc     <- mkDUProc_Opt(du_proc_cfg);
-
     RLE_ifc#(dct_bits)                      rle         <- mkRLE();
     HuffEncoder_ifc#(dct_bits)              huff        <- mkHuffEncoder();
     JPEGBitstream_ifc                       stuffer     <- mkJPEGBitstream(False);
-
     JPEGFramewriter_ifc                     fwriter     <- mkJPEGFramewriter(cfg.en_chroma);
 
     // ---- Table Client <-> Server connections ----
@@ -180,10 +177,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         mkConnection(img_tiler.block_out, ch_splt.pix);     //tiler blocks -> channel splitter
     end
     if(cfg.en_chroma) begin
-        mkConnection(ch_splt.y, du_disp.y);
-        mkConnection(ch_splt.cb, du_disp.cb);
-        mkConnection(ch_splt.cr, du_disp.cr);
-        mkConnection(du_disp.pix, toPut(f_du_pixels));
+        mkConnection(ch_splt.y,     du_disp.y);
+        mkConnection(ch_splt.cb,    du_disp.cb);
+        mkConnection(ch_splt.cr,    du_disp.cr);
+        mkConnection(du_disp.pix,   toPut(f_du_pixels));
     end else begin
         mkConnection(ch_splt.y, toPut(f_du_pixels));
         rule r_discard_cb;
@@ -194,8 +191,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         endrule
     end
 
-    // DU processing pipeline (Server chain)
-    // Pixel dispatch is handled by r_disp_to_duproc below, which also tracks DU boundaries.
+    //DU processing pipeline (Server chain)
+    //pixel dispatch is handled by r_disp_to_duproc below, which also tracks DU boundaries.
     mkConnection(du_proc.data.response, rle.data.request);
     mkConnection(rle.data.response,     huff.data.request);
     mkConnection(huff.data.response,    stuffer.data.request);
@@ -206,7 +203,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     Reg#(Bit#(16))              rg_width    <- mkRegU;
     Reg#(Bit#(16))              rg_height   <- mkRegU;
 
-    // DU counting: tracks phase through interleaved MCU scan
+    //DU counting: tracks phase through interleaved MCU scan
     Reg#(Bit#(16))              rg_mcu_w    <- mkRegU;
     Reg#(Bit#(16))              rg_mcu_h    <- mkRegU;
     Reg#(Bit#(16))              rg_mcu_x    <- mkReg(0);
@@ -282,9 +279,9 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     Reg#(UInt#(3)) rg_mcu_phase <- mkReg(0);
     Reg#(Bit#(6))  rg_du_pix    <- mkReg(0);  //pixel index within current DU (0-63)
 
-    // Transfer pixels from the configured DU source to DUProc.
-    // In grayscale mode, f_du_pixels carries luma directly.
-    // In color mode, it carries the interleaved dispatcher output.
+    //Transfer pixels from the configured DU source to DUProc.
+    //In grayscale mode, f_du_pixels carries luma directly.
+    //In color mode, it carries the interleaved dispatcher output.
     rule r_disp_to_duproc (rg_state == S_RUNNING);
         let p = f_du_pixels.first;
         f_du_pixels.deq;
@@ -337,6 +334,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     // ---- start handling (driven by CTRL register) ----
 
     rule r_start (rg_state == S_IDLE && csrs.internal.start() && tables.ready() && !tables.codegen_busy());
+        // Consume each request once, including rejected configurations.
+        csrs.internal.clear_start();
         let cfg_valid = True;
 
         let width  = csrs.internal.img_width();
@@ -362,6 +361,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         rg_du_pix       <= 0;
 
         if(cfg_valid) begin
+            csrs.internal.clear_done();
             if(cfg.en_tiler)
                 img_tiler.set_img_width(truncate(width));
 

@@ -198,8 +198,25 @@ module [Module] mkBlueJPEGConsecutiveTest#(Bool en_chroma, Bool double_buffer_ti
 
         await(dut.s_axis.tready());
 
-        i_cfg_acc.write_reg_req("CTRL", 0);
-        bjpeg_expect_wr_ok(i_cfg_acc);
+        i_cfg_acc.read_reg_req("CTRL");
+        action
+            let rsp <- i_cfg_acc.read_reg_rsp();
+            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
+            if(tpl_2(rsp) != CSR_OKAY || tpl_1(rsp)[start_bit] != 0) begin
+                print_s("ERROR: hardware did not consume START", RED);
+                $fatal(1);
+            end
+        endaction
+
+        i_cfg_acc.read_reg_req("STS");
+        action
+            let rsp <- i_cfg_acc.read_reg_rsp();
+            let done_bit <- i_cfg_acc.field_bit("STS", "DONE");
+            if(tpl_2(rsp) != CSR_OKAY || tpl_1(rsp)[done_bit] != 0) begin
+                print_s("ERROR: DONE was not cleared for the new frame", RED);
+                $fatal(1);
+            end
+        endaction
     endseq;
     FSM fsm_start_frame <- mkFSM(start_frame);
 
@@ -266,6 +283,17 @@ module [Module] mkBlueJPEGConsecutiveTest#(Bool en_chroma, Bool double_buffer_ti
                 seq fsm_feed_pixels.start(); await(fsm_feed_pixels.done()); endseq
                 seq fsm_collect.start();     await(fsm_collect.done());     endseq
             endpar
+
+            bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished);
+            i_cfg_acc.read_reg_req("PERF1");
+            action
+                let rsp <- i_cfg_acc.read_reg_rsp();
+                if(tpl_2(rsp) != CSR_OKAY || tpl_1(rsp) != fromInteger(valueOf(n_pixels))) begin
+                    print_fmt($format("ERROR: frame %0d pixel counter: got %0d, expected %0d",
+                        rg_frame_idx + 1, tpl_1(rsp), valueOf(n_pixels)), RED);
+                    $fatal(1);
+                end
+            endaction
 
             action
                 rg_watchdog_en <= False;
