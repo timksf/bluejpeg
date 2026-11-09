@@ -117,7 +117,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     
 
     csr_reg_def('h08, "STS", "Status Register.");
-    rg_ready    <- csr_reg_ro( 'h08, False,   0, "RDY",   "Module Ready",    "Indicates whether module is ready for processing.");
+    rg_ready    <- csr_reg_ro( 'h08, False,   0, "RDY",   "Module Ready",    "Set once the default tables are loaded and their Huffman codes generated after reset; low while a codegen runs.");
     rg_cg_busy  <- csr_reg_ro( 'h08, False,   1, "CGB",   "Codegen Busy",    "Indicates whether huffman table codegen is running.");
     rg_done     <- csr_reg_ho(
         'h08, 'b0, 4, w_done_update,

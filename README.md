@@ -28,7 +28,7 @@ The DU frontend is tiler → channel splitter → dispatcher.
 | 0x04   | CTRL     | `[0]` start                                    |
 | 0x08   | STS      | `[0]` ready, `[1]` codegen busy, `[4]` done, `[16]` error, `[17]` invalid config |
 | 0x0C   | IMSZ     | `[15:0]` width, `[31:16]` height                 |
-| 0x14   | CGEN     | `[1:0]` table type, `[31]` trigger               |
+| 0x14   | CGEN     | `[1:0]` table type, `[31]` trigger (only needed after writing custom Huffman tables; default codes are generated after reset) |
 | 0x30–0x38 | PERF  | Cycles, input pixels, output bytes              |
 | 0x100+ | TABLE WR | Quantization / Huffman table data writes       |
 
@@ -62,7 +62,7 @@ The DU frontend is tiler → channel splitter → dispatcher.
 
 #### Interfaces & configuration
 
-- [x] AXI4-Stream I/O - 24-bit RGB in, 8-bit JPEG out
+- [x] AXI4-Stream I/O - 24-bit YCbCr in ({Y, Cb, Cr}), 8-bit JPEG out
 - [x] AXI4-Lite config register map - `blue_jpeg_csrs`
 - [x] Standard quantization & Huffman tables - `DefaultTables` (ITU-T T.81 Annex K)
 

@@ -270,6 +270,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             id   : ?
         };
         axis_wr.pkg.put(pkg);
+        csrs.internal.perf_byteso.tick_up();
     endrule
 
     // ---- DU mode / last tracking ----

@@ -172,6 +172,26 @@ module mkTableStorage#(NumProxy#(qwidth) qp, Bool transposed)(TableStorage_ifc#(
     Reg#(Bit#(16))         rg_cg_code   <- mkRegU; //running code value
     FIFO#(HuffTableWrite_t) f_cg_write  <- mkPipelineFIFO;
 
+    //code tables start uninitialized, so all four are generated from the default tables once after reset
+    Reg#(UInt#(3))         rg_boot_cg   <- mkReg(0);
+    Bool                   boot_cg_done = rg_boot_cg == 4;
+
+    function Action start_codegen(HuffTableType_t htt);
+        action
+            rg_cg_active <= True;
+            rg_cg_table  <= htt;
+            rg_cg_si     <= 1;
+            rg_cg_j      <= 0;
+            rg_cg_k      <= 0;
+            rg_cg_code   <= 0;
+        endaction
+    endfunction
+
+    rule r_boot_codegen (rg_huff_init_done && !boot_cg_done && !rg_cg_active);
+        start_codegen(unpack(truncate(pack(rg_boot_cg))));
+        rg_boot_cg <= rg_boot_cg + 1;
+    endrule
+
     rule r_codegen_write;
         let wr = f_cg_write.first;
         f_cg_write.deq;
@@ -242,17 +262,12 @@ module mkTableStorage#(NumProxy#(qwidth) qp, Bool transposed)(TableStorage_ifc#(
         endcase
     endmethod
 
-    method Action generate_codes(HuffTableType_t htt) if (!rg_cg_active);
-        rg_cg_active <= True;
-        rg_cg_table  <= htt;
-        rg_cg_si     <= 1;
-        rg_cg_j      <= 0;
-        rg_cg_k      <= 0;
-        rg_cg_code   <= 0;
+    method Action generate_codes(HuffTableType_t htt) if(boot_cg_done && !rg_cg_active);
+        start_codegen(htt);
     endmethod
 
     method Bool codegen_busy    = rg_cg_active;
-    method Bool ready           = rg_init_done && rg_huff_init_done;
+    method Bool ready           = rg_init_done && rg_huff_init_done && boot_cg_done && !rg_cg_active;
 
     //to Quantizer / Huffencoder
     interface quant_scaled          = toGPServer(asReg(w_qidx),  read_quant_scaled);

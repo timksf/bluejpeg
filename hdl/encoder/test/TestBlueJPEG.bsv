@@ -211,15 +211,7 @@ module [Module] test(TestHandler)
         fsm_wait_ready.start();
         await(fsm_wait_ready.done());
 
-        // ---- phase 3: generate Huffman codes (4 tables) ----
-        // Default BITS/VAL tables are already loaded at init; just run codegen.
-        // HuffTableType_t: DC_Luma=0, DC_Chroma=1, AC_Luma=2, AC_Chroma=3
-        print_s("Generating Huffman codes...", YELLOW);
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 0);  // DC_Luma
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 1);  // DC_Chroma
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 2);  // AC_Luma
-        bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 3);  // AC_Chroma
-        print_s("Huffman code generation complete", GREEN);
+        //no codegen trigger: STS.RDY covers the code tables generated after reset
 
         // ---- phase 4: configure BlueJPEG ----
         print_s("Configuring BlueJPEG...", YELLOW);
@@ -258,6 +250,14 @@ module [Module] test(TestHandler)
             rg_axil_rsp <= tpl_1(perf1_rsp);
         endaction
         print_fmt($format("Processed Pixels: %0d", rg_axil_rsp), GREEN);
+        i_cfg_acc.read_reg_req("PERF2");
+        action
+            let perf2_rsp <- i_cfg_acc.read_reg_rsp();
+            if(tpl_1(perf2_rsp) != pack(rg_out_count)) begin
+                print_fmt($format("PERF2 byte count %0d does not match %0d received bytes", tpl_1(perf2_rsp), rg_out_count), RED);
+                $finish(1);
+            end
+        endaction
 
         print_fmt($format("JPEG encoding complete, %0d bytes output", rg_out_count), GREEN);
         print_fmt($format("Output written to %s and SimRAM[%0d..]",
