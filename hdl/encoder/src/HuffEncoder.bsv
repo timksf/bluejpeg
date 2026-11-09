@@ -49,6 +49,9 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
     FIFO#(HuffDUMeta_t) f_meta       <- mkSizedFIFO(4);
     Reg#(Bit#(6))       rg_coeff_idx <- mkReg(0);
 
+    //rewind only pulses, r_rewind owns the reset and the processing rules stand still in that cycle
+    PulseWire pw_rewind <- mkPulseWire;
+
     //registered table addresses split symbol generation from LUTRAM lookup
     Reg#(HuffCodeDCIdx_t)   rg_dc_req <- mkReg(HuffCodeDCIdx_t { pt: Luma, idx: 0 });
     Wire#(HuffTableEntry_t) w_dc_resp <- mkWire;
@@ -74,7 +77,7 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         return (val < 0) ? ~abs_bits : abs_bits;
     endfunction
 
-    rule r_prepare;
+    rule r_prepare (!pw_rewind);
         let tag  = f_in.first; f_in.deq;
         let meta = f_meta.first;
 
@@ -132,7 +135,7 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         f_pending.enq(pending);
     endrule
 
-    rule r_emit;
+    rule r_emit (!pw_rewind);
         let pending = f_pending.first; f_pending.deq;
 
         HuffTableEntry_t entry = pending.is_dc ? w_dc_resp : w_ac_resp;
@@ -152,13 +155,16 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         f_out.enq(out);
     endrule
 
-    method Action rewind();
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_rewind (pw_rewind);
         rg_coeff_idx <= 0;
         f_meta.clear;
-        f_in.clear();
-        f_pending.clear();
-        f_out.clear();
-    endmethod
+        f_in.clear;
+        f_pending.clear;
+        f_out.clear;
+    endrule
+
+    method rewind = pw_rewind.send;
 
     interface du_meta = toPut(f_meta);
 

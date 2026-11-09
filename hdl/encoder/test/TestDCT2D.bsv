@@ -71,7 +71,7 @@ module [Module] mkTestCase(TestHandler_ifc);
 
                 for(Integer i=0; i<8; i=i+1)
                     for(Integer j=0; j<8; j=j+1) begin
-                        let      pix     <- rand_pix();
+                        let pix <- rand_pix();
                         Int#(16) pix_i16 = unpack(zeroExtend(pack(pix)));
                         block_2d[i][j] = truncate(pix_i16 - 128); //random pixel then mean shift
                     end
@@ -87,11 +87,11 @@ module [Module] mkTestCase(TestHandler_ifc);
 
             //calculate reference and compare
             action
-                let                              ref_out_packed <- dct_2d_i16_ref(rg_input_flat, False);
-                Vector#(8, Vector#(8, Int#(16))) ref_out        = unpack(ref_out_packed);
-                let                              res            <- dut.data.response.get();
-                let                              res_tp         = transpose_mcu(res); //replaces the output transpose buffer
-                let                              hw_block       = res_tp.block;
+                let ref_out_packed <- dct_2d_i16_ref(rg_input_flat, False);
+                Vector#(8, Vector#(8, Int#(16))) ref_out = unpack(ref_out_packed);
+                let res      <- dut.data.response.get();
+                let res_tp   = transpose_mcu(res); //replaces the output transpose buffer
+                let hw_block = res_tp.block;
 
                 DU_t#(Int#(12), 8, 8) ref_ = DU_t { block: map(map(truncate), ref_out) };
 
@@ -166,7 +166,7 @@ module [Module] mkTestCaseOpt(TestHandler_ifc);
 
                 for(Integer i=0; i<8; i=i+1)
                     for(Integer j=0; j<8; j=j+1) begin
-                        let      pix     <- rand_pix();
+                        let pix <- rand_pix();
                         Int#(16) pix_i16 = unpack(zeroExtend(pack(pix)));
                         block_2d[i][j] = truncate(pix_i16 - 128); //random pixel then mean shift
                     end
@@ -198,8 +198,8 @@ module [Module] mkTestCaseOpt(TestHandler_ifc);
 
             //calculate reference and compare
             action
-                let                              ref_out_packed <- dct_2d_i16_ref(rg_input_flat, False);
-                Vector#(8, Vector#(8, Int#(16))) ref_out        = unpack(ref_out_packed);
+                let ref_out_packed <- dct_2d_i16_ref(rg_input_flat, False);
+                Vector#(8, Vector#(8, Int#(16))) ref_out = unpack(ref_out_packed);
 
                 let res_tp   = transpose_mcu(rg_mcu_out);
                 let hw_block = res_tp.block;

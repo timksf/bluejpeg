@@ -65,10 +65,10 @@ module mkDUProc#(DUProcCfg_t#(dct_scale, q_scale) cfg)(DUProcLegacy_ifc#(pixel_b
     FIFO#(UInt#(pixel_bits)) f_i;
     FIFO#(Int#(dct_bits))    f_dct <- mkFIFO;
 
-    DUDebug_ifc#(UInt#(pixel_bits), 8, 8) i_du_dbg_0;
-    DUDebug_ifc#(Int#(dct_bits), 8, 8)    i_du_dbg_1;
-    DUDebug_ifc#(Int#(dct_bits), 8, 8)    i_du_dbg_2;
-    DUDebug_ifc#(Int#(dct_bits), 64, 1)   i_du_dbg_3;
+    DUDebug_ifc#(UInt#(pixel_bits), 8, 8) i_du_dbg_0 = ?;
+    DUDebug_ifc#(Int#(dct_bits), 8, 8)    i_du_dbg_1 = ?;
+    DUDebug_ifc#(Int#(dct_bits), 8, 8)    i_du_dbg_2 = ?;
+    DUDebug_ifc#(Int#(dct_bits), 64, 1)   i_du_dbg_3 = ?;
     if(cfg.debug) begin
         i_du_dbg_0 <- mkDUDebug("BEFORE DCT");
         i_du_dbg_1 <- mkDUDebug("AFTER DCT");
@@ -158,10 +158,10 @@ module mkDUProc_Opt#(DUProcCfg_t#(dct_scale, q_scale) cfg)(DUProc_ifc#(pixel_bit
     FIFO#(UInt#(pixel_bits)) f_i;
     FIFO#(Int#(pixel_bits))  f_dct <- mkFIFO;
 
-    DUDebug_ifc#(UInt#(pixel_bits), 8, 8)           i_du_dbg_0;
-    DUDebug_ifc#(Int#(TAdd#(pixel_bits, 7)), 8, 8)  i_du_dbg_1;
-    DUDebug_ifc#(Int#(TAdd#(pixel_bits, 7)), 8, 8)  i_du_dbg_2;
-    DUDebug_ifc#(Int#(TAdd#(pixel_bits, 7)), 64, 1) i_du_dbg_3;
+    DUDebug_ifc#(UInt#(pixel_bits), 8, 8)           i_du_dbg_0 = ?;
+    DUDebug_ifc#(Int#(TAdd#(pixel_bits, 7)), 8, 8)  i_du_dbg_1 = ?;
+    DUDebug_ifc#(Int#(TAdd#(pixel_bits, 7)), 8, 8)  i_du_dbg_2 = ?;
+    DUDebug_ifc#(Int#(TAdd#(pixel_bits, 7)), 64, 1) i_du_dbg_3 = ?;
     if(cfg.debug) begin
         i_du_dbg_0 <- mkDUDebug("BEFORE DCT");
         i_du_dbg_1 <- mkDUDebug("AFTER DCT");

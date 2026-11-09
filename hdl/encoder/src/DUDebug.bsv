@@ -32,7 +32,7 @@ module mkDUDebug#(String tag)(DUDebug_ifc#(t, w, h))
     Reg#(Bool) rg_ready <- mkReg(False);
 
     rule r_accumulate (!rg_ready);
-        let                    pix = f_in.first; f_in.deq;
+        let pix = f_in.first; f_in.deq;
         Vector#(TMul#(w,h), t) blk = rg_block;
         blk[rg_cnt] = pix;
         rg_block <= blk;

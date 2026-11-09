@@ -70,7 +70,7 @@ module mkSimRAM_AXI#(Bool v)(SimRAM_AXI4_ifc#(sz, addrw, dataw, idw, usrw))
         rg_transfers_left <= rg_transfers_left - 1;
         rg_cur_addr <= rg_cur_addr + 1;
 
-        let         rd_val      <- i_m_backend.read(unpack(extend(rg_cur_addr)));
+        let rd_val <- i_m_backend.read(unpack(extend(rg_cur_addr)));
         Bit#(dataw) from_memory = truncate(pack(rd_val));
 
         slave_rd.response.put(AXI4_Read_Rs { id: rg_cur_id_read, data: from_memory, resp: OKAY, last: (rg_transfers_left == 1), user: 0});

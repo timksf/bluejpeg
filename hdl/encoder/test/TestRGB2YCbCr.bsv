@@ -105,12 +105,13 @@ module [Module] mkSimpleTest(TestHandler_ifc);
                 user: ?,
                 keep: unpack(-1), //keep all
                 dest: ?,
+                id: 0,
                 last: True //last transfer in stream
             });
         endaction
         //wait for result
         action
-            let      res     <- i_axis_rx.pkg.get();
+            let res <- i_axis_rx.pkg.get();
             YCbCr_t  ycbcr   = unpack(res.data);
             Bit#(32) ref_raw = rgb2ycbcr_ref(24, 12, 77);
             YCbCr_t ref_res = YCbCr_t {
@@ -224,7 +225,7 @@ module [Module] mkImageTest(TestHandler_ifc)
 
     rule r_mm2s;
         //assume there is a single pixel per data word in memory for simplicity
-        let  r    <- i_mem_master_rd.server.response.get();
+        let r <- i_mem_master_rd.server.response.get();
         Bool last = (rg_read_counter == fromInteger(valueof(amount) - 1));
         rg_read_counter <= rg_read_counter + 1;
         RGB_t rgb = unpack(r[23:0]);
@@ -233,13 +234,14 @@ module [Module] mkImageTest(TestHandler_ifc)
             user: ?,
             keep: unpack(-1), //keep all
             dest: ?,
+            id: 0,
             last: last //last transfer in stream
         });
         // print_fmt($format("MM2S: %0d", rg_read_counter), YELLOW);
     endrule
 
     rule r_s2mm;
-        let     res   <- i_axis_rx.pkg.get();
+        let res <- i_axis_rx.pkg.get();
         YCbCr_t ycbcr = unpack(res.data);
         i_mem_master_wr.data.put(extend(pack(ycbcr.y)));
         // print_fmt($format("S2MM: %0d", rg_write_counter), YELLOW);

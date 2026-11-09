@@ -31,7 +31,6 @@ typedef 16 DCTScale;
 typedef 16 QuantScale;
 typedef 8 PixelWidth;
 
-
 module [Module] mkTestBlueJPEGGray(TestHandler_ifc);
 
     function print_s  = print_mod_pre_color_t_s;
@@ -82,13 +81,13 @@ module [Module] mkTestCase(TestHandler_ifc)
             double_buffer_tiler : False,
             en_chroma           : False
         };
-    BlueJPEG_ifc dut      <- mkBlueJPEG(jpeg_cfg);
-    let          csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
+    BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
+    let csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
 
     //AXI-Lite master for DUT configuration
-    AXI4_Lite_Master_Rd#(32, 32) i_cfg_rd  <- mkAXI4_Lite_Master_Rd(1);
-    AXI4_Lite_Master_Wr#(32, 32) i_cfg_wr  <- mkAXI4_Lite_Master_Wr(16);
-    let                          i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, i_cfg_rd, i_cfg_wr);
+    AXI4_Lite_Master_Rd#(32, 32) i_cfg_rd <- mkAXI4_Lite_Master_Rd(1);
+    AXI4_Lite_Master_Wr#(32, 32) i_cfg_wr <- mkAXI4_Lite_Master_Wr(16);
+    let i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, i_cfg_rd, i_cfg_wr);
 
     //AXI-Stream: pixel input (32-bit)
     AXI4_Stream_Wr#(24, 0) i_axis_tx <- mkAXI4_Stream_Wr(128);
@@ -122,7 +121,7 @@ module [Module] mkTestCase(TestHandler_ifc)
     Stmt feed_pixels = seq
         rg_pixel_idx <= 0;
         while(rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
-            let      word  <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
+            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
             Bit#(24) pixel = truncate(pack(word));
             Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
                 unpack(pixel[23:16]),   //r
@@ -140,12 +139,12 @@ module [Module] mkTestCase(TestHandler_ifc)
                 user: ?,
                 keep: unpack(-1),
                 dest: 0,
+                id: 0,
                 last: is_last
             });
             rg_pixel_idx <= rg_pixel_idx + 1;
         endaction
     endseq;
-    FSM i_fsm_feed_pixels <- mkFSM(feed_pixels);
 
     //collect JPEG output bytes to output file and RAM output region
     Stmt collect_output = seq
@@ -158,8 +157,8 @@ module [Module] mkTestCase(TestHandler_ifc)
             rg_out_file <= fd;
         endaction
         while(!rg_finished) action
-            let     pkg <- i_axis_out.pkg.get();
-            Bit#(8) b   = pkg.data;
+            let pkg <- i_axis_out.pkg.get();
+            Bit#(8) b = pkg.data;
             //write to SimRAM
             write_word_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count), unpack(extend(b)));
             //write to file
@@ -172,14 +171,6 @@ module [Module] mkTestCase(TestHandler_ifc)
         endaction
         $fclose(rg_out_file);
     endseq;
-    FSM i_fsm_collect <- mkFSM(collect_output);
-
-    //poll CTRL register for done bit
-    FSM i_fsm_poll_done <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
-
-    //wait for default table init (poll STATUS.ready)
-    FSM i_fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
-
 
     //main test sequence
 
@@ -205,8 +196,7 @@ module [Module] mkTestCase(TestHandler_ifc)
 
         //phase 2: wait for table init
         print_s("Waiting for default table init...", YELLOW);
-        i_fsm_wait_ready.start();
-        await(i_fsm_wait_ready.done());
+        bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp);
 
         //phase 3: generate only luma Huffman codes
         print_s("Generating luma Huffman codes...", YELLOW);
@@ -226,7 +216,7 @@ module [Module] mkTestCase(TestHandler_ifc)
         //phase 5: start encoder
         print_s("Starting grayscale BlueJPEG encoder...", YELLOW);
         action
-            let      start_bit  <- i_cfg_acc.field_bit("CTRL", "START");
+            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
             Bit#(32) start_mask = 1 << start_bit;
             i_cfg_acc.write_reg_req("CTRL", start_mask);
         endaction
@@ -234,9 +224,9 @@ module [Module] mkTestCase(TestHandler_ifc)
 
         //phase 6: feed pixels + collect output + poll done
         par
-            seq i_fsm_feed_pixels.start(); await(i_fsm_feed_pixels.done()); endseq
-            seq i_fsm_collect.start();     await(i_fsm_collect.done());     endseq
-            seq i_fsm_poll_done.start();   await(i_fsm_poll_done.done());   endseq
+            feed_pixels;
+            collect_output;
+            bjpeg_poll_done(i_cfg_acc, rg_axil_rsp);
         endpar
 
         i_cfg_acc.read_reg_req("PERF0");

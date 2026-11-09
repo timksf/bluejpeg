@@ -131,8 +131,8 @@ module [Module] mkTestDUProc(TestHandler_ifc);
 
             //calculate reference and compare
             action
-                let                   ref_out_packed <- mcu_proc_ref(rg_input_flat, True, !dut_cfg.dct_safe_arith);
-                Vector#(64, Int#(16)) ref_out        = unpack(ref_out_packed);
+                let ref_out_packed <- mcu_proc_ref(rg_input_flat, True, !dut_cfg.dct_safe_arith);
+                Vector#(64, Int#(16)) ref_out = unpack(ref_out_packed);
 
                 function Int#(DCTWidth) calc_diff(Integer i);
                     Int#(DCTWidth) hw_val  = rg_mcu_out[i];

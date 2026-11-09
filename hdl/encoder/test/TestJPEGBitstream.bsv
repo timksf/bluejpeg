@@ -124,8 +124,8 @@ module mkTestJPEGBitstreamMode#(Bool buffer_in, Bool backpressure)(TestHandler_i
 
     //hold off initially to fill queues, then accept only one cycle in eight
     rule r_check (rg_active && (!backpressure || (rg_cycles >= 40 && rg_cycles % 8 == 0)));
-        let      actual     <- i_dut.data.response.get();
-        let      example    = test_case(rg_case);
+        let actual  <- i_dut.data.response.get();
+        let example = test_case(rg_case);
         UInt#(9) shift_bits = zeroExtend(example.byte_count - 1 - rg_received) * 8;
         Bit#(8)  expected   = truncate(example.bytes >> shift_bits);
         if(rg_received >= example.byte_count || actual != expected) begin

@@ -30,7 +30,6 @@ typedef 12   DCTScale;
 typedef 12   QuantScale;
 typedef 8    PixelWidth;
 
-
 module [Module] mkTestJPEGBitAccuracy(TestHandler_ifc);
 
     function print_s  = print_mod_pre_color_t_s;
@@ -81,13 +80,13 @@ module [Module] mkTestCase(TestHandler_ifc)
             double_buffer_tiler : False,
             en_chroma           : True
         };
-    BlueJPEG_ifc dut      <- mkBlueJPEG(jpeg_cfg);
-    let          csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
+    BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
+    let csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
 
     //AXI-Lite master for DUT configuration
-    AXI4_Lite_Master_Rd#(32, 32) i_cfg_rd  <- mkAXI4_Lite_Master_Rd(1);
-    AXI4_Lite_Master_Wr#(32, 32) i_cfg_wr  <- mkAXI4_Lite_Master_Wr(16);
-    let                          i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, i_cfg_rd, i_cfg_wr);
+    AXI4_Lite_Master_Rd#(32, 32) i_cfg_rd <- mkAXI4_Lite_Master_Rd(1);
+    AXI4_Lite_Master_Wr#(32, 32) i_cfg_wr <- mkAXI4_Lite_Master_Wr(16);
+    let i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, i_cfg_rd, i_cfg_wr);
 
     //AXI-Stream: pixel input (24-bit)
     AXI4_Stream_Wr#(24, 0) i_axis_tx <- mkAXI4_Stream_Wr(128);
@@ -123,7 +122,7 @@ module [Module] mkTestCase(TestHandler_ifc)
     Stmt feed_pixels = seq
         rg_pixel_idx <= 0;
         while(rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
-            let      word  <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
+            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
             Bit#(24) pixel = truncate(pack(word));
             Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
                 unpack(pixel[23:16]),
@@ -141,18 +140,18 @@ module [Module] mkTestCase(TestHandler_ifc)
                 user: ?,
                 keep: unpack(-1),
                 dest: 0,
+                id: 0,
                 last: is_last
             });
             rg_pixel_idx <= rg_pixel_idx + 1;
         endaction
     endseq;
-    FSM i_fsm_feed_pixels <- mkFSM(feed_pixels);
 
     //collect JPEG output bytes into SimRAM (HW output region)
     Stmt collect_output = seq
         while(!rg_finished) action
-            let     pkg <- i_axis_out.pkg.get();
-            Bit#(8) b   = pkg.data;
+            let pkg <- i_axis_out.pkg.get();
+            Bit#(8) b = pkg.data;
             write_word_SimRAM(rg_ram_ptr,
                 hw_out_base + extend(rg_out_count),
                 unpack(extend(b)));
@@ -163,14 +162,10 @@ module [Module] mkTestCase(TestHandler_ifc)
             end
         endaction
     endseq;
-    FSM i_fsm_collect <- mkFSM(collect_output);
 
     //poll STATUS register for done bit
-    FSM i_fsm_poll_done <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
 
     //wait for default table init
-    FSM i_fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
-
 
     //comparison state
     Reg#(UInt#(32)) rg_cmp_idx  <- mkReg(0);
@@ -213,8 +208,7 @@ module [Module] mkTestCase(TestHandler_ifc)
 
         //phase 3: wait for table init
         print_s("Waiting for default table init...", YELLOW);
-        i_fsm_wait_ready.start();
-        await(i_fsm_wait_ready.done());
+        bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp);
 
         //phase 4: generate Huffman codes (4 tables)
         print_s("Generating Huffman codes...", YELLOW);
@@ -236,7 +230,7 @@ module [Module] mkTestCase(TestHandler_ifc)
         //phase 6: start encoder
         print_s("Starting BlueJPEG encoder...", YELLOW);
         action
-            let      start_bit  <- i_cfg_acc.field_bit("CTRL", "START");
+            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
             Bit#(32) start_mask = 1 << start_bit;
             i_cfg_acc.write_reg_req("CTRL", start_mask);
         endaction
@@ -244,9 +238,9 @@ module [Module] mkTestCase(TestHandler_ifc)
 
         //phase 7: feed pixels + collect output + poll done
         par
-            seq i_fsm_feed_pixels.start(); await(i_fsm_feed_pixels.done()); endseq
-            seq i_fsm_collect.start();     await(i_fsm_collect.done());     endseq
-            seq i_fsm_poll_done.start();   await(i_fsm_poll_done.done());   endseq
+            feed_pixels;
+            collect_output;
+            bjpeg_poll_done(i_cfg_acc, rg_axil_rsp);
         endpar
 
         print_fmt($format("HW encoding complete, %0d bytes output", rg_out_count), GREEN);
@@ -265,8 +259,8 @@ module [Module] mkTestCase(TestHandler_ifc)
         rg_cmp_idx <= 0;
         while(rg_cmp_idx < rg_out_count && rg_cmp_idx < rg_ref_bytes) seq
             action
-                let     hw_word  <- read_word_SimRAM(rg_ram_ptr, hw_out_base  + extend(rg_cmp_idx));
-                let     ref_word <- read_word_SimRAM(rg_ram_ptr, ref_out_base + extend(rg_cmp_idx));
+                let hw_word  <- read_word_SimRAM(rg_ram_ptr, hw_out_base  + extend(rg_cmp_idx));
+                let ref_word <- read_word_SimRAM(rg_ram_ptr, ref_out_base + extend(rg_cmp_idx));
                 Bit#(8) hw_byte  = truncate(pack(hw_word));
                 Bit#(8) ref_byte = truncate(pack(ref_word));
                 if(hw_byte != ref_byte) begin

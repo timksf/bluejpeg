@@ -228,7 +228,7 @@ function ActionValue#(Bit#(w1)) flog2(Bit#(w) x)
         Add#(TLog#(w), 1, w1)
     );
     actionvalue
-        let      lz  <- clz_gen(x);
+        let lz <- clz_gen(x);
         Bit#(w1) res = fromInteger(valueof(w)) - lz - 1;
         return res;
     endactionvalue

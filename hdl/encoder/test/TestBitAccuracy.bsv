@@ -95,7 +95,7 @@ module [Module] mkTestBitAccuracy(TestHandler_ifc);
                 Vector#(64, UInt#(PixelWidth)) block_1d  = newVector;
                 Vector#(64, Int#(16))          ref_input = newVector;
                 for(Integer i = 0; i < 64; i = i + 1) begin
-                    let      pix     <- rand_pix();
+                    let pix <- rand_pix();
                     Int#(16) pix_i16 = unpack(zeroExtend(pack(pix)));
                     block_1d[i] = truncate(pix);
                     ref_input[i] = pix_i16;
@@ -124,8 +124,8 @@ module [Module] mkTestBitAccuracy(TestHandler_ifc);
 
             //compare HW output vs C++ reference (bitwise exact)
             action
-                let                   ref_packed <- mcu_proc_ref(rg_input_flat, rg_is_luma, !dut_cfg.dct_safe_arith);
-                Vector#(64, Int#(16)) ref_out    = unpack(ref_packed);
+                let ref_packed <- mcu_proc_ref(rg_input_flat, rg_is_luma, !dut_cfg.dct_safe_arith);
+                Vector#(64, Int#(16)) ref_out = unpack(ref_packed);
 
                 //compute max absolute difference
                 Int#(DCTWidth) max_diff       = 0;

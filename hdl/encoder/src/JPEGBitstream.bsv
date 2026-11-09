@@ -25,23 +25,26 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
 
     //64 bit accumulator, the CReg allows r_emit (port 0) and r_accumulate (port 1) to fire in the same cycle
     //valid bits are in positions [rg_bits-1:0]
-    //port 0: emit / flush rules, port 1: accumulate, port 2: rewind
-    Reg#(Bit#(64)) rg_buffer[3] <- mkCReg(3, 0);
-    Reg#(UInt#(7)) rg_bits[3]   <- mkCReg(3, 0);
+    //port 0: emit / flush rules and rewind, port 1: accumulate
+    Reg#(Bit#(64)) rg_buffer[2] <- mkCReg(2, 0);
+    Reg#(UInt#(7)) rg_bits[2]   <- mkCReg(2, 0);
 
     //stuffing: after emitting 0xFF, must emit 0x00
-    Reg#(Bool) rg_stuff[3] <- mkCReg(3, False);
+    Reg#(Bool) rg_stuff[2] <- mkCReg(2, False);
 
     //flush state machine
     Reg#(Bool) rg_finishing    <- mkReg(False); //seen last flag, draining bytes
     Reg#(Bool) rg_pad_injected <- mkReg(False); //padding bits have been added
     Reg#(Bool) rg_done         <- mkReg(False); //scan complete
 
+    //rewind only pulses, r_rewind owns the reset and the other rules stand still in that cycle
+    PulseWire pw_rewind <- mkPulseWire;
+
     //all port-0 rules are mutually exclusive
     (* conflict_free = "r_emit, r_stuff, r_pad, r_pad_done, r_check_done" *)
 
     //accept new codeword when buffer has room (port 1 sees emit updates)
-    rule r_accumulate (!rg_finishing && rg_bits[1] <= 32 && !rg_stuff[1]);
+    rule r_accumulate (!pw_rewind && !rg_finishing && rg_bits[1] <= 32 && !rg_stuff[1]);
         let cw = f_in.first; f_in.deq;
 
         Bit#(7)  sz       = zeroExtend(cw.huffsize);
@@ -55,7 +58,7 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
     endrule
 
     //emit full bytes from the accumulator msb-first (port 0)
-    rule r_emit (rg_bits[0] >= 8 && !rg_stuff[0]);
+    rule r_emit (!pw_rewind && rg_bits[0] >= 8 && !rg_stuff[0]);
         Bit#(7) shift_amt = pack(rg_bits[0] - 8);
         Bit#(8) out_byte  = truncate(rg_buffer[0] >> shift_amt);
         f_out.enq(out_byte);
@@ -69,13 +72,13 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
     endrule
 
     //emit 0x00 stuffing byte after 0xFF
-    rule r_stuff (rg_stuff[0]);
+    rule r_stuff (!pw_rewind && rg_stuff[0]);
         f_out.enq(8'h00);
         rg_stuff[0] <= False;
     endrule
 
     //flush: inject 1-bit padding to complete the final byte
-    rule r_pad (rg_finishing && !rg_pad_injected && rg_bits[0] > 0 && rg_bits[0] < 8 && !rg_stuff[0]);
+    rule r_pad (!pw_rewind && rg_finishing && !rg_pad_injected && rg_bits[0] > 0 && rg_bits[0] < 8 && !rg_stuff[0]);
         Bit#(7)  pad  = pack(8 - rg_bits[0]);
         Bit#(64) ones = (1 << pad) - 1;
         rg_buffer[0] <= (rg_buffer[0] << pad) | ones;
@@ -84,30 +87,32 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
     endrule
 
     //flush with zero remaining bits (codeword aligned to byte boundary)
-    rule r_pad_done (rg_finishing && !rg_pad_injected && rg_bits[0] == 0 && !rg_stuff[0]);
+    rule r_pad_done (!pw_rewind && rg_finishing && !rg_pad_injected && rg_bits[0] == 0 && !rg_stuff[0]);
         rg_done <= True;
         rg_finishing <= False;
     endrule
 
     //final byte emitted and all stuffing done -> signal completion
-    rule r_check_done (rg_finishing && rg_pad_injected && rg_bits[0] == 0 && !rg_stuff[0]);
+    rule r_check_done (!pw_rewind && rg_finishing && rg_pad_injected && rg_bits[0] == 0 && !rg_stuff[0]);
         rg_done <= True;
         rg_finishing <= False;
         rg_pad_injected <= False;
     endrule
 
-    method Bool scan_done() = rg_done;
-
-    method Action rewind();
-        rg_buffer[2]    <= 0;
-        rg_bits[2]      <= 0;
-        rg_stuff[2]     <= False;
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_rewind (pw_rewind);
+        rg_buffer[0]    <= 0;
+        rg_bits[0]      <= 0;
+        rg_stuff[0]     <= False;
         rg_finishing    <= False;
         rg_pad_injected <= False;
         rg_done         <= False;
-        f_in.clear();
-        f_out.clear();
-    endmethod
+        f_in.clear;
+        f_out.clear;
+    endrule
+
+    method Bool scan_done() = rg_done;
+    method rewind = pw_rewind.send;
 
     interface data = toGPServer(f_in, f_out);
 

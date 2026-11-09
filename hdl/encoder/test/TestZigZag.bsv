@@ -44,7 +44,7 @@ module [Module] mkTestZigZag(TestHandler_ifc);
                 Vector#(8, Vector#(8, Int#(16))) in_block = newVector;
                 for(Integer i = 0; i < 8; i = i + 1) begin
                     for(Integer j = 0; j < 8; j = j + 1) begin
-                        let      pix <- rand_pix();
+                        let pix <- rand_pix();
                         Int#(16) val = unpack(zeroExtend(pack(pix))) - 128;
                         in_block[i][j] = val;
                     end
@@ -54,10 +54,10 @@ module [Module] mkTestZigZag(TestHandler_ifc);
 
             //compute reference
             action
-                let                   bs         = rg_in_mcu;
-                Bit#(1024)            packed_in  = pack(bs);
-                let                   packed_out <- zigzag_ref_i16(packed_in, is_transposed);
-                DU_t#(Int#(16), 8, 8) ref_mcu    = unpack(packed_out);
+                let bs = rg_in_mcu;
+                Bit#(1024) packed_in = pack(bs);
+                let packed_out <- zigzag_ref_i16(packed_in, is_transposed);
+                DU_t#(Int#(16), 8, 8) ref_mcu = unpack(packed_out);
                 rg_ref_mcu <= ref_mcu;
             endaction
 
@@ -75,9 +75,9 @@ module [Module] mkTestZigZag(TestHandler_ifc);
                 seq
                     rg_out_idx <= 0;
                     while(rg_out_idx < 64) action
-                        let     hw_res <- dut.data.response.get();
-                        Bit#(3) row    = truncate(rg_out_idx >> 3);
-                        Bit#(3) col    = truncate(rg_out_idx);
+                        let hw_res <- dut.data.response.get();
+                        Bit#(3) row = truncate(rg_out_idx >> 3);
+                        Bit#(3) col = truncate(rg_out_idx);
 
                         let bs = rg_res_mcu;
                         bs.block[row][col] = hw_res;

@@ -44,7 +44,7 @@ module mkTestDUDispatcher(TestHandler_ifc);
                 //pause the consumer across DU boundaries to exercise backpressure
                 await(rg_cycles % 8 < 3);
                 action
-                    let      actual    <- i_dispatcher.pix.get();
+                    let actual <- i_dispatcher.pix.get();
                     UInt#(9) mcu       = rg_output_count / 192;
                     UInt#(9) component = (rg_output_count % 192) / 64;
                     UInt#(8) expected  = truncate(mcu * 64 + component * 64 + rg_output_count % 64);

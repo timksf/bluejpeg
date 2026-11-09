@@ -156,20 +156,20 @@ module [Module] mkRGB2YCbCrTop(RGB2YCbCr_ifc#(dw))
     AXI4_Stream_Wr#(dw, 0) i_axis_wr <- mkAXI4_Stream_Wr(1); //buffer size param
 
     //config interface AXI4 Lite
-    BlueCSRAccess_ifc#(32, 32, 1, RGB2YCbCrCfg_ifc#(coeff_w)) i_csrs     <- create_blue_csr(rgb2ycbcr_csrs, False);
-    let                                                       i_axi_csrs <- mkBlueCSRAXI4LiteAdapter(i_csrs.external, 1, 1);
+    BlueCSRAccess_ifc#(32, 32, 1, RGB2YCbCrCfg_ifc#(coeff_w)) i_csrs <- create_blue_csr(rgb2ycbcr_csrs, False);
+    let i_axi_csrs <- mkBlueCSRAXI4LiteAdapter(i_csrs.external, 1, 1);
 
     //actual colorspace converter
     NumProxy_t#(coeff_w) coeff_width = ?;
     RGB2YCbCrConv_ifc    i_conv      <- mkRGB2YCbCrConv(coeff_width, i_csrs.internal.coeffs);
 
-    Reg#(UInt#(32)) rInConv[2] <- mkCRegU(2);
-    Reg#(UInt#(32)) rg_ctr     <- mkRegU;
-    Reg#(Bool)      rg_last    <- mkRegU;
-    Reg#(Bool)      rg_running <- mkReg(False);
+    Reg#(UInt#(32)) rg_in_conv[2] <- mkCRegU(2);
+    Reg#(UInt#(32)) rg_ctr        <- mkRegU;
+    Reg#(Bool)      rg_last       <- mkRegU;
+    Reg#(Bool)      rg_running    <- mkReg(False);
 
     rule r_init (i_csrs.internal.start() && !rg_running);
-        rInConv[0] <= 0;
+        rg_in_conv[0] <= 0;
         rg_ctr <= 0;
         rg_running <= True;
         rg_last <= False;
@@ -182,7 +182,7 @@ module [Module] mkRGB2YCbCrTop(RGB2YCbCr_ifc#(dw))
         let pkg <- i_axis_rd.pkg.get();
         if(pkg.keep == 'b111) begin //discard packets with any invalid value
             i_conv.data.request.put(unpack(pkg.data));
-            rInConv[0] <= rInConv[0] + 1;
+            rg_in_conv[0] <= rg_in_conv[0] + 1;
             rg_last <= pkg.last;
         end
     endrule
@@ -192,9 +192,9 @@ module [Module] mkRGB2YCbCrTop(RGB2YCbCr_ifc#(dw))
         let new_ctr = rg_ctr + 1;
         i_csrs.internal.pixel_ctr(new_ctr);
         rg_ctr <= new_ctr;
-        rInConv[1] <= rInConv[1] - 1;
+        rg_in_conv[1] <= rg_in_conv[1] - 1;
         Bool last = False;
-        if(rg_last && rInConv[1] == 1) begin
+        if(rg_last && rg_in_conv[1] == 1) begin
             i_csrs.internal.finish();
             rg_running <= False;
             last = True;
@@ -204,6 +204,7 @@ module [Module] mkRGB2YCbCrTop(RGB2YCbCr_ifc#(dw))
             user: ?,
             keep: unpack(-1), //keep all
             dest: ?,
+            id: 0,
             last: last
         });
     endrule
@@ -251,7 +252,7 @@ module mkRGB2YCbCrConv#(NumProxy_t#(w) _, RGB2YCbCrParams_t#(w) params)(RGB2YCbC
     */
 
     rule r_stage_y;
-        let      rgb        = f_rgb.first;
+        let rgb = f_rgb.first;
         Int#(w1) r          = unpack(pack(zeroExtend(rgb.r)));
         Int#(w1) g          = unpack(pack(zeroExtend(rgb.g)));
         Int#(w1) b          = unpack(pack(zeroExtend(rgb.b)));
@@ -265,8 +266,8 @@ module mkRGB2YCbCrConv#(NumProxy_t#(w) _, RGB2YCbCrParams_t#(w) params)(RGB2YCbC
     endrule
 
     rule r_stage_cb_cr;
-        let      rgb     = f_rgb.first;
-        let      y_sc    = f_stage_y.first;
+        let rgb  = f_rgb.first;
+        let y_sc = f_stage_y.first;
         Int#(w1) r       = unpack(pack(zeroExtend(rgb.r)));
         Int#(w1) b       = unpack(pack(zeroExtend(rgb.b)));
         Int#(w)  y_final = truncate(y_sc >> params.log2_b);

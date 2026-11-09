@@ -73,7 +73,7 @@ module mkTransposeBuffer#(Bool use_bram)(TransposeBuffer_ifc#(t, w, h))
     interface Get transposed;
         method ActionValue#(t) get() if(rg_filled && !pw_rewind && !rg_empty);
             Bit#(TAdd#(hori_idx_w,vert_idx_w)) idx = extend(rg_read_j)+extend(rg_read_i)*fromInteger(width);
-            let                                d   = rg_buffer[idx];
+            let d = rg_buffer[idx];
             /* advance indices with transposed limits (first vert, then hori) */
             // $display("Read %0d, %0d", rg_read_j, rg_read_i);
             if(rg_read_i == max_vert_idx) begin
@@ -134,15 +134,30 @@ module mkTransposeBufferOpt(TransposeBufferOpt_ifc#(t))
     Reg#(Bit#(2)) rg_blocks_written <- mkReg(0);
     Reg#(Bit#(2)) rg_blocks_read    <- mkReg(0);
 
+    //put and get only pulse, r_count owns both block counters so neither method writes state the other reads
+    PulseWire pw_block_written <- mkPulseWire;
+    PulseWire pw_block_read    <- mkPulseWire;
+    PulseWire pw_rewind        <- mkPulseWire;
+
     Bit#(2) blocks_rdy = rg_blocks_written - rg_blocks_read;
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_count (pw_block_written || pw_block_read || pw_rewind);
+        if(pw_rewind) begin
+            rg_blocks_written <= 0;
+            rg_blocks_read    <= 0;
+        end else begin
+            if(pw_block_written) rg_blocks_written <= rg_blocks_written + 1;
+            if(pw_block_read)    rg_blocks_read    <= rg_blocks_read + 1;
+        end
+    endrule
 
     method Action rewind();
         rg_wr_buf <= 0;
         rg_wr_row <= 0;
         rg_rd_buf <= 0;
         rg_rd_col <= 0;
-        rg_blocks_written <= 0;
-        rg_blocks_read <= 0;
+        pw_rewind.send;
     endmethod
 
     interface Put original;
@@ -157,7 +172,7 @@ module mkTransposeBufferOpt(TransposeBufferOpt_ifc#(t))
             if(rg_wr_row == 7) begin
                 rg_wr_row <= 0;
                 rg_wr_buf <= ~rg_wr_buf;
-                rg_blocks_written <= rg_blocks_written + 1;
+                pw_block_written.send;
             end else begin
                 rg_wr_row <= rg_wr_row + 1;
             end
@@ -185,7 +200,7 @@ module mkTransposeBufferOpt(TransposeBufferOpt_ifc#(t))
             if(rg_rd_col == 7) begin
                 rg_rd_col <= 0;
                 rg_rd_buf <= ~rg_rd_buf;
-                rg_blocks_read <= rg_blocks_read + 1;
+                pw_block_read.send;
             end else begin
                 rg_rd_col <= rg_rd_col + 1;
             end

@@ -228,14 +228,14 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     if(cfg.en_tiler) begin
         rule r_axis_to_tiler (rg_state == S_RUNNING);
             i_csrs.internal.perf_pixels.tick(); //count ingested pixels
-            let     pkg <- i_axis_rd.pkg.get();
+            let pkg <- i_axis_rd.pkg.get();
             YCbCr_t pix = unpack(pkg.data);
             i_img_tiler.line_in.put(pix);
         endrule
     end else begin
         rule r_axis_to_chsplt;
             i_csrs.internal.perf_pixels.tick();
-            let     pkg <- i_axis_rd.pkg.get();
+            let pkg <- i_axis_rd.pkg.get();
             YCbCr_t pix = unpack(pkg.data);
             i_ch_splt.pix.put(pix);
         endrule
@@ -243,6 +243,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     //scan data bridge: stuffer -> framewriter
 
+    //scan_done can rise while the stuffer still holds output bytes, so the bridge drains them before the end marker
+    (* descending_urgency = "r_scan_bridge, r_scan_end" *)
     rule r_scan_bridge (rg_state == S_RUNNING || rg_state == S_FLUSH);
         let b <- i_stuffer.data.response.get();
         i_fwriter.scan_data.put(tagged Valid b);
@@ -282,7 +284,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         f_du_pixels.deq;
         i_du_proc.data.request.put(p);
 
-        let  n_du       = cfg.en_chroma ? 3 : fromInteger(1);
+        let n_du = cfg.en_chroma ? 3 : fromInteger(1);
         Bool end_of_mcu = !cfg.en_chroma || (rg_mcu_phase == n_du - 1);
         Bool is_last    = (end_of_mcu && rg_mcu_x == rg_mcu_w-1 && rg_mcu_y == rg_mcu_h-1);
 
@@ -328,7 +330,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     //start handling (driven by CTRL register)
 
-    rule r_start (rg_state == S_IDLE && i_csrs.internal.start() && i_tables.ready() && !i_tables.codegen_busy());
+    //a pending codegen request runs before a start is accepted
+    rule r_start (rg_state == S_IDLE && i_csrs.internal.start() && !i_csrs.internal.codegen_trig() && i_tables.ready());
         //consume each request once, including rejected configurations
         i_csrs.internal.clear_start();
         let cfg_valid = True;

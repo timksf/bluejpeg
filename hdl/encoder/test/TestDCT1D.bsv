@@ -17,7 +17,7 @@ import TestHelper :: *;
 
 function ActionValue#(Bit#(64)) dct_1d_i8_ref(Bit#(64) in, Bool scale) = actionvalue
     Bit#(65) in_padded = {1'b0, in};
-    let      v         <- dct_1d_i8_ref_raw(in_padded, scale);
+    let v <- dct_1d_i8_ref_raw(in_padded, scale);
     return v[63:0];
 endactionvalue;
 
@@ -57,7 +57,7 @@ module [Module] mkTestDCT1D(TestHandler_ifc);
                 Vector#(8, Int#(16)) row = newVector;
 
                 for(Integer i=0; i<8; i=i+1) begin
-                    let      pix     <- rand_pix();
+                    let pix <- rand_pix();
                     Int#(16) pix_i16 = unpack(zeroExtend(pack(pix)));
                     row[i] = truncate(pix_i16 - 128);
                 end
@@ -72,11 +72,11 @@ module [Module] mkTestDCT1D(TestHandler_ifc);
         delay(20); //fill the pipeline and apply output backpressure
 
         while(rg_counter < 8) action
-            let                  input_row      = f_tv.first; f_tv.deq;
-            Vector#(8, Int#(16)) ext_row        = map(signExtend, input_row);
-            let                  ref_out_packed <- dct_1d_i16_ref(pack(ext_row), True);
-            Vector#(8, Int#(16)) ref_wide       = unpack(ref_out_packed);
-            Vector#(8, Int#(16)) ref_out        = map(truncate, ref_wide);
+            let input_row = f_tv.first; f_tv.deq;
+            Vector#(8, Int#(16)) ext_row = map(signExtend, input_row);
+            let ref_out_packed <- dct_1d_i16_ref(pack(ext_row), True);
+            Vector#(8, Int#(16)) ref_wide = unpack(ref_out_packed);
+            Vector#(8, Int#(16)) ref_out  = map(truncate, ref_wide);
 
             let res         <- dut.data.response.get();
             let row_error   = sum_abs_error(ref_out, res);

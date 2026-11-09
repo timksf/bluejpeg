@@ -34,14 +34,14 @@ function Action print_mod_pre_color(Fmt fmt, TermColor tc) =
 
 function Action print_mod_pre_color_t_s(String s, TermColor tc) =
 action
-    let t      <- $time();
+    let t <- $time();
     Fmt prefix = $format("[t=%0d]%s", t, mod_prefix);
     $display(prefix + color_string(s, tc));
 endaction;
 
 function Action print_mod_pre_color_t_f(Fmt f, TermColor tc) =
 action
-    let t      <- $time();
+    let t <- $time();
     Fmt prefix = $format("[t=%0d]%s", t, mod_prefix);
     $display(prefix + color_fmt(f, tc));
 endaction;

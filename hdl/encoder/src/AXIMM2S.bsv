@@ -214,7 +214,7 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
         end
         f_outstanding.enq(?);
         UInt#(aw) bytes_this_burst = cExtend(request.burst_length + 1) << fromInteger(valueof(TLog#(bytes_per_beat)));
-        let       next_addr        = rg_current_addr + pack(bytes_this_burst);
+        let next_addr = rg_current_addr + pack(bytes_this_burst);
         rg_current_addr <= next_addr;
         i_aximm_rd.request.put(request);
     endrule
@@ -223,8 +223,8 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
         let rsp <- i_aximm_rd.response.get();
         if(rsp.resp == OKAY) begin
             //narrowing happens here, if sdw < dw
-            Bit#(datawidth) d         = rsp.data[valueof(datawidth)-1:0];
-            let             remaining = rg_bytes_remaining - fromInteger(valueof(TDiv#(datawidth, 8)));
+            Bit#(datawidth) d = rsp.data[valueof(datawidth)-1:0];
+            let remaining = rg_bytes_remaining - fromInteger(valueof(TDiv#(datawidth, 8)));
             rg_bytes_remaining <= remaining;
             f_buffer.enq(tuple2(d, remaining == 0));
         end else begin
@@ -243,6 +243,7 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
             user: ?,
             keep: unpack(-1), //keep all, as always datawidth == sdw
             dest: ?,
+            id: 0,
             last: last
         });
         rg_bytes_sent <= rg_bytes_sent + fromInteger(valueof(TDiv#(datawidth, 8)));

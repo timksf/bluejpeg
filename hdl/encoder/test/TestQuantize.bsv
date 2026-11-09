@@ -45,7 +45,7 @@ module [Module] mkTestQuantize(TestHandler_ifc);
                 Vector#(8, Vector#(8, Int#(12))) in_block = newVector;
                 for(Integer i = 0; i < 8; i = i + 1) begin
                     for(Integer j = 0; j < 8; j = j + 1) begin
-                        let      pix     <- rand_pix();
+                        let pix <- rand_pix();
                         Int#(16) pix_i16 = unpack(zeroExtend(pack(pix)));
                         //expand magnitude back up to represent somewhat realistic DCT coefficients
                         Int#(12) val     = truncate(pix_i16 - 128) * 8;
@@ -69,13 +69,13 @@ module [Module] mkTestQuantize(TestHandler_ifc);
                 seq
                     rg_out_idx <= 0;
                     while(rg_out_idx < 64) action
-                        let     hw_res <- dut.data.response.get();
-                        Bit#(3) row    = truncate(rg_out_idx >> 3);
-                        Bit#(3) col    = truncate(rg_out_idx);
-                        let     val    = rg_in_mcu.block[row][col];
+                        let hw_res <- dut.data.response.get();
+                        Bit#(3) row = truncate(rg_out_idx >> 3);
+                        Bit#(3) col = truncate(rg_out_idx);
+                        let val = rg_in_mcu.block[row][col];
 //
-                        let      expected_wide <- quant_ref_i16(signExtend(val), zeroExtend(rg_out_idx), True, True);
-                        Int#(12) expected      = truncate(expected_wide);
+                        let expected_wide <- quant_ref_i16(signExtend(val), zeroExtend(rg_out_idx), True, True);
+                        Int#(12) expected = truncate(expected_wide);
 
                         let bs = rg_res_mcu;
                         bs.block[row][col] = hw_res;

@@ -34,8 +34,8 @@ function Stmt bjpeg_wait_tables_ready(
         while(!unpack(rg_rsp[0])) seq
             cfg_acc.read_reg_req("STS");
             action
-                let      sts_rsp  <- cfg_acc.read_reg_rsp();
-                let      rdy_bit  <- cfg_acc.field_bit("STS", "RDY");
+                let sts_rsp <- cfg_acc.read_reg_rsp();
+                let rdy_bit <- cfg_acc.field_bit("STS", "RDY");
                 Bit#(32) sts_data = tpl_1(sts_rsp);
                 rg_rsp <= zeroExtend(sts_data[rdy_bit]);
             endaction
@@ -61,8 +61,8 @@ function Stmt bjpeg_trigger_codegen(
         while(unpack(rg_rsp[0])) seq
             cfg_acc.read_reg_req("STS");
             action
-                let      sts_rsp  <- cfg_acc.read_reg_rsp();
-                let      cgb_bit  <- cfg_acc.field_bit("STS", "CGB");
+                let sts_rsp <- cfg_acc.read_reg_rsp();
+                let cgb_bit <- cfg_acc.field_bit("STS", "CGB");
                 Bit#(32) sts_data = tpl_1(sts_rsp);
                 rg_rsp <= zeroExtend(sts_data[cgb_bit]);
             endaction
@@ -70,24 +70,22 @@ function Stmt bjpeg_trigger_codegen(
     endseq;
 endfunction
 
-//poll STATUS.done until set (or rg_finished already True), then assert rg_finished
+//poll STATUS.DONE until set, the caller owns any completion flag
 function Stmt bjpeg_poll_done(
     BlueCSRTbAccessor_ifc#(32) cfg_acc,
-    Reg#(Bit#(32)) rg_rsp,
-    Reg#(Bool) rg_finished);
+    Reg#(Bit#(32)) rg_rsp);
     return seq
         rg_rsp <= 0;
         while(!unpack(rg_rsp[0])) seq
             cfg_acc.read_reg_req("STS");
             action
-                let      sts_rsp  <- cfg_acc.read_reg_rsp();
-                let      done_bit <- cfg_acc.field_bit("STS", "DONE");
+                let sts_rsp  <- cfg_acc.read_reg_rsp();
+                let done_bit <- cfg_acc.field_bit("STS", "DONE");
                 Bit#(32) sts_data = tpl_1(sts_rsp);
                 rg_rsp <= zeroExtend(sts_data[done_bit]);
             endaction
         endseq
         print_mod_pre_color_t_s("DUT signaled done via STATUS register", GREEN);
-        rg_finished <= True;
     endseq;
 endfunction
 

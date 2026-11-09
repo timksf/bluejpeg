@@ -137,7 +137,7 @@ module [Module] mkTestCase(TestHandler_ifc)
         par
             while(!rg_finished)
                 action
-                    let      rsp  <- i_axis_rx.pkg.get();
+                    let rsp <- i_axis_rx.pkg.get();
                     Bit#(24) data = rsp.data;
                     //check the received data for correctness, each 24 bit value corresponds to a truncated 64 bit word from memory
                     rg_rx_counter <= rg_rx_counter + 1;
@@ -173,8 +173,8 @@ module [Module] mkTestCase(TestHandler_ifc)
                 if(rg_dut_error) seq
                     axi4_lite_read(i_config_rd, fromInteger(cfg_cmd_cause_offs));
                     action
-                        let               rsp <- i_config_rd.response.get();
-                        AXIMM2SErrorCause c   = unpack(truncate(rsp.data));
+                        let rsp <- i_config_rd.response.get();
+                        AXIMM2SErrorCause c = unpack(truncate(rsp.data));
                         print_fmt($format("DUT error: ") + fshow(c), RED);
                     endaction
                     $fatal();

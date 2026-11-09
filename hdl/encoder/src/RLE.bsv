@@ -57,7 +57,10 @@ module mkRLE(RLE_ifc#(bits))
     //to emit one or more ZRL tags before emitting the AC tag
     Reg#(Maybe#(Int#(bits))) rg_stall_val <- mkReg(tagged Invalid);
 
-    rule r_process_dc (rg_idx == 0 && !isValid(rg_stall_val));
+    //rewind only pulses, r_rewind owns the reset and the processing rules stand still in that cycle
+    PulseWire pw_rewind <- mkPulseWire;
+
+    rule r_process_dc (!pw_rewind && rg_idx == 0 && !isValid(rg_stall_val));
         let val = f_in.first; f_in.deq;
 
         let comp = f_comp.first;
@@ -70,7 +73,7 @@ module mkRLE(RLE_ifc#(bits))
         rg_zero_run <= 0;
     endrule
 
-    rule r_process_ac (rg_idx > 0 && !isValid(rg_stall_val));
+    rule r_process_ac (!pw_rewind && rg_idx > 0 && !isValid(rg_stall_val));
         let val = f_in.first; f_in.deq;
 
         if(val == 0) begin
@@ -106,7 +109,7 @@ module mkRLE(RLE_ifc#(bits))
         end
     endrule
 
-    rule r_process_zrl (isValid(rg_stall_val));
+    rule r_process_zrl (!pw_rewind && isValid(rg_stall_val));
         let val = fromMaybe(?, rg_stall_val);
 
         if(rg_zero_run >= 16) begin
@@ -125,15 +128,18 @@ module mkRLE(RLE_ifc#(bits))
         end
     endrule
 
-    method Action rewind();
-        rg_idx <= 0;
-        rg_zero_run <= 0;
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_rewind (pw_rewind);
+        rg_idx       <= 0;
+        rg_zero_run  <= 0;
         writeVReg(rg_prev_dc, replicate(0));
         rg_stall_val <= tagged Invalid;
         f_comp.clear;
-        f_in.clear();
-        f_out.clear();
-    endmethod
+        f_in.clear;
+        f_out.clear;
+    endrule
+
+    method rewind = pw_rewind.send;
 
     interface du_comp = toPut(f_comp);
     interface data    = toGPServer(f_in, f_out);

@@ -262,9 +262,9 @@ module mkDCT1D#(NumProxy_t#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_a
     else
         f_out <- mkBypassFIFO;
 
-    Real scale   = 2 ** fromInteger(valueof(bits_frac));
-    let  coeffs  = prepare_coeffs(scale);
-    let  scoeffs = prepare_scoeffs(scale);
+    Real scale = 2 ** fromInteger(valueof(bits_frac));
+    let coeffs  = prepare_coeffs(scale);
+    let scoeffs = prepare_scoeffs(scale);
 
     //stage0
     rule r_stage0;
@@ -340,9 +340,9 @@ module mkDCT1D_rigid#(NumProxy_t#(bits_frac) _scale_proxy, Bool scale_out, Bool 
 
     FIFOF#(Vector#(8, Int#(bits))) f_out <- mkFIFOF; //mkPipelineFIFOF;
 
-    Real scale   = 2 ** fromInteger(valueof(bits_frac));
-    let  coeffs  = prepare_coeffs(scale);
-    let  scoeffs = prepare_scoeffs(scale);
+    Real scale = 2 ** fromInteger(valueof(bits_frac));
+    let coeffs  = prepare_coeffs(scale);
+    let scoeffs = prepare_scoeffs(scale);
 
     Wire#(Bool) w_stall <- mkBypassWire;
 

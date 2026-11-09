@@ -171,6 +171,7 @@ module mkTableStorage#(NumProxy_t#(qwidth) qp, Bool transposed)(TableStorage_ifc
     //code tables start uninitialized, so all four are generated from the default tables once after reset
     Reg#(UInt#(3)) rg_boot_cg   <- mkReg(0);
     Bool           boot_cg_done = rg_boot_cg == 4;
+    Bool           tables_ready = rg_init_done && rg_huff_init_done && boot_cg_done && !rg_cg_active;
 
     function Action start_codegen(HuffTableType_t htt);
         action
@@ -218,9 +219,9 @@ module mkTableStorage#(NumProxy_t#(qwidth) qp, Bool transposed)(TableStorage_ifc
             rg_cg_j    <= 0;
         end else begin
             //write generated code into code table
-            let      tbl_idx = huff_table_idx(rg_cg_table);
+            let tbl_idx = huff_table_idx(rg_cg_table);
             //symbol (index into huffman table) retrieved from huffval (contains symbols sorted by length)
-            UInt#(8) symbol  = i_huff_val[tbl_idx].sub(truncate(rg_cg_k));
+            UInt#(8) symbol = i_huff_val[tbl_idx].sub(truncate(rg_cg_k));
             let entry = HuffTableEntry_t {
                 code: rg_cg_code,
                 size: truncate(rg_cg_si)
@@ -240,8 +241,8 @@ module mkTableStorage#(NumProxy_t#(qwidth) qp, Bool transposed)(TableStorage_ifc
         end
     endrule
 
-    //table write interface, for SW configuration
-    method Action write_table(TableType_t tt, Bit#(8) addr, Bit#(32) v);
+    //table write interface for SW configuration, held off during startup init and codegen
+    method Action write_table(TableType_t tt, Bit#(8) addr, Bit#(32) v) if(tables_ready);
         case(tt)
             QLuma:              i_quant_luma_raw.upd(truncate(addr), unpack(truncate(v)));
             QChroma:            i_quant_chroma_raw.upd(truncate(addr), unpack(truncate(v)));
@@ -263,7 +264,7 @@ module mkTableStorage#(NumProxy_t#(qwidth) qp, Bool transposed)(TableStorage_ifc
     endmethod
 
     method Bool codegen_busy    = rg_cg_active;
-    method Bool ready           = rg_init_done && rg_huff_init_done && boot_cg_done && !rg_cg_active;
+    method Bool ready           = tables_ready;
 
     //to quantizer / Huffman encoder
     interface quant_scaled          = toGPServer(asReg(w_qidx),  read_quant_scaled);

@@ -117,6 +117,19 @@ module mkQuantize#(NumProxy_t#(bits_frac) f_scale, Bool buffer_in, Bool aan_scal
     interface du_mode = toPut(f_mode);
     interface data    = toGPServer(f_i, f_o);
 
+    //compile-time tables, so this client never issues a table request
+    interface Client qtable;
+        interface Get request;
+            method ActionValue#(QuantTableIdx_t) get() if(False);
+                return ?;
+            endmethod
+        endinterface
+        interface Put response;
+            method Action put(Int#(32) v);
+            endmethod
+        endinterface
+    endinterface
+
 endmodule
 
 //runtime table variant
