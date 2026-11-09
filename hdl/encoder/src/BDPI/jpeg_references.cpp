@@ -207,7 +207,7 @@ extern "C" {
         return num & 0xFFFF;
     }
 
-    int16_t quant_ref_i16(int16_t v, uint32_t idx, bool luma_not_chroma, bool apply_aan, int f_scale = 12) {
+    int16_t quant_ref_i16(int16_t v, uint32_t idx, bool luma_not_chroma, bool apply_aan, uint32_t f_scale) {
         using namespace jpegencode;
         if(idx > 63) {
             std::cerr << "Quantization encountered invalid index " << idx << std::endl;

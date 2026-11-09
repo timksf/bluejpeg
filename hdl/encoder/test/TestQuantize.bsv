@@ -15,6 +15,9 @@ import Types :: *;
 import PrintUtil :: *;
 import TestHelper :: *;
 
+//fractional bits of the AAN multipliers, shared by the DUT and the reference
+typedef 8 QuantScale;
+
 module [Module] mkTestQuantize(TestHandler_ifc);
 
     function print_s = print_mod_pre_color_t_s;
@@ -22,9 +25,8 @@ module [Module] mkTestQuantize(TestHandler_ifc);
 
     Integer n_tests = 10;
 
-    //scaling factor for quantization
-    NumProxy_t#(8) f_scale = ?;
-    Quant_ifc#(12) dut     <- mkQuantize(f_scale, False, True, False);
+    NumProxy_t#(QuantScale) f_scale = ?;
+    Quant_ifc#(12)          dut     <- mkQuantize(f_scale, False, True, False);
 
     Reg#(Bit#(32)) rg_counter <- mkReg(0);
     Reg#(Bit#(32)) rg_errors  <- mkReg(0);
@@ -74,7 +76,7 @@ module [Module] mkTestQuantize(TestHandler_ifc);
                         Bit#(3) col = truncate(rg_out_idx);
                         let val = rg_in_mcu.block[row][col];
 //
-                        let expected_wide <- quant_ref_i16(signExtend(val), zeroExtend(rg_out_idx), True, True);
+                        let expected_wide <- quant_ref_i16(signExtend(val), zeroExtend(rg_out_idx), True, True, fromInteger(valueOf(QuantScale)));
                         Int#(12) expected = truncate(expected_wide);
 
                         let bs = rg_res_mcu;
@@ -106,12 +108,9 @@ module [Module] mkTestQuantize(TestHandler_ifc);
                 function Int#(12) max_func(Int#(12) a, Int#(12) b) = (a > b) ? a : b;
                 Int#(12) max_diff = fold(max_func, diffs);
 
+                //the hardware is bit-exact to the reference, so any difference is an error
                 if(max_diff > 0) begin
-                    print_fmt($format("Test %0d, max error: %0d", rg_counter, max_diff), WHITE);
-                end
-
-                if(max_diff > 1) begin
-                    print_fmt($format("Error>1 at iteration %0d", rg_counter), RED);
+                    print_fmt($format("Test %0d, max error: %0d", rg_counter, max_diff), RED);
                     rg_errors <= rg_errors + 1;
                 end
 

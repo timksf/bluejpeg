@@ -125,7 +125,8 @@ import "BDPI" function ActionValue#(Bit#(128))  dct_1d_i16_ref(Bit#(128) in, Boo
 import "BDPI" function ActionValue#(Bit#(1024)) dct_2d_i16_ref(Bit#(1024) in, Bool scale);
 import "BDPI" function ActionValue#(Bit#(512))  dct_2d_i8_ref(Bit#(512) in, Bool scale);
 
-import "BDPI" function ActionValue#(Int#(16)) quant_ref_i16(Int#(16) val, Bit#(32) idx, Bool is_luma, Bool apply_aan);
+//f_scale is the number of fractional bits of the AAN multipliers and must match the hardware under test
+import "BDPI" function ActionValue#(Int#(16)) quant_ref_i16(Int#(16) val, Bit#(32) idx, Bool is_luma, Bool apply_aan, Bit#(32) f_scale);
 
 import "BDPI" function ActionValue#(Bit#(1024)) zigzag_ref_i16(Bit#(1024) in, Bool transposed);
 
