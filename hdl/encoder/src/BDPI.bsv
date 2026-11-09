@@ -27,7 +27,7 @@ import "BDPI" function Action write_byte_SimRAM(
     UInt#(64) byte_val
 );
 
-//Image Loader; from file to memory to simulation ram model
+//image loader, copies an image file into the simulation ram model
 import "BDPI" function ActionValue#(UInt#(64)) create_ImageLoader(String filename);
 import "BDPI" function ActionValue#(UInt#(8)) get_pixel_ImageLoader(UInt#(64) ptr);
 
@@ -49,8 +49,8 @@ import "BDPI" function Action write_to_mem_gray_packed_ImageLoader(
     UInt#(64) start_addr
 );
 
-//ImageWriter; from simulation ram model to file
-import "BDPI" function Action mem_to_file_seq_ImageWriter(  
+//image writer, copies the simulation ram model into an image file
+import "BDPI" function Action mem_to_file_seq_ImageWriter(
     UInt#(64) ram_ptr,
     UInt#(32) width,
     UInt#(32) height,
@@ -58,8 +58,8 @@ import "BDPI" function Action mem_to_file_seq_ImageWriter(
     UInt#(64) start_addr
 );
 
-//ImageWriter; from simulation ram model to file
-import "BDPI" function Action mem_to_file_gray_ImageWriter(  
+//image writer, copies the simulation ram model into an image file
+import "BDPI" function Action mem_to_file_gray_ImageWriter(
     UInt#(64) ram_ptr,
     UInt#(32) width,
     UInt#(32) height,
@@ -68,7 +68,7 @@ import "BDPI" function Action mem_to_file_gray_ImageWriter(
 );
 
 
-import "BDPI" function Action mem_to_file_interleaved_ImageWriter(  
+import "BDPI" function Action mem_to_file_interleaved_ImageWriter(
     UInt#(64) ram_ptr,
     UInt#(32) width,
     UInt#(32) height,
@@ -76,7 +76,7 @@ import "BDPI" function Action mem_to_file_interleaved_ImageWriter(
     UInt#(64) start_addr
 );
 
-import "BDPI" function Action mem_to_file_gray_packed_ImageWriter(  
+import "BDPI" function Action mem_to_file_gray_packed_ImageWriter(
     UInt#(64) ram_ptr,
     UInt#(32) width,
     UInt#(32) height,
@@ -129,8 +129,8 @@ import "BDPI" function ActionValue#(Int#(16)) quant_ref_i16(Int#(16) val, Bit#(3
 
 import "BDPI" function ActionValue#(Bit#(1024)) zigzag_ref_i16(Bit#(1024) in, Bool transposed);
 
-// Full JPEG reference encoder: runs bit-accurate SW pipeline and stores
-// output bytes in SimRAM. Returns total byte count.
+//full JPEG reference encoder: runs the bit-accurate SW pipeline and stores the output bytes in SimRAM
+//returns the total byte count
 import "BDPI" function ActionValue#(UInt#(32)) jpeg_encode_ref(
     String image_path,
     UInt#(8) subsampling_mode,

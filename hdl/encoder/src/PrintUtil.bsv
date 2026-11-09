@@ -8,7 +8,7 @@ typedef enum{
     MAGENTA = 5,
     CYAN = 6,
     WHITE = 7
-} TermColor deriving(Eq, Bits);
+} TermColor deriving(Bits, Eq);
 
 //the function names become ugly really fast but can easily be aliased wherever needed
 
@@ -26,22 +26,22 @@ function Action print_mod_prefixed_s(String s) = $display(mod_prefix + s);
 
 function Action print_mod_prefixed(Fmt fmt) = $display($format("%s", mod_prefix) + fmt);
 
-function Action print_mod_pre_color_s(String s, TermColor tc) = 
+function Action print_mod_pre_color_s(String s, TermColor tc) =
     $display($format("%s", mod_prefix) + color_string(s, tc));
 
-function Action print_mod_pre_color(Fmt fmt, TermColor tc) = 
+function Action print_mod_pre_color(Fmt fmt, TermColor tc) =
     $display($format("%s", mod_prefix) + color_fmt(fmt, tc));
 
-function Action print_mod_pre_color_t_s(String s, TermColor tc) = 
+function Action print_mod_pre_color_t_s(String s, TermColor tc) =
 action
-    let t <- $time();
+    let t      <- $time();
     Fmt prefix = $format("[t=%0d]%s", t, mod_prefix);
     $display(prefix + color_string(s, tc));
 endaction;
 
-function Action print_mod_pre_color_t_f(Fmt f, TermColor tc) = 
+function Action print_mod_pre_color_t_f(Fmt f, TermColor tc) =
 action
-    let t <- $time();
+    let t      <- $time();
     Fmt prefix = $format("[t=%0d]%s", t, mod_prefix);
     $display(prefix + color_fmt(f, tc));
 endaction;

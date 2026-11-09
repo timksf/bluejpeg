@@ -10,13 +10,13 @@ import SpecialFIFOs :: *;
 import Types :: *;
 import ZigZag :: *;
 
-//Complements encoded scan data with all markers and tables required for a
+//complements encoded scan data with all markers and tables required for a
 //JPEG/JFIF compliant image:
-//  SOI -> APP0 -> DQTx(1|2) -> SOF0 -> DHTx(2|4) -> SOS -> scan data -> EOI
+//SOI -> APP0 -> DQTx(1|2) -> SOF0 -> DHTx(2|4) -> SOS -> scan data -> EOI
 //
-//Scan data arrives via scan_data Put as Maybe#(Bit#(8)):
-//  tagged Valid byte  -  scan data byte (already byte-stuffed)
-//  tagged Invalid     -  end-of-scan signal
+//scan data arrives via scan_data Put as Maybe#(Bit#(8)):
+//tagged Valid byte  -  scan data byte (already byte-stuffed)
+//tagged Invalid     -  end-of-scan signal
 //
 //DQT and DHT table contents are read combinationally from TableStorage
 
@@ -34,10 +34,10 @@ typedef enum {
     SCAN,
     EOI,
     DONE
-} State_t deriving(Eq, Bits, FShow);
+} State_t deriving(Bits, Eq, FShow);
 
 function HuffTableType_t dht_htt(Bit#(2) tbl);
-    return case (tbl)
+    return case(tbl)
         0: DC_Luma;
         1: AC_Luma;
         2: DC_Chroma;
@@ -61,14 +61,14 @@ endinterface
 
 module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
-    FIFO#(Maybe#(Bit#(8))) f_scan <- mkFIFO;
-    FIFO#(Tuple2#(Bit#(8), Bool)) f_out <- mkFIFO;
+    FIFO#(Maybe#(Bit#(8)))        f_scan <- mkFIFO;
+    FIFO#(Tuple2#(Bit#(8), Bool)) f_out  <- mkFIFO;
 
     Reg#(State_t) rg_state <- mkReg(IDLE);
 
     //configuration
-    Reg#(Bit#(16))          rg_width  <- mkRegU;
-    Reg#(Bit#(16))          rg_height <- mkRegU;
+    Reg#(Bit#(16)) rg_width  <- mkRegU;
+    Reg#(Bit#(16)) rg_height <- mkRegU;
 
     //byte counter within current state
     Reg#(UInt#(9)) rg_cnt <- mkReg(0);
@@ -86,11 +86,11 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     Wire#(QuantTableIdx_t) w_qraw_req  <- mkWire;
     Wire#(UInt#(8))        w_qraw_resp <- mkWire;
 
-    Wire#(HuffBitsIdx_t)   w_hbits_req  <- mkWire;
-    Wire#(UInt#(8))        w_hbits_resp <- mkWire;
+    Wire#(HuffBitsIdx_t) w_hbits_req  <- mkWire;
+    Wire#(UInt#(8))      w_hbits_resp <- mkWire;
 
-    Wire#(HuffValIdx_t)    w_hval_req  <- mkWire;
-    Wire#(UInt#(8))        w_hval_resp <- mkWire;
+    Wire#(HuffValIdx_t) w_hval_req  <- mkWire;
+    Wire#(UInt#(8))     w_hval_resp <- mkWire;
 
     function Action enq_out(Bit#(8) b, Bool last);
         action
@@ -98,13 +98,11 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
         endaction
     endfunction
 
-    // ----------------------------------------------------------------
-    // Constant header byte lookups
-    // ----------------------------------------------------------------
+    //constant header byte lookups
 
     //SOI + APP0 (JFIF): 20 bytes
     function Bit#(8) jfif_hdr(UInt#(9) idx);
-        return case (idx)
+        return case(idx)
             0:  'hFF; 1:  'hD8;                        //SOI
             2:  'hFF; 3:  'hE0;                        //APP0
             4:  'h00; 5:  'h10;                        //Ls=16
@@ -122,7 +120,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //DQT marker header: FF DB 00 43 Pq_Tq  (5 bytes, Lq=67)
     function Bit#(8) dqt_head_byte(UInt#(9) idx, Bit#(1) tq);
-        return case (idx)
+        return case(idx)
             0: 'hFF; 1: 'hDB;      //DQT marker
             2: 'h00; 3: 'h43;      //Lq = 2 + 1 + 64 = 67 (16 bits)
             4: zeroExtend(tq);     //Pq=0 (8-bit precision), Tq
@@ -130,14 +128,14 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
         endcase;
     endfunction
 
-    //SOF0: grayscale uses 1 component, color uses 3 components.
+    //SOF0: grayscale uses 1 component, color uses 3 components
     function Bit#(8) sof0_byte(UInt#(9) idx);
         Bit#(8) sampfac = 'h11;
         if(!en_chroma) begin
-            return case (idx)
+            return case(idx)
                 0:  'hFF; 1:  'hC0;                     //SOF0 marker
                 2:  'h00; 3:  'h0B;                     //Lf = 8 + 3*Nf = 11
-                4:  'h08;                               //P = 8 bits
+                4:  'h08;                               //p = 8 bits
                 5:  rg_height[15:8]; 6: rg_height[7:0];
                 7:  rg_width[15:8];  8: rg_width[7:0];
                 9:  'h01;                               //Nf = 1
@@ -145,10 +143,10 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
                 default: 0;
             endcase;
         end else begin
-            return case (idx)
+            return case(idx)
                 0:  'hFF; 1:  'hC0;                     //SOF0 marker
                 2:  'h00; 3:  'h11;                     //Lf = 8 + 3*Nf = 17
-                4:  'h08;                               //P = 8 bits
+                4:  'h08;                               //p = 8 bits
                 5:  rg_height[15:8]; 6: rg_height[7:0];
                 7:  rg_width[15:8];  8: rg_width[7:0];
                 9:  'h03;                               //Nf = 3
@@ -162,7 +160,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //Tc|Th byte for DHT marker
     function Bit#(8) dht_tc_th(Bit#(2) tbl);
-        return case (tbl)
+        return case(tbl)
             0: 'h00;   //DC table 0 (luma)
             1: 'h10;   //AC table 0 (luma)
             2: 'h01;   //DC table 1 (chroma)
@@ -173,7 +171,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     function Bit#(8) dht_head_byte(UInt#(9) idx, Bit#(2) table_id);
         //Lh = 2 + 1 + 16 + sum(BITS)
         Bit#(16) lh = 19 + zeroExtend(pack(rg_huffval_total));
-        return case (idx)
+        return case(idx)
             0: 'hFF;        1: 'hC4;        //DHT marker
             2: lh[15:8];    3: lh[7:0];     //Lh
             4: dht_tc_th(table_id);         //Tc|Th
@@ -181,10 +179,10 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
         endcase;
     endfunction
 
-    //SOS: grayscale uses Ns=1, color uses Ns=3.
+    //SOS: grayscale uses Ns=1, color uses Ns=3
     function Bit#(8) sos_byte(UInt#(9) idx);
         if(!en_chroma) begin
-            return case (idx)
+            return case(idx)
                 0: 'hFF; 1: 'hDA;                 //SOS marker
                 2: 'h00; 3: 'h08;                 //Ls = 6 + 2*Ns = 8
                 4: 'h01;                          //Ns = 1
@@ -195,7 +193,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
                 default: 0;
             endcase;
         end else begin
-            return case (idx)
+            return case(idx)
                 0:  'hFF; 1:  'hDA;                //SOS marker
                 2:  'h00; 3:  'h0C;                //Ls = 6 + 2*Ns = 12
                 4:  'h03;                          //Ns = 3
@@ -215,12 +213,12 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     endfunction
 
 
-    // FSM 
+    //FSM
 
     //emit SOI + APP0 (20 bytes)
     rule r_static_header (rg_state == STATIC_HEADER);
         enq_out(jfif_hdr(rg_cnt), False);
-        if (rg_cnt == 19) begin
+        if(rg_cnt == 19) begin
             rg_cnt   <= 0;
             rg_dqt   <= 0;
             rg_state <= DQT_HEAD;
@@ -231,7 +229,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //emit DQT marker header (5 bytes)
     rule r_dqt_head (rg_state == DQT_HEAD);
         enq_out(dqt_head_byte(rg_cnt, rg_dqt), False);
-        if (rg_cnt == 4) begin
+        if(rg_cnt == 4) begin
             rg_cnt   <= 0;
             rg_state <= DQT_DATA;
         end else
@@ -243,17 +241,17 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //drive quant_raw address wire during DQT_DATA (zigzag-reordered)
     rule r_dqt_addr (rg_state == DQT_DATA);
-        PixType_t pt = (rg_dqt == 0) ? Luma : Chroma;
-        Bit#(6) scan_idx = truncate(pack(rg_cnt));
+        PixType_t pt       = (rg_dqt == 0) ? Luma : Chroma;
+        Bit#(6)   scan_idx = truncate(pack(rg_cnt));
         w_qraw_req <= QuantTableIdx_t { pt: pt, idx: fromInteger(dqt_zigzag[scan_idx]) };
     endrule
 
     //emit 64 quantization table values
     rule r_dqt_data (rg_state == DQT_DATA);
         enq_out(pack(w_qraw_resp), False);
-        if (rg_cnt == 63) begin
+        if(rg_cnt == 63) begin
             rg_cnt <= 0;
-            if (en_chroma && rg_dqt == 0) begin
+            if(en_chroma && rg_dqt == 0) begin
                 rg_dqt   <= 1;
                 rg_state <= DQT_HEAD;
             end else
@@ -270,7 +268,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //pre-compute sum(BITS[0..15]) for current DHT table
     //17 cycles: cycles 0..15 accumulate, cycle 16 transitions (register holds final sum)
     rule r_dht_sum (rg_state == DHT_SUM);
-        if (rg_cnt <= 15) begin
+        if(rg_cnt <= 15) begin
             rg_huffval_total <= rg_huffval_total + extend(w_hbits_resp);
             rg_cnt <= rg_cnt + 1;
         end else begin
@@ -283,7 +281,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     rule r_dht_head (rg_state == DHT_HEAD);
         Bit#(8) b = dht_head_byte(rg_cnt, rg_dht);
         enq_out(b, False);
-        if (rg_cnt == 4) begin
+        if(rg_cnt == 4) begin
             rg_cnt   <= 0;
             rg_state <= DHT_BITS;
         end else
@@ -293,11 +291,11 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //emit 16 BITS bytes
     rule r_dht_bits (rg_state == DHT_BITS);
         enq_out(pack(w_hbits_resp), False);
-        if (rg_cnt == 15) begin
+        if(rg_cnt == 15) begin
             rg_cnt <= 0;
-            if (rg_huffval_total == 0) begin
+            if(rg_huffval_total == 0) begin
                 //no HUFFVAL entries - advance to next table or to SOF0
-                if (last_dht_table(rg_dht)) begin
+                if(last_dht_table(rg_dht)) begin
                     rg_huffval_total <= 0;
                     rg_state         <= SOF0;
                 end
@@ -319,10 +317,10 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //emit HUFFVAL bytes
     rule r_dht_val (rg_state == DHT_VAL);
         enq_out(pack(w_hval_resp), False);
-        if (rg_cnt == rg_huffval_total - 1) begin
+        if(rg_cnt == rg_huffval_total - 1) begin
             rg_cnt           <= 0;
             rg_huffval_total <= 0;
-            if (last_dht_table(rg_dht))
+            if(last_dht_table(rg_dht))
                 rg_state <= SOF0;
             else begin
                 rg_dht   <= rg_dht + 1;
@@ -335,7 +333,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //emit SOF0 frame header (19 bytes)
     rule r_sof0 (rg_state == SOF0);
         enq_out(sof0_byte(rg_cnt), False);
-        if (rg_cnt == (en_chroma ? 18 : 12)) begin
+        if(rg_cnt == (en_chroma ? 18 : 12)) begin
             rg_cnt           <= 0;
             rg_dht           <= 0;
             rg_huffval_total <= 0;
@@ -347,17 +345,17 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //emit SOS header (14 bytes)
     rule r_scan_header (rg_state == SCAN_HEAD);
         enq_out(sos_byte(rg_cnt), False);
-        if (rg_cnt == (en_chroma ? 13 : 9)) begin
+        if(rg_cnt == (en_chroma ? 13 : 9)) begin
             rg_cnt   <= 0;
             rg_state <= SCAN;
         end else
             rg_cnt <= rg_cnt + 1;
     endrule
 
-    //passthrough scan data; tagged Invalid signals end of scan
+    //passthrough scan data, tagged Invalid signals the end of the scan
     rule r_scan (rg_state == SCAN);
         let mb = f_scan.first; f_scan.deq;
-        case (mb) matches
+        case(mb) matches
             tagged Valid .b: enq_out(b, False);
             tagged Invalid: begin
                 rg_state <= EOI;
@@ -369,7 +367,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //emit EOI marker (FF D9)
     rule r_eoi (rg_state == EOI);
         enq_out((rg_cnt == 0) ? 'hFF : 'hD9, rg_cnt == 1);
-        if (rg_cnt == 1) begin
+        if(rg_cnt == 1) begin
             rg_state <= DONE;
             rg_cnt   <= 0;
         end else
@@ -382,7 +380,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
         rg_height <= height;
     endmethod
 
-    method Action start() if (rg_state == IDLE || rg_state == DONE);
+    method Action start() if(rg_state == IDLE || rg_state == DONE);
         rg_state <= STATIC_HEADER;
         rg_cnt   <= 0;
     endmethod

@@ -3,7 +3,6 @@ package BlueJPEGRegs;
 import FIFO :: *;
 import GetPut :: *;
 import SpecialFIFOs :: *;
-
 import BlueCSRCore :: *;
 
 import Types :: *;
@@ -14,18 +13,19 @@ typedef struct {
     TableType_t table_type;
     Bit#(8)     addr;
     Bit#(32)    data;
-} TableWriteCmd_t deriving(Eq, Bits, FShow);
+} TableWriteCmd_t deriving(Bits, Eq, FShow);
 
 interface PerfCounter_ifc;
     method Action tick();
 endinterface
 
-//read-only 32-bit event counter owned by a single rule; clear restarts it at the event of the same cycle, so no tick is lost
+//read-only 32-bit event counter owned by a single rule
+//clear restarts it at the event of the same cycle, so no tick is lost
 module [BlueCSRCtx_t#(32, 32)] perf_counter#(Integer offs, Bool clear, String ident, String name, String desc)(PerfCounter_ifc);
     PulseWire               pw_tick  <- mkPulseWire;
     Wire#(Maybe#(Bit#(32))) w_update <- mkDWire(tagged Invalid);
 
-    ReadOnly#(Bit#(32))     rg_count <- csr_reg_ho(offs, 0, 0, w_update, ident, name, desc);
+    ReadOnly#(Bit#(32)) rg_count <- csr_reg_ho(offs, 0, 0, w_update, ident, name, desc);
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule r_update (clear || pw_tick);
@@ -60,31 +60,31 @@ endinterface
 
 module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
 
-    ReadOnly#(Bool)         rg_start;
-    ReadOnly#(Bit#(1))      rg_done;
+    ReadOnly#(Bool)    rg_start;
+    ReadOnly#(Bit#(1)) rg_done;
 
-    PulseWire               pw_frame_done    <- mkPulseWire;
-    PulseWire               pw_inv_cfg       <- mkPulseWire;
-    PulseWire               pw_perf_rst      <- mkPulseWire;
+    PulseWire pw_frame_done <- mkPulseWire;
+    PulseWire pw_inv_cfg    <- mkPulseWire;
+    PulseWire pw_perf_rst   <- mkPulseWire;
 
-    PulseWire               pw_clear_start   <- mkPulseWire;
-    PulseWire               pw_clear_cg_trig <- mkPulseWire;
-    Wire#(Maybe#(Bit#(1)))  w_done_update    <- mkDWire(tagged Invalid);
+    PulseWire              pw_clear_start   <- mkPulseWire;
+    PulseWire              pw_clear_cg_trig <- mkPulseWire;
+    Wire#(Maybe#(Bit#(1))) w_done_update    <- mkDWire(tagged Invalid);
 
-    Reg#(Bool)              rg_ready;
-    Reg#(Bool)              rg_cg_busy;
+    Reg#(Bool) rg_ready;
+    Reg#(Bool) rg_cg_busy;
 
-    ReadOnly#(Bool)         rg_cg_trigger;
-    Reg#(HuffTableType_t)   rg_cg_table_t;
+    ReadOnly#(Bool)       rg_cg_trigger;
+    Reg#(HuffTableType_t) rg_cg_table_t;
 
-    Reg#(Bit#(16))          rg_imw;
-    Reg#(Bit#(16))          rg_imh;
+    Reg#(Bit#(16)) rg_imw;
+    Reg#(Bit#(16)) rg_imh;
 
-    PerfCounter_ifc         i_perf_cycles;
-    PerfCounter_ifc         i_perf_pixels;
-    PerfCounter_ifc         i_perf_byteso;
+    PerfCounter_ifc i_perf_cycles;
+    PerfCounter_ifc i_perf_pixels;
+    PerfCounter_ifc i_perf_byteso;
 
-    FIFO#(TableWriteCmd_t)  f_fn_table_write <- mkFIFO;
+    FIFO#(TableWriteCmd_t) f_fn_table_write <- mkFIFO;
 
     //writes table table_t at local address offs with value val
     function Action fn_table_write(TableType_t table_t, Bit#(32) offs, Bit#(32) val);
@@ -107,7 +107,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     endfunction
 
     csr_regmap_def("BlueJPEG", "Register File for BlueJPEG encoder.");
-    
+
     //an ID register is usefuls in designs with many peripherals
     csr_reg_def('h00, "MIV", "Module ID & Version Register.");
     csr_reg_rc('h00, Bit#(12)'('h001),   0, "MID", "Module ID",      "Unique ID for this module.");
@@ -117,12 +117,12 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     csr_reg_def('h04, "CTRL", "Control Register.");
     rg_start <- csr_reg_hu(
         'h04, False, 0, pw_clear_start ? tagged Valid False : tagged Invalid,
-        "START", "Module Start", "Writing 1 requests processing; hardware clears the request when accepted or rejected."
+        "START", "Module Start", "Writing 1 requests processing. Hardware clears the request when it is accepted or rejected."
     );
-    
+
 
     csr_reg_def('h08, "STS", "Status Register.");
-    rg_ready    <- csr_reg_ro( 'h08, False,   0, "RDY",   "Module Ready",    "Set once the default tables are loaded and their Huffman codes generated after reset; low while a codegen runs.");
+    rg_ready    <- csr_reg_ro( 'h08, False,   0, "RDY",   "Module Ready",    "Set once the default tables are loaded and their Huffman codes generated after reset. Low while a codegen runs.");
     rg_cg_busy  <- csr_reg_ro( 'h08, False,   1, "CGB",   "Codegen Busy",    "Indicates whether huffman table codegen is running.");
     rg_done     <- csr_reg_ho(
         'h08, 'b0, 4, w_done_update,
@@ -139,11 +139,12 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     rg_cg_table_t <- csr_reg_rw( 'h14, unpack(0),    0, "TBL", "CG Table Type",     "Controls which table type to generate. 00=DC LUMA, 01=DC CHROMA, 10=AC LUMA, 11=AC CHROMA.");
     rg_cg_trigger <- csr_reg_hu(
         'h14, False, 31, pw_clear_cg_trig ? tagged Valid False : tagged Invalid,
-        "TRG", "Codegen Trigger", "Writing 1 triggers huffman code generation from stored tables; hardware clears it when the codegen starts."
+        "TRG", "Codegen Trigger", "Writing 1 triggers Huffman code generation from the stored tables. Hardware clears it when the codegen starts."
     );
 
 
-    //pending bits latch regardless of enable and double as sticky status; enabled pending bits drive the irq line
+    //pending bits latch regardless of enable and double as sticky status
+    //enabled pending bits drive the irq line
     csr_reg_def('h18, "IRQP", "Interrupt Pending (W1C).");
     csr_reg_def('h1C, "IRQE", "Interrupt Enable.");
     csr_irq('h18, 'h1C, 0, 0, pw_frame_done, "DONE", "Frame Done",     "A frame was encoded completely.");

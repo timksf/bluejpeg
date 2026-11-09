@@ -6,11 +6,10 @@ import Connectable :: *;
 import Clocks :: *;
 import FIFOF :: *;
 import SpecialFIFOs :: *;
-
 import BlueAXI :: *;
 import BlueCSR :: *;
-import BlueJPEGTestHelper :: *;
 
+import BlueJPEGTestHelper :: *;
 import BDPI :: *;
 import Types :: *;
 import PrintUtil :: *;
@@ -33,81 +32,83 @@ typedef 16 QuantScale;
 typedef 8 PixelWidth;
 
 module mkBackpressuredAXI4StreamRd#(Integer bufferSize)(AXI4_Stream_Rd#(datawidth, userwidth))
-    provisos(Div#(datawidth, 8, keepwidth));
+    provisos(
+        Div#(datawidth, 8, keepwidth)
+    );
 
     let isRst <- isResetAsserted();
 
-    Wire#(Bool)                  tvalidIn <- mkBypassWire();
-    Wire#(Bit#(datawidth))       dataIn   <- mkBypassWire();
-    Wire#(Bit#(userwidth))       userIn   <- mkBypassWire();
-    Wire#(Bit#(keepwidth))       keepIn   <- mkBypassWire();
-    Wire#(Bit#(4))               destIn   <- mkBypassWire();
-    Wire#(Bit#(8))               idIn     <- mkBypassWire();
-    Wire#(Bool)                  lastIn   <- mkBypassWire();
-    Reg#(UInt#(8))               rg_cycle <- mkReg(0);
+    Wire#(Bool)            w_tvalid_in <- mkBypassWire();
+    Wire#(Bit#(datawidth)) w_data_in   <- mkBypassWire();
+    Wire#(Bit#(userwidth)) w_user_in   <- mkBypassWire();
+    Wire#(Bit#(keepwidth)) w_keep_in   <- mkBypassWire();
+    Wire#(Bit#(4))         w_dest_in   <- mkBypassWire();
+    Wire#(Bit#(8))         w_id_in     <- mkBypassWire();
+    Wire#(Bool)            w_last_in   <- mkBypassWire();
+    Reg#(UInt#(8))         rg_cycle    <- mkReg(0);
 
-    FIFOF#(AXI4_Stream_Pkg#(datawidth, userwidth)) in <- mkSizedFIFOF(bufferSize);
-    if (bufferSize == 1)
-        in <- mkPipelineFIFOF();
-    if (bufferSize == 2)
-        in <- mkFIFOF();
+    FIFOF#(AXI4_Stream_Pkg#(datawidth, userwidth)) f_in <- mkSizedFIFOF(bufferSize);
+    if(bufferSize == 1)
+        f_in <- mkPipelineFIFOF();
+    if(bufferSize == 2)
+        f_in <- mkFIFOF();
 
     function Bool ready_pattern();
         UInt#(8) phase = rg_cycle % 16;
         return phase < 5 || phase == 9 || phase == 10 || phase == 15;
     endfunction
 
-    rule count_cycles if (!isRst);
+    rule r_count_cycles (!isRst);
         rg_cycle <= rg_cycle + 1;
     endrule
 
-    rule writeFIFO if (!isRst && ready_pattern() && tvalidIn && in.notFull());
+    rule r_write_fifo (!isRst && ready_pattern() && w_tvalid_in && f_in.notFull());
         AXI4_Stream_Pkg#(datawidth, userwidth) s;
-        s.data = dataIn;
-        s.user = userIn;
-        s.keep = keepIn;
-        s.dest = destIn;
-        s.id   = idIn;
-        s.last = lastIn;
-        in.enq(s);
+        s.data = w_data_in;
+        s.user = w_user_in;
+        s.keep = w_keep_in;
+        s.dest = w_dest_in;
+        s.id   = w_id_in;
+        s.last = w_last_in;
+        f_in.enq(s);
     endrule
 
-    interface Get pkg = toGet(in);
+    interface Get pkg = toGet(f_in);
 
     interface AXI4_Stream_Rd_Fab fab;
-        interface tready = !isRst && ready_pattern() && in.notFull();
-        interface ptvalid = tvalidIn._write;
-        interface ptdata  = dataIn._write;
-        interface ptuser  = userIn._write;
-        interface ptkeep  = keepIn._write;
-        interface ptDest  = destIn._write;
-        interface ptid    = idIn._write;
-        interface ptlast  = lastIn._write;
+        interface tready = !isRst && ready_pattern() && f_in.notFull();
+        interface ptvalid = w_tvalid_in._write;
+        interface ptdata  = w_data_in._write;
+        interface ptuser  = w_user_in._write;
+        interface ptkeep  = w_keep_in._write;
+        interface ptDest  = w_dest_in._write;
+        interface ptid    = w_id_in._write;
+        interface ptlast  = w_last_in._write;
     endinterface
 endmodule
 
-module [Module] mkTestBlueJPEGGrayBackpressure(TestHandler);
+module [Module] mkTestBlueJPEGGrayBackpressure(TestHandler_ifc);
 
-    let t1 <- test;
+    let t1 <- mkTestCase;
 
     Stmt s = seq
         t1.go();
-        while (!t1.done()) action endaction
+        while(!t1.done()) action endaction
     endseq;
 
-    FSM fsm_test <- mkFSM(s);
+    FSM i_fsm_test <- mkFSM(s);
 
     method Action go();
-        fsm_test.start();
+        i_fsm_test.start();
     endmethod
 
     method Bool done();
-        return fsm_test.done();
+        return i_fsm_test.done();
     endmethod
 
 endmodule
 
-module [Module] test(TestHandler)
+module [Module] mkTestCase(TestHandler_ifc)
     provisos(
         NumAlias#(n_pixels, TMul#(InputWidth, InputHeight)),
         NumAlias#(ram_words, 'd3_000_000)
@@ -131,20 +132,20 @@ module [Module] test(TestHandler)
             double_buffer_tiler : False,
             en_chroma           : False
         };
-    BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
-    let csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
+    BlueJPEG_ifc dut      <- mkBlueJPEG(jpeg_cfg);
+    let          csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
 
-    AXI4_Lite_Master_Rd#(32, 32) cfg_rd <- mkAXI4_Lite_Master_Rd(1);
-    AXI4_Lite_Master_Wr#(32, 32) cfg_wr <- mkAXI4_Lite_Master_Wr(16);
-    let i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, cfg_rd, cfg_wr);
+    AXI4_Lite_Master_Rd#(32, 32) i_cfg_rd  <- mkAXI4_Lite_Master_Rd(1);
+    AXI4_Lite_Master_Wr#(32, 32) i_cfg_wr  <- mkAXI4_Lite_Master_Wr(16);
+    let                          i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, i_cfg_rd, i_cfg_wr);
 
-    AXI4_Stream_Wr#(24, 0) axis_tx  <- mkAXI4_Stream_Wr(128);
-    AXI4_Stream_Rd#(8, 0)  axis_out <- mkBackpressuredAXI4StreamRd(8);
+    AXI4_Stream_Wr#(24, 0) i_axis_tx  <- mkAXI4_Stream_Wr(128);
+    AXI4_Stream_Rd#(8, 0)  i_axis_out <- mkBackpressuredAXI4StreamRd(8);
 
-    mkConnection(axis_tx.fab,      dut.s_axis);
-    mkConnection(dut.m_axis,       axis_out.fab);
-    mkConnection(dut.s_axi_cfg_rd, cfg_rd.fab);
-    mkConnection(dut.s_axi_cfg_wr, cfg_wr.fab);
+    mkConnection(i_axis_tx.fab,      dut.s_axis);
+    mkConnection(dut.m_axis,       i_axis_out.fab);
+    mkConnection(dut.s_axi_cfg_rd, i_cfg_rd.fab);
+    mkConnection(dut.s_axi_cfg_wr, i_cfg_wr.fab);
 
     Reg#(UInt#(64)) rg_ram_ptr      <- mkRegU;
     Reg#(UInt#(64)) rg_img_load_ptr <- mkRegU;
@@ -160,8 +161,8 @@ module [Module] test(TestHandler)
 
     Stmt feed_pixels = seq
         rg_pixel_idx <= 0;
-        while (rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
-            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
+        while(rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
+            let      word  <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
             Bit#(24) pixel = truncate(pack(word));
             Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
                 unpack(pixel[23:16]),
@@ -174,7 +175,7 @@ module [Module] test(TestHandler)
                 cr: unpack(ycbcr_raw[07:00])
             };
             let is_last = (rg_pixel_idx == fromInteger(valueOf(n_pixels) - 1));
-            axis_tx.pkg.put(AXI4_Stream_Pkg {
+            i_axis_tx.pkg.put(AXI4_Stream_Pkg {
                 data: pack(pix_ycbcr),
                 user: ?,
                 keep: unpack(-1),
@@ -184,36 +185,36 @@ module [Module] test(TestHandler)
             rg_pixel_idx <= rg_pixel_idx + 1;
         endaction
     endseq;
-    FSM fsm_feed_pixels <- mkFSM(feed_pixels);
+    FSM i_fsm_feed_pixels <- mkFSM(feed_pixels);
 
     Stmt collect_output = seq
         action
             let fd <- $fopen(output_jpeg_path, "wb");
-            if (fd == InvalidFile) begin
+            if(fd == InvalidFile) begin
                 print_s("ERROR: cannot open output file", RED);
                 $finish();
             end
             rg_out_file <= fd;
         endaction
-        while (!rg_finished) action
-            let pkg <- axis_out.pkg.get();
-            Bit#(8) b = pkg.data;
+        while(!rg_finished) action
+            let     pkg <- i_axis_out.pkg.get();
+            Bit#(8) b   = pkg.data;
             write_word_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count), unpack(extend(b)));
             $fwrite(rg_out_file, "%c", b);
             rg_prev_byte <= rg_last_byte;
             rg_last_byte <= b;
             rg_out_count <= rg_out_count + 1;
-            if (pkg.last) begin
+            if(pkg.last) begin
                 print_fmt($format("Received TLAST under backpressure, total bytes: %0d", rg_out_count + 1), GREEN);
                 rg_finished <= True;
             end
         endaction
         $fclose(rg_out_file);
     endseq;
-    FSM fsm_collect <- mkFSM(collect_output);
+    FSM i_fsm_collect <- mkFSM(collect_output);
 
-    FSM fsm_poll_done <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
-    FSM fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
+    FSM i_fsm_poll_done  <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
+    FSM i_fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
 
     Stmt main = seq
         rg_out_count <= 0;
@@ -237,8 +238,8 @@ module [Module] test(TestHandler)
         print_s("Image loaded", GREEN);
 
         print_s("Waiting for default table init...", YELLOW);
-        fsm_wait_ready.start();
-        await(fsm_wait_ready.done());
+        i_fsm_wait_ready.start();
+        await(i_fsm_wait_ready.done());
 
         print_s("Generating luma Huffman codes...", YELLOW);
         bjpeg_trigger_codegen(i_cfg_acc, rg_axil_rsp, 0);
@@ -255,16 +256,16 @@ module [Module] test(TestHandler)
 
         print_s("Starting grayscale BlueJPEG encoder with output backpressure...", YELLOW);
         action
-            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
+            let      start_bit  <- i_cfg_acc.field_bit("CTRL", "START");
             Bit#(32) start_mask = 1 << start_bit;
             i_cfg_acc.write_reg_req("CTRL", start_mask);
         endaction
         bjpeg_expect_wr_ok(i_cfg_acc);
 
         par
-            seq fsm_feed_pixels.start(); await(fsm_feed_pixels.done()); endseq
-            seq fsm_collect.start();     await(fsm_collect.done());     endseq
-            seq fsm_poll_done.start();   await(fsm_poll_done.done());   endseq
+            seq i_fsm_feed_pixels.start(); await(i_fsm_feed_pixels.done()); endseq
+            seq i_fsm_collect.start();     await(i_fsm_collect.done());     endseq
+            seq i_fsm_poll_done.start();   await(i_fsm_poll_done.done());   endseq
         endpar
 
         i_cfg_acc.read_reg_req("PERF0");
@@ -281,11 +282,11 @@ module [Module] test(TestHandler)
         print_fmt($format("Processed Pixels: %0d", rg_axil_rsp), GREEN);
 
         action
-            if (rg_out_count == 0) begin
+            if(rg_out_count == 0) begin
                 print_s("ERROR: no JPEG bytes were produced", RED);
                 $finish();
             end
-            if (rg_prev_byte != 'hFF || rg_last_byte != 'hD9) begin
+            if(rg_prev_byte != 'hFF || rg_last_byte != 'hD9) begin
                 print_fmt($format("ERROR: output does not end with EOI, tail=%02x %02x",
                     rg_prev_byte, rg_last_byte), RED);
                 $finish();
@@ -297,14 +298,14 @@ module [Module] test(TestHandler)
         print_fmt($format("=== TestBlueJPEGGrayBackpressure PASSED ==="), GREEN);
     endseq;
 
-    FSM fsm_test <- mkFSM(main);
+    FSM i_fsm_test <- mkFSM(main);
 
     method Action go();
-        fsm_test.start();
+        i_fsm_test.start();
     endmethod
 
     method Bool done();
-        return fsm_test.done();
+        return i_fsm_test.done();
     endmethod
 
 endmodule

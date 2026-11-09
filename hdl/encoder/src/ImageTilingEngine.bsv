@@ -12,11 +12,11 @@ import BankedMemory :: *;
 
 /*
 
-    We could use AXI Stream between all the processing modules but this would probably 
+    We could use AXI Stream between all the processing modules but this would probably
     cause unnecessary overhead. So instead, simply use Bluespecs handshaking between modules
     with Clients and Servers.
     For this Tiling Engine, there should be an AXI Stream adapter, since it will directly be connected
-    to the outside world. 
+    to the outside world.
     This adapter can also be implemented in the actual Encoder, however.
 
 */
@@ -27,13 +27,13 @@ interface ImageTilingEngine_ifc#(type t, numeric type mcu_w, numeric type mcu_h)
 
     method Action set_img_width(Bit#(13) x);
     method Action start();
-    //Stop after the final block has drained so the next frame can start.
+    //stop after the final block has drained so the next frame can start
     method Action stop();
 endinterface
 
 
 /* A second address range overlaps filling one line group with emitting the other. */
-module mkImageTilingEngine#(NumProxy#(max_img_width) _, Bool double_buffer)(ImageTilingEngine_ifc#(t, mcu_w, mcu_h))
+module mkImageTilingEngine#(NumProxy_t#(max_img_width) _, Bool double_buffer)(ImageTilingEngine_ifc#(t, mcu_w, mcu_h))
     provisos(
         Bits#(t, bpp),
         Mul#(max_img_width, mcu_h, buffer_capacity),
@@ -52,35 +52,35 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _, Bool double_buffer)(Imag
         Mul#(mcu_w, mcu_h, pixels_in_mcu),
         Log#(pixels_in_mcu, block_idx_w),
         Log#(mcu_w, log2_mcu_w)
-        // Add#(TExp#(log2_mcu_w), 0, mcu_w),
-        // Log#(mcu_h, log2_mcu_h),
-        // Add#(TExp#(log2_mcu_h), 0, mcu_h)
+        //Add#(TExp#(log2_mcu_w), 0, mcu_w),
+        //Log#(mcu_h, log2_mcu_h),
+        //Add#(TExp#(log2_mcu_h), 0, mcu_h)
     );
 
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
     /* required BRAM capacity is calculated from max. upported scanline width and MCU height */
-    Integer buffered_pixels = valueof(buffer_capacity);
+    Integer buffered_pixels  = valueof(buffer_capacity);
     Integer pixels_per_block = valueof(pixels_in_mcu);
-    Integer active_buffers = double_buffer ? 2 : 1;
-    Integer memory_pixels  = active_buffers * buffered_pixels;
+    Integer active_buffers   = double_buffer ? 2 : 1;
+    Integer memory_pixels    = active_buffers * buffered_pixels;
 
     BRAM_Configure bram_cfg = defaultValue;
     bram_cfg.memorySize = memory_pixels;
 
-    FIFO#(t) f_line     <- mkFIFO;
-    FIFO#(t) f_block    <- mkFIFO;
+    FIFO#(t) f_line  <- mkFIFO;
+    FIFO#(t) f_block <- mkFIFO;
 
     BankedMemoryAccessor_ifc#(2, memory_addrw, bpp, 1) i_pixels <- mkBankedMemoryBRAM2Accessor(bram_cfg);
 
-    Reg#(Bit#(line_w))          rg_imgw             <- mkRegU;
-    Reg#(Bit#(buffer_countw))   rg_buf_threshold    <- mkRegU;
-    Reg#(Bit#(buffer_addrw))    rg_wr_addr          <- mkRegU;
-    Reg#(Bit#(buffer_addrw))    rg_rd_addr          <- mkRegU;
-    Reg#(Bit#(buffer_countw))   rg_rd_pix_cnt       <- mkRegU;
-    Reg#(Bit#(block_idx_w))     rg_block_idx        <- mkRegU; /* keeps track of pixel in MCU */
-    Reg#(Bit#(line_w))          rg_curr_block       <- mkRegU; /* offs for current MCU in buffer */
+    Reg#(Bit#(line_w))        rg_imgw          <- mkRegU;
+    Reg#(Bit#(buffer_countw)) rg_buf_threshold <- mkRegU;
+    Reg#(Bit#(buffer_addrw))  rg_wr_addr       <- mkRegU;
+    Reg#(Bit#(buffer_addrw))  rg_rd_addr       <- mkRegU;
+    Reg#(Bit#(buffer_countw)) rg_rd_pix_cnt    <- mkRegU;
+    Reg#(Bit#(block_idx_w))   rg_block_idx     <- mkRegU; //pixel position in the MCU
+    Reg#(Bit#(line_w))        rg_curr_block    <- mkRegU; //offset of the current MCU in the buffer
 
     Reg#(Bit#(1))          rg_wr_buf    <- mkReg(0);
     Reg#(Bit#(1))          rg_rd_buf    <- mkReg(0);
@@ -119,7 +119,7 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _, Bool double_buffer)(Imag
 
     /*
         We start filling a new MCU when all relevant pixels have been fetched
-        this could start even earlier, when (rg_imgw-1)*mcu_h+mcu_w have been fetched but 
+        this could start even earlier, when (rg_imgw-1)*mcu_h+mcu_w have been fetched but
         lets stick with the simpler calculation for now as this also alllows easier termination
         of writing to the buffer
     */
@@ -139,7 +139,7 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _, Bool double_buffer)(Imag
     /*
         When the buffer is full, we will be able to dispatch line_width / mcu_width blocks
         each block is fetched from the buffer sequentially, so we need to keep track of the current block
-        and the current index inside of the respective block while also modifying the 
+        and the current index inside of the respective block while also modifying the
         buffer address correctly
     */
     function Action advance_read_request();
@@ -210,7 +210,7 @@ module mkImageTilingEngine#(NumProxy#(max_img_width) _, Bool double_buffer)(Imag
         rg_imgw <= w_trunc;
         rg_buf_threshold <= zeroExtend(w_trunc) * fromInteger(valueof(mcu_h));
     endaction;
-    
+
     method start if(!rg_running) = action
         rg_running         <= True;
         rg_wr_addr         <= 0;

@@ -14,11 +14,14 @@ interface RLE_ifc#(numeric type bits);
     interface Server#(Int#(bits), RLETag_t#(bits)) data;
 endinterface
 
-module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
+module mkRLE(RLE_ifc#(bits))
+    provisos(
+        Bits#(Int#(bits), _sz)
+    );
 
     /*
         This is the first non-uniform pipeline stage outputting a compressed representation
-        of the input data (quantization is theoretically not compression, although limited 
+        of the input data (quantization is theoretically not compression, although limited
         accuracy practically causes compression).
         This module is a prerequisite for huffman encoding. Has to perform following tasks:
         - detect number of consecutive zero AC coefficients in MCU for ZRL symbols
@@ -34,44 +37,44 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
         - ordinary AC values
     */
 
-    FIFO#(Int#(bits))      f_in     <- mkBypassFIFO;
-    FIFO#(RLETag_t#(bits)) f_out    <- mkFIFO;
+    FIFO#(Int#(bits))      f_in  <- mkBypassFIFO;
+    FIFO#(RLETag_t#(bits)) f_out <- mkFIFO;
 
-    Reg#(Bit#(6))    rg_idx      <- mkReg(0);
-    Reg#(Bit#(6))    rg_zero_run <- mkReg(0);
+    Reg#(Bit#(6)) rg_idx      <- mkReg(0);
+    Reg#(Bit#(6)) rg_zero_run <- mkReg(0);
 
     //per-DU component ID via FIFO (0=Y, 1=Cb, 2=Cr)
-    FIFO#(Bit#(2))  f_comp      <- mkSizedFIFO(4);
+    FIFO#(Bit#(2)) f_comp <- mkSizedFIFO(4);
 
     //separate DC predictor per component (JPEG requires per-component)
-    Vector#(3, Reg#(Int#(bits))) v_prev_dc <- replicateM(mkReg(0));
+    Vector#(3, Reg#(Int#(bits))) rg_prev_dc <- replicateM(mkReg(0));
 
-    function Reg#(Int#(bits)) rg_prev_dc(Bit#(2) comp);
-        return asReg(v_prev_dc[comp]);
+    function Reg#(Int#(bits)) prev_dc_reg(Bit#(2) comp);
+        return asReg(rg_prev_dc[comp]);
     endfunction
 
-    //when a non-zero AC follows >= 16 zeros, we must stall the input 
-    //to emit one or more ZRL tags before emitting the AC tag.
+    //when a non-zero AC follows >= 16 zeros, we must stall the input
+    //to emit one or more ZRL tags before emitting the AC tag
     Reg#(Maybe#(Int#(bits))) rg_stall_val <- mkReg(tagged Invalid);
 
     rule r_process_dc (rg_idx == 0 && !isValid(rg_stall_val));
         let val = f_in.first; f_in.deq;
-        
+
         let comp = f_comp.first;
-        let prev = rg_prev_dc(comp);
+        let prev = prev_dc_reg(comp);
 
         f_out.enq(tagged DCDiff (val - prev));
-        rg_prev_dc(comp) <= val;
-        
+        prev_dc_reg(comp) <= val;
+
         rg_idx      <= 1;
         rg_zero_run <= 0;
     endrule
 
     rule r_process_ac (rg_idx > 0 && !isValid(rg_stall_val));
         let val = f_in.first; f_in.deq;
-        
-        if (val == 0) begin
-            if (rg_idx == 63) begin
+
+        if(val == 0) begin
+            if(rg_idx == 63) begin
                 //if last value is zero, emit EOB
                 f_out.enq(tagged EOB);
                 rg_idx      <= 0;
@@ -84,7 +87,7 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
             end
         end else begin
             //this branch ends a zero run of length N in [0, 63]
-            if (rg_zero_run >= 16) begin
+            if(rg_zero_run >= 16) begin
                 //at least 16 consecutive zeros where encountered, emit as many ZRLs as required, followed by AC run
                 f_out.enq(tagged ZRL);
                 rg_zero_run     <= rg_zero_run - 16;
@@ -93,9 +96,9 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
                 //directly emit AC run if less than 16 consecutive zeros
                 f_out.enq(tagged AC ACRun_t { run: truncate(rg_zero_run), val: val });
                 rg_zero_run <= 0;
-                
-                if (rg_idx == 63) begin 
-                    rg_idx <= 0; f_comp.deq; 
+
+                if(rg_idx == 63) begin
+                    rg_idx <= 0; f_comp.deq;
                 end else begin
                     rg_idx <= rg_idx + 1;
                 end
@@ -105,17 +108,17 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
 
     rule r_process_zrl (isValid(rg_stall_val));
         let val = fromMaybe(?, rg_stall_val);
-        
-        if (rg_zero_run >= 16) begin
+
+        if(rg_zero_run >= 16) begin
             f_out.enq(tagged ZRL);
             rg_zero_run <= rg_zero_run - 16;
         end else begin
             f_out.enq(tagged AC ACRun_t { run: truncate(rg_zero_run), val: val });
             rg_zero_run <= 0;
             rg_stall_val <= tagged Invalid; //clear stall
-            
-            if (rg_idx == 63) begin 
-                rg_idx <= 0; f_comp.deq; 
+
+            if(rg_idx == 63) begin
+                rg_idx <= 0; f_comp.deq;
             end else begin
                 rg_idx <= rg_idx + 1;
             end
@@ -125,7 +128,7 @@ module mkRLE(RLE_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
     method Action rewind();
         rg_idx <= 0;
         rg_zero_run <= 0;
-        writeVReg(v_prev_dc, replicate(0));
+        writeVReg(rg_prev_dc, replicate(0));
         rg_stall_val <= tagged Invalid;
         f_comp.clear;
         f_in.clear();

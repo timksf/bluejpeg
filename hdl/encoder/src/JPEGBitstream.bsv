@@ -23,11 +23,11 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
     else
         f_in <- mkBypassFIFO;
 
-    //64 bit accumulator; CReg allows r_emit (port 0) and r_accumulate (port 1)
-    //to fire in the same cycle.  Valid bits are in positions [rg_bits-1:0].
-    //Port 0: emit / flush rules   Port 1: accumulate   Port 2: rewind
-    Reg#(Bit#(64))  rg_buffer[3] <- mkCReg(3, 0);
-    Reg#(UInt#(7))  rg_bits[3]   <- mkCReg(3, 0);
+    //64 bit accumulator, the CReg allows r_emit (port 0) and r_accumulate (port 1) to fire in the same cycle
+    //valid bits are in positions [rg_bits-1:0]
+    //port 0: emit / flush rules, port 1: accumulate, port 2: rewind
+    Reg#(Bit#(64)) rg_buffer[3] <- mkCReg(3, 0);
+    Reg#(UInt#(7)) rg_bits[3]   <- mkCReg(3, 0);
 
     //stuffing: after emitting 0xFF, must emit 0x00
     Reg#(Bool) rg_stuff[3] <- mkCReg(3, False);
@@ -44,20 +44,20 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
     rule r_accumulate (!rg_finishing && rg_bits[1] <= 32 && !rg_stuff[1]);
         let cw = f_in.first; f_in.deq;
 
-        Bit#(7) sz = zeroExtend(cw.huffsize);
-        Bit#(64) mask = (1 << sz) - 1;
+        Bit#(7)  sz       = zeroExtend(cw.huffsize);
+        Bit#(64) mask     = (1 << sz) - 1;
         Bit#(64) new_bits = zeroExtend(cw.huffcode) & mask;
 
         rg_buffer[1] <= (rg_buffer[1] << sz) | new_bits;
         rg_bits[1]   <= rg_bits[1] + unpack(sz);
 
-        if (cw.last) rg_finishing <= True;
+        if(cw.last) rg_finishing <= True;
     endrule
 
     //emit full bytes from the accumulator msb-first (port 0)
     rule r_emit (rg_bits[0] >= 8 && !rg_stuff[0]);
         Bit#(7) shift_amt = pack(rg_bits[0] - 8);
-        Bit#(8) out_byte = truncate(rg_buffer[0] >> shift_amt);
+        Bit#(8) out_byte  = truncate(rg_buffer[0] >> shift_amt);
         f_out.enq(out_byte);
         rg_bits[0] <= rg_bits[0] - 8;
 
@@ -65,7 +65,7 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
         Bit#(64) remain_mask = (1 << shift_amt) - 1;
         rg_buffer[0] <= rg_buffer[0] & remain_mask;
 
-        if (out_byte == 8'hFF) rg_stuff[0] <= True;
+        if(out_byte == 8'hFF) rg_stuff[0] <= True;
     endrule
 
     //emit 0x00 stuffing byte after 0xFF
@@ -76,7 +76,7 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
 
     //flush: inject 1-bit padding to complete the final byte
     rule r_pad (rg_finishing && !rg_pad_injected && rg_bits[0] > 0 && rg_bits[0] < 8 && !rg_stuff[0]);
-        Bit#(7) pad = pack(8 - rg_bits[0]);
+        Bit#(7)  pad  = pack(8 - rg_bits[0]);
         Bit#(64) ones = (1 << pad) - 1;
         rg_buffer[0] <= (rg_buffer[0] << pad) | ones;
         rg_bits[0] <= 8;

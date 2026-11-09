@@ -14,13 +14,19 @@ instance BuildList#(t, List#(t));
     endfunction
 endinstance
 
-instance BuildList#(t, function r f(t y)) provisos(BuildList#(t, r));
+instance BuildList#(t, function r f(t y))
+    provisos(
+        BuildList#(t, r)
+    );
     function function r f(t y) buildList_(List#(t) v, t x);
         return buildList_(List::cons(x, v));
     endfunction
 endinstance
 
-function r list(t x) provisos(BuildList#(t, r));
+function r list(t x)
+    provisos(
+        BuildList#(t, r)
+    );
     return buildList_(Nil, x);
 endfunction
 

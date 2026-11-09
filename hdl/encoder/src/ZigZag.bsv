@@ -22,12 +22,12 @@ function Vector#(64, Integer) zigzag_indices(Bool transposed);
        58, 59, 52, 45, 38, 31, 39, 46,
        53, 60, 61, 54, 47, 55, 62, 63
     );
-    
+
     Vector#(64, Integer) res = newVector;
     for(Integer i = 0; i < 64; i = i + 1) begin
         Integer idx = z[i];
-        Integer r = idx / 8;
-        Integer c = idx % 8;
+        Integer r   = idx / 8;
+        Integer c   = idx % 8;
         //for transposed zigzag, decompose into r, c and convert to transposed linear index
         res[i] = transposed ? (c * 8 + r) : idx;
     end
@@ -39,43 +39,46 @@ interface Zigzag_ifc#(numeric type bits);
     interface Server#(Int#(bits), Int#(bits)) data;
 endinterface
 
-module mkZigZag#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
+module mkZigZag#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits))
+    provisos(
+        Bits#(Int#(bits), _sz)
+    );
 
     FIFO#(Int#(bits)) f_in;
     FIFO#(Int#(bits)) f_out <- mkFIFO;
 
     if(buffer_in)
         f_in <- mkFIFO;
-    else 
+    else
         f_in <- mkBypassFIFO;
 
     //ping-pong buffer, one for writing one for reading
-    Vector#(64, Reg#(Int#(bits))) buf0 <- replicateM(mkRegU);
-    Vector#(64, Reg#(Int#(bits))) buf1 <- replicateM(mkRegU);
+    Vector#(64, Reg#(Int#(bits))) i_buf0 <- replicateM(mkRegU);
+    Vector#(64, Reg#(Int#(bits))) i_buf1 <- replicateM(mkRegU);
 
-    Reg#(Bit#(6)) rg_write_idx  <- mkReg(0);
-    Reg#(Bit#(6)) rg_read_idx   <- mkReg(0);
+    Reg#(Bit#(6)) rg_write_idx <- mkReg(0);
+    Reg#(Bit#(6)) rg_read_idx  <- mkReg(0);
 
     //state
     Reg#(Bit#(1)) rg_write_bank <- mkReg(0);
     Reg#(Bit#(1)) rg_read_bank  <- mkReg(0);
-    
+
     //prevent under or overflow
     Reg#(Bit#(2)) rg_blocks_written <- mkReg(0);
     Reg#(Bit#(2)) rg_blocks_read    <- mkReg(0);
 
     Vector#(64, Integer) zigzag_map = zigzag_indices(transposed);
-    
+
     Bit#(2) blocks_rdy = rg_blocks_written - rg_blocks_read;
 
     (* descending_urgency = "r_read_out, r_write_in" *)
     rule r_write_in (blocks_rdy < 2);
         let val = f_in.first; f_in.deq;
-        
-        if (rg_write_bank == 0) buf0[rg_write_idx] <= val;
-        else                    buf1[rg_write_idx] <= val;
 
-        if (rg_write_idx == 63) begin
+        if(rg_write_bank == 0) i_buf0[rg_write_idx] <= val;
+        else                    i_buf1[rg_write_idx] <= val;
+
+        if(rg_write_idx == 63) begin
             rg_write_idx    <= 0;
             rg_write_bank   <= ~rg_write_bank;
             rg_blocks_written <= rg_blocks_written + 1;
@@ -86,11 +89,11 @@ module mkZigZag#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) provisos(Bi
 
     rule r_read_out (blocks_rdy > 0);
         Integer read_idx = zigzag_map[rg_read_idx];
-        
-        Int#(bits) val = (rg_read_bank == 0) ? buf0[read_idx] : buf1[read_idx];
+
+        Int#(bits) val = (rg_read_bank == 0) ? i_buf0[read_idx] : i_buf1[read_idx];
         f_out.enq(val);
 
-        if (rg_read_idx == 63) begin
+        if(rg_read_idx == 63) begin
             rg_read_idx     <= 0;
             rg_read_bank    <= ~rg_read_bank;
             rg_blocks_read  <= rg_blocks_read + 1;
@@ -104,46 +107,49 @@ module mkZigZag#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) provisos(Bi
 endmodule
 
 //this is essentially the same module but it uses mkRegFile to infer LUTRAMs
-module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) provisos(Bits#(Int#(bits), _sz));
+module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits))
+    provisos(
+        Bits#(Int#(bits), _sz)
+    );
 
     FIFO#(Int#(bits)) f_in;
     FIFO#(Int#(bits)) f_out <- mkFIFO;
 
     if(buffer_in)
         f_in <- mkFIFO;
-    else 
+    else
         f_in <- mkBypassFIFO;
 
     //ping-pong buffer using RegFile to infer LUTRAMs
-    RegFile#(Bit#(6), Int#(bits)) buf0 <- mkRegFileWCF(0, 63);
-    RegFile#(Bit#(6), Int#(bits)) buf1 <- mkRegFileWCF(0, 63);
+    RegFile#(Bit#(6), Int#(bits)) i_buf0 <- mkRegFileWCF(0, 63);
+    RegFile#(Bit#(6), Int#(bits)) i_buf1 <- mkRegFileWCF(0, 63);
 
-    Reg#(Bit#(6)) rg_write_idx  <- mkReg(0);
-    Reg#(Bit#(6)) rg_read_idx   <- mkReg(0);
+    Reg#(Bit#(6)) rg_write_idx <- mkReg(0);
+    Reg#(Bit#(6)) rg_read_idx  <- mkReg(0);
 
     //state
     Reg#(Bit#(1)) rg_write_bank <- mkReg(0);
     Reg#(Bit#(1)) rg_read_bank  <- mkReg(0);
-    
-    //prevent under or overflow
-    Reg#(Bit#(2)) rg_blocks_rdy <- mkReg(0);
-    PulseWire pw_block_written <- mkPulseWire;
-    PulseWire pw_block_read    <- mkPulseWire;
 
-    function Bit#(6) toBit6(Integer x) = fromInteger(x);
-    Vector#(64, Bit#(6)) zigzag_map = map(toBit6, zigzag_indices(transposed));
-    
+    //prevent under or overflow
+    Reg#(Bit#(2)) rg_blocks_rdy    <- mkReg(0);
+    PulseWire     pw_block_written <- mkPulseWire;
+    PulseWire     pw_block_read    <- mkPulseWire;
+
+    function Bit#(6) to_bit6(Integer x) = fromInteger(x);
+    Vector#(64, Bit#(6)) zigzag_map = map(to_bit6, zigzag_indices(transposed));
+
     rule r_update_blocks (pw_block_written || pw_block_read);
         rg_blocks_rdy <= rg_blocks_rdy + (pw_block_written ? 1 : 0) - (pw_block_read ? 1 : 0);
     endrule
 
     rule r_write_in (rg_blocks_rdy < 2);
         let val = f_in.first; f_in.deq;
-        
-        if (rg_write_bank == 0) buf0.upd(rg_write_idx, val);
-        else                    buf1.upd(rg_write_idx, val);
 
-        if (rg_write_idx == 63) begin
+        if(rg_write_bank == 0) i_buf0.upd(rg_write_idx, val);
+        else                    i_buf1.upd(rg_write_idx, val);
+
+        if(rg_write_idx == 63) begin
             rg_write_idx    <= 0;
             rg_write_bank   <= ~rg_write_bank;
             pw_block_written.send();
@@ -154,11 +160,11 @@ module mkZigZag_Opt#(Bool buffer_in, Bool transposed)(Zigzag_ifc#(bits)) proviso
 
     rule r_read_out (rg_blocks_rdy > 0);
         Bit#(6) read_idx = zigzag_map[rg_read_idx];
-        
-        Int#(bits) val = (rg_read_bank == 0) ? buf0.sub(read_idx) : buf1.sub(read_idx);
+
+        Int#(bits) val = (rg_read_bank == 0) ? i_buf0.sub(read_idx) : i_buf1.sub(read_idx);
         f_out.enq(val);
 
-        if (rg_read_idx == 63) begin
+        if(rg_read_idx == 63) begin
             rg_read_idx     <= 0;
             rg_read_bank    <= ~rg_read_bank;
             pw_block_read.send();

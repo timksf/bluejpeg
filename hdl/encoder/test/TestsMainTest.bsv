@@ -1,15 +1,15 @@
 package TestsMainTest;
 
 import StmtFSM :: *;
+import BlueAXI :: *;
 
 import TestHelper :: *;
 import PrintUtil :: *;
 import BlueJPEG :: *;
-import BlueAXI :: *;
 import SimRAM_AXI :: *;
 
 (* synthesize *)
-module [Module] mkTestsMainTest(TestHelper::TestHandler);
+module [Module] mkTestsMainTest(TestHelper::TestHandler_ifc);
 
     function print_s = print_mod_pre_color_t_s;
 
@@ -20,14 +20,14 @@ module [Module] mkTestsMainTest(TestHelper::TestHandler);
             print_s("Hello World from the testbench.", YELLOW);
         endseq
     };
-    FSM testFSM <- mkFSM(s);
+    FSM i_test_fsm <- mkFSM(s);
 
     method Action go();
-        testFSM.start();
+        i_test_fsm.start();
     endmethod
 
     method Bool done();
-        return testFSM.done();
+        return i_test_fsm.done();
     endmethod
 endmodule
 

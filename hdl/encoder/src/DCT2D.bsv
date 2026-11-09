@@ -18,40 +18,40 @@ interface DCT2D_ifc#(numeric type bits);
 endinterface
 
 //TODO optimize resource usage (especially register usage!)
-module mkDCT2D#(NumProxy#(frac_bits) f_scale, Bool transpose_output)(DCT2D_ifc#(bits));
+module mkDCT2D#(NumProxy_t#(frac_bits) f_scale, Bool transpose_output)(DCT2D_ifc#(bits));
 
-    FIFO#(DU_t#(Int#(bits), 8, 8)) f_in <- mkPipelineFIFO;
+    FIFO#(DU_t#(Int#(bits), 8, 8)) f_in  <- mkPipelineFIFO;
     FIFO#(DU_t#(Int#(bits), 8, 8)) f_out <- mkPipelineFIFO;
 
-    DCT1D_ifc#(bits) dct_row <- mkDCT1D(f_scale, False, True);
-    DCT1D_ifc#(bits) dct_col <- mkDCT1D(f_scale, False, True);
-    
-    TransposeBuffer_ifc#(Int#(bits), 8, 8) tp0 <- mkTransposeBuffer(False);
-    TransposeBuffer_ifc#(Int#(bits), 8, 8) tp1 = ?;
+    DCT1D_ifc#(bits) i_dct_row <- mkDCT1D(f_scale, False, True);
+    DCT1D_ifc#(bits) i_dct_col <- mkDCT1D(f_scale, False, True);
 
-    if (transpose_output) begin
-        tp1 <- mkTransposeBuffer(False);
+    TransposeBuffer_ifc#(Int#(bits), 8, 8) i_tp0 <- mkTransposeBuffer(False);
+    TransposeBuffer_ifc#(Int#(bits), 8, 8) i_tp1 = ?;
+
+    if(transpose_output) begin
+        i_tp1 <- mkTransposeBuffer(False);
     end
 
     Reg#(Bit#(3)) rg_row <- mkReg(0);
 
     //after reading the output of the row DCT, serialize into transpose buffer
-    Reg#(Vector#(8, Int#(bits))) rg_row_buf <- mkRegU;
-    Reg#(Bit#(3))   rg_col_idx      <- mkReg(0);
-    Reg#(Bool)      rg_row_valid    <- mkReg(False);
+    Reg#(Vector#(8, Int#(bits))) rg_row_buf   <- mkRegU;
+    Reg#(Bit#(3))                rg_col_idx   <- mkReg(0);
+    Reg#(Bool)                   rg_row_valid <- mkReg(False);
 
     //de-serialize from transpose buffer and then perform col dct
     Reg#(Vector#(8, Int#(bits))) rg_col_buf <- mkRegU;
-    Reg#(Bit#(3)) rg_row_idx    <- mkReg(0);
-    Reg#(Bit#(6)) rg_tp_cnt     <- mkReg(0);
+    Reg#(Bit#(3))                rg_row_idx <- mkReg(0);
+    Reg#(Bit#(6))                rg_tp_cnt  <- mkReg(0);
 
     PulseWire pw_rewind <- mkPulseWire;
 
     //row DCT
-    rule rrow_dct;
+    rule r_row_dct;
         let mcu = f_in.first;
-        dct_row.data.request.put(mcu.block[rg_row]);
-        if (rg_row == 7) begin
+        i_dct_row.data.request.put(mcu.block[rg_row]);
+        if(rg_row == 7) begin
             rg_row <= 0;
             f_in.deq;
         end else begin
@@ -60,33 +60,33 @@ module mkDCT2D#(NumProxy#(frac_bits) f_scale, Bool transpose_output)(DCT2D_ifc#(
     endrule
 
     //transpose buffer serialization
-    rule rrow_dct_res if(!rg_row_valid);
-        let v <- dct_row.data.response.get();
+    rule r_row_dct_res (!rg_row_valid);
+        let v <- i_dct_row.data.response.get();
         rg_row_buf <= v;
         rg_row_valid <= True;
         rg_col_idx <= 0;
     endrule
 
-    rule rtranspose_main if(rg_row_valid);
-        tp0.original.put(rg_row_buf[rg_col_idx]);
-        if (rg_col_idx == 7) begin
+    rule r_transpose_main (rg_row_valid);
+        i_tp0.original.put(rg_row_buf[rg_col_idx]);
+        if(rg_col_idx == 7) begin
             rg_row_valid <= False;
         end
         rg_col_idx <= rg_col_idx + 1;
     endrule
 
     //transpose de-serialization -> col dct
-    rule rcol_dct;
-        let val <- tp0.transposed.get();
+    rule r_col_dct;
+        let val <- i_tp0.transposed.get();
         rg_col_buf[rg_row_idx] <= val;
-        
-        if (rg_row_idx == 7) begin
+
+        if(rg_row_idx == 7) begin
             let new_vec = rg_col_buf;
             new_vec[7] = val;
-            dct_col.data.request.put(new_vec);
-            
-            if (rg_tp_cnt == 63) begin
-                // tp0.rewind();
+            i_dct_col.data.request.put(new_vec);
+
+            if(rg_tp_cnt == 63) begin
+                // i_tp0.rewind();
                 rg_tp_cnt <= 0;
             end else begin
                 rg_tp_cnt <= rg_tp_cnt + 1;
@@ -98,16 +98,16 @@ module mkDCT2D#(NumProxy#(frac_bits) f_scale, Bool transpose_output)(DCT2D_ifc#(
     endrule
 
     //output - reassemble into (transposed) DU_t
-    if (!transpose_output) begin
+    if(!transpose_output) begin
         //no output transpose
-        Reg#(Vector#(8, Vector#(8, Int#(bits)))) rg_mcu_out <- mkRegU;
-        Reg#(Bit#(3)) rg_out_col_idx <- mkReg(0);
+        Reg#(Vector#(8, Vector#(8, Int#(bits)))) rg_mcu_out     <- mkRegU;
+        Reg#(Bit#(3))                            rg_out_col_idx <- mkReg(0);
 
-        rule rbuild_out;
-            let v <- dct_col.data.response.get();
+        rule r_build_out;
+            let v <- i_dct_col.data.response.get();
             rg_mcu_out[rg_out_col_idx] <= v;
-            
-            if (rg_out_col_idx == 7) begin
+
+            if(rg_out_col_idx == 7) begin
                 let final_block = rg_mcu_out;
                 final_block[7] = v;
                 f_out.enq(DU_t { block: final_block });
@@ -116,48 +116,48 @@ module mkDCT2D#(NumProxy#(frac_bits) f_scale, Bool transpose_output)(DCT2D_ifc#(
                 rg_out_col_idx <= rg_out_col_idx + 1;
             end
         endrule
-        
-        rule do_rewind if(pw_rewind);
+
+        rule r_rewind (pw_rewind);
             rg_out_col_idx <= 0;
         endrule
 
     end else begin
         //output transpose enabled
-        
+
         //serialize
         // Reg#(Vector#(8, Int#(bits))) rVecBuf2 <- mkRegU;
         // Reg#(Bit#(3)) rVecIdx2 <- mkReg(0);
         // Reg#(Bool) rVecValid2 <- mkReg(False);
 
         // rule get_dct_row_out if (!rVecValid2);
-        //     let v <- dct_col.data.response.get();
+        //     let v <- i_dct_col.data.response.get();
         //     rVecBuf2 <= v;
         //     rVecValid2 <= True;
         //     rVecIdx2 <= 0;
         // endrule
 
         // rule feed_trans_2 if (rVecValid2);
-        //     tp1.original.put(rVecBuf2[rVecIdx2]);
+        //     i_tp1.original.put(rVecBuf2[rVecIdx2]);
         //     if (rVecIdx2 == 7) rVecValid2 <= False;
         //     rVecIdx2 <= rVecIdx2 + 1;
         // endrule
 
-        // // 4b. Collect Final Output (Deserialize from Transpose 2)
+        //// 4b. Collect Final Output (Deserialize from Transpose 2)
         // Reg#(Vector#(8, Vector#(8, Int#(bits)))) rFinalBlock <- mkRegU;
         // Reg#(Vector#(8, Int#(bits))) rFinalRow <- mkRegU;
         // Reg#(Bit#(3)) rFinalColIdx <- mkReg(0);
         // Reg#(Bit#(3)) rFinalRowIdx <- mkReg(0);
         // Reg#(Bit#(6)) rTrans2Cnt <- mkReg(0);
-        
+
         // rule collect_output_transposed;
-        //     let val <- tp1.transposed.get();
+        //     let val <- i_tp1.transposed.get();
         //     rFinalRow[rFinalColIdx] <= val;
 
         //     if (rFinalColIdx == 7) begin
         //         let row_vec = rFinalRow;
         //         row_vec[7] = val;
         //         rFinalBlock[rFinalRowIdx] <= row_vec;
-                
+
         //         if (rFinalRowIdx == 7) begin
         //             let block = rFinalBlock;
         //             block[7] = row_vec;
@@ -172,14 +172,14 @@ module mkDCT2D#(NumProxy#(frac_bits) f_scale, Bool transpose_output)(DCT2D_ifc#(
         //     end
 
         //     if (rTrans2Cnt == 63) begin
-        //         tp1.rewind();
+        //         i_tp1.rewind();
         //         rTrans2Cnt <= 0;
         //     end else begin
         //         rTrans2Cnt <= rTrans2Cnt + 1;
         //     end
         // endrule
 
-        // rule do_rewind if(pw_rewind);
+        // rule r_rewind if(pw_rewind);
         //     rVecIdx2 <= 0;
         //     rVecValid2 <= False;
         //     rFinalColIdx <= 0;
@@ -194,8 +194,8 @@ module mkDCT2D#(NumProxy#(frac_bits) f_scale, Bool transpose_output)(DCT2D_ifc#(
         rg_row_valid <= False;
         rg_row_idx <= 0;
         rg_tp_cnt <= 0;
-        tp0.rewind();
-        if (transpose_output) tp1.rewind();
+        i_tp0.rewind();
+        if(transpose_output) i_tp1.rewind();
         pw_rewind.send();
     endmethod
 

@@ -9,27 +9,27 @@ import SpecialFIFOs :: *;
 import Vector :: *;
 import BUtils :: *;
 import Assert :: *;
-
 import BlueAXI :: *;
+
 import Util :: *;
 
-Integer cfg_cmd_control_offs    = 'h00;
-Integer cfg_cmd_cause_offs      = 'h04;
-Integer cfg_start_addr_lo_offs  = 'h10;
-Integer cfg_start_addr_hi_offs  = 'h14;
-Integer cfg_tx_bytes_lo_offs    = 'h18;
-Integer cfg_tx_bytes_hi_offs    = 'h1C;
-Integer cfg_tx_counter_lo_offs  = 'h20;
-Integer cfg_tx_counter_hi_offs  = 'h24;
+Integer cfg_cmd_control_offs   = 'h00;
+Integer cfg_cmd_cause_offs     = 'h04;
+Integer cfg_start_addr_lo_offs = 'h10;
+Integer cfg_start_addr_hi_offs = 'h14;
+Integer cfg_tx_bytes_lo_offs   = 'h18;
+Integer cfg_tx_bytes_hi_offs   = 'h1C;
+Integer cfg_tx_counter_lo_offs = 'h20;
+Integer cfg_tx_counter_hi_offs = 'h24;
 
 //bit offsets in control register
 Integer cfg_start_bit_offs  = 0;
 Integer cfg_finish_bit_offs = 1;
-Integer cfg_error_bit_offs = 2;
+Integer cfg_error_bit_offs  = 2;
 
 typedef enum {
     ReqBytesUnaligned //the requested number of bytes is not aligned with the bytes per stream packet
-} AXIMM2S_Error_Cause deriving(FShow, Eq, Bits);
+} AXIMM2SErrorCause deriving(Bits, Eq, FShow);
 
 interface AXIMM2S_ifc#(numeric type aw, numeric type dw, numeric type sdw);
     //MM read master
@@ -51,7 +51,7 @@ endinterface
 interface AXIMM2SCfg_ifc;
 
     method Action finish(); //signal finished processing
-    method Action error(AXIMM2S_Error_Cause c);
+    method Action error(AXIMM2SErrorCause c);
 
     interface ReadOnly#(Bit#(32)) ctrl; //use only for debugging
     interface ReadOnly#(Bool) start;
@@ -61,10 +61,10 @@ interface AXIMM2SCfg_ifc;
 
 endinterface
 
-module [ConfigCtx#(32, 32)] aximm2sConfig(AXIMM2SCfg_ifc);
+module [ConfigCtx#(32, 32)] aximm2s_config(AXIMM2SCfg_ifc);
 
-    Reg#(Bit#(32)) rg_cmd_control <- mkReg(0);
-    Reg#(AXIMM2S_Error_Cause) rg_cmd_error_cause <- mkRegU;
+    Reg#(Bit#(32))          rg_cmd_control     <- mkReg(0);
+    Reg#(AXIMM2SErrorCause) rg_cmd_error_cause <- mkRegU;
 
     Reg#(Bit#(32)) rg_start_addr_lo <- mkRegU;
     Reg#(Bit#(32)) rg_start_addr_hi <- mkRegU;
@@ -85,7 +85,7 @@ module [ConfigCtx#(32, 32)] aximm2sConfig(AXIMM2SCfg_ifc);
 
     addReg(cfg_tx_bytes_lo_offs, rg_tx_bytes_lo);
     addReg(cfg_tx_bytes_hi_offs, rg_tx_bytes_hi);
-    
+
     addRegRO(cfg_tx_counter_lo_offs, rg_tx_counter_lo);
     addRegRO(cfg_tx_counter_hi_offs, rg_tx_counter_hi);
 
@@ -120,7 +120,7 @@ module [ConfigCtx#(32, 32)] aximm2sConfig(AXIMM2SCfg_ifc);
 
     interface ReadOnly tx_bytes;
         method _read = {rg_tx_bytes_hi, rg_tx_bytes_lo};
-    endinterface 
+    endinterface
 
     interface ctrl = regToReadOnly(rg_cmd_control);
 
@@ -141,43 +141,43 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
         Div#(barrier, data_bytes, burst_length_max), //max. #bytes per burst based on the 4096 barrier
         Max#(aw, 64, 64), //aw <= 64
         Mul#(8, bytes_per_beat, dw) //bytes_per_beat = dw/8
-        // Add#(12, a__, aw) //aw >= 12
-        // Log#(bytes_per_beat)
+        //Add#(12, a__, aw) //aw >= 12
+        //Log#(bytes_per_beat)
     );
 
-    staticAssert(isPowerOf2(burst_length) && burst_length <= 256, "Burst length is required to be a power of 2 leq 256");
+    staticAssert(is_power_of_2(burst_length) && burst_length <= 256, "Burst length is required to be a power of 2 leq 256");
 
-    Integer burst_size = valueof(bytes_per_beat); //bytes per beat in a burst
+    Integer burst_size      = valueof(bytes_per_beat);   //bytes per beat in a burst
     Integer bytes_per_burst = burst_size * burst_length; //bytes per full burst (AxSIZE**2 * AxLEN)
 
-    staticAssert(burst_length <= valueof(burst_length_max), 
+    staticAssert(burst_length <= valueof(burst_length_max),
         "Burst length " + integerToString(burst_length) + " exceeds 4096 bytes with " + integerToString(burst_length*burst_size));
 
     //AXIMM ifc
-    AXI4_Master_Rd#(aw, dw, 0, 0) aximm_rd <- mkAXI4_Master_Rd(1, 1, False);
+    AXI4_Master_Rd#(aw, dw, 0, 0)             i_aximm_rd <- mkAXI4_Master_Rd(1, 1, False);
     //AXIS ifc
-    AXI4_Stream_Wr#(sdw, 0) axis_wr <- mkAXI4_Stream_Wr(1);
+    AXI4_Stream_Wr#(sdw, 0)                   i_axis_wr  <- mkAXI4_Stream_Wr(1);
     //AXIL config
-    IntExtConfig_ifc#(32, 32, AXIMM2SCfg_ifc) config_ <- axi4LiteConfigFromContext(aximm2sConfig);
+    IntExtConfig_ifc#(32, 32, AXIMM2SCfg_ifc) config_    <- axi4LiteConfigFromContext(aximm2s_config);
 
-    // Buffer between MM receive and stream output, tagged with last flag
-    // Tuple2: (data, last)
-    FIFO#(Tuple2#(Bit#(datawidth), Bool)) f_buffer <- mkFIFO;
-    Reg#(Bool) rg_running <- mkReg(False);
-    Reg#(Bit#(aw)) rg_current_addr <- mkRegU;
-    Reg#(Bit#(aw)) rg_final_addr <- mkRegU;
-    Reg#(Bit#(64)) rg_bytes_remaining <- mkRegU;
-    Reg#(Bit#(64)) rg_bytes_sent <- mkReg(0);
+    //buffer between MM receive and stream output, tagged with last flag
+    //Tuple2: (data, last)
+    FIFO#(Tuple2#(Bit#(datawidth), Bool)) f_buffer           <- mkFIFO;
+    Reg#(Bool)                            rg_running         <- mkReg(False);
+    Reg#(Bit#(aw))                        rg_current_addr    <- mkRegU;
+    Reg#(Bit#(aw))                        rg_final_addr      <- mkRegU;
+    Reg#(Bit#(64))                        rg_bytes_remaining <- mkRegU;
+    Reg#(Bit#(64))                        rg_bytes_sent      <- mkReg(0);
     //place token in this FIFO for each request, remove token when last data arrived
-    FIFO#(Bit#(0)) f_outstanding <- mkSizedFIFO(max_outstanding);
+    FIFO#(Bit#(0))                        f_outstanding      <- mkSizedFIFO(max_outstanding);
 
     function Bit#(TAdd#(1, barrier_bits)) bytes_til_barrier(Bit#(w) addr);
-        Bit#(TAdd#(1, barrier_bits)) e_addr = cExtend(addr);
+        Bit#(TAdd#(1, barrier_bits)) e_addr  = cExtend(addr);
         Bit#(TAdd#(1, barrier_bits)) barrier = fromInteger(valueof(barrier));
         return barrier - addr[valueof(barrier_bits):0];
     endfunction
 
-    rule r_init if(config_.device_ifc.start() && !rg_running);
+    rule r_init (config_.device_ifc.start() && !rg_running);
         let start_addr = config_.device_ifc.start_addr()[valueof(aw)-1:0];
         rg_current_addr <= start_addr;
         let bytes_to_send = config_.device_ifc.tx_bytes();
@@ -193,7 +193,7 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
         rg_final_addr <= start_addr + (bytes_to_send[valueof(aw)-1:0] / fromInteger(valueof(data_bytes))) << fromInteger(valueof(TLog#(bytes_per_beat)));
     endrule
 
-    rule r_issue_req if(rg_running && rg_current_addr != rg_final_addr);
+    rule r_issue_req (rg_running && rg_current_addr != rg_final_addr);
         //this should satisfy the max. outstanding requests supported by connected slaves
         //also have to take care to not cross 4k barriers with any request
         AXI4_Read_Rq#(aw, 0, 0) request = defaultValue;
@@ -201,7 +201,7 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
         request.burst_size = bitsToBurstSize(valueof(dw));
         request.burst_type = INCR;
 
-        let legal_bytes = bytes_til_barrier(rg_current_addr);
+        let legal_bytes   = bytes_til_barrier(rg_current_addr);
         let bytes_to_send = legal_bytes != 0 ? min(extend(legal_bytes), rg_bytes_remaining) : rg_bytes_remaining;
         if(fromInteger(bytes_per_burst) > bytes_to_send) begin
             //cannot issue a full burst
@@ -214,17 +214,17 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
         end
         f_outstanding.enq(?);
         UInt#(aw) bytes_this_burst = cExtend(request.burst_length + 1) << fromInteger(valueof(TLog#(bytes_per_beat)));
-        let next_addr = rg_current_addr + pack(bytes_this_burst);
+        let       next_addr        = rg_current_addr + pack(bytes_this_burst);
         rg_current_addr <= next_addr;
-        aximm_rd.request.put(request);
+        i_aximm_rd.request.put(request);
     endrule
 
-    rule r_rec_data if(rg_running);
-        let rsp <- aximm_rd.response.get();
+    rule r_rec_data (rg_running);
+        let rsp <- i_aximm_rd.response.get();
         if(rsp.resp == OKAY) begin
             //narrowing happens here, if sdw < dw
-            Bit#(datawidth) d = rsp.data[valueof(datawidth)-1:0];
-            let remaining = rg_bytes_remaining - fromInteger(valueof(TDiv#(datawidth, 8)));
+            Bit#(datawidth) d         = rsp.data[valueof(datawidth)-1:0];
+            let             remaining = rg_bytes_remaining - fromInteger(valueof(TDiv#(datawidth, 8)));
             rg_bytes_remaining <= remaining;
             f_buffer.enq(tuple2(d, remaining == 0));
         end else begin
@@ -233,12 +233,12 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
             rg_running <= False;
         end
         if(rsp.last)
-            f_outstanding.deq; 
+            f_outstanding.deq;
     endrule
 
-    rule r_stream_out if(rg_running);
+    rule r_stream_out (rg_running);
         match {.d, .last} = f_buffer.first; f_buffer.deq;
-        axis_wr.pkg.put(AXI4_Stream_Pkg {
+        i_axis_wr.pkg.put(AXI4_Stream_Pkg {
             data: d,
             user: ?,
             keep: unpack(-1), //keep all, as always datawidth == sdw
@@ -254,14 +254,13 @@ module [Module] mkAXIMM2S#(Integer burst_length, Integer max_outstanding)(AXIMM2
     endrule
 
     //MM
-    interface fab_mm_rd = aximm_rd.fab;
-    //S
-    interface fab_s_wr = axis_wr.fab;
+    interface fab_mm_rd = i_aximm_rd.fab;
+    //s
+    interface fab_s_wr = i_axis_wr.fab;
     //config
     interface fab_config_rd = config_.bus_ifc.s_rd;
     interface fab_config_wr = config_.bus_ifc.s_wr;
 
 endmodule
-
 
 endpackage

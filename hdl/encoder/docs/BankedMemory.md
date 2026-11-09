@@ -26,7 +26,7 @@ port can accept work in the current cycle. `request()` returns a
 
 - For `L=0`, a read must return `tagged Valid data` from `request()` in the same
   cycle. A write returns `tagged Invalid`.
-- For `L>0`, `request()` returns `tagged Invalid`; read data must be available
+- For `L>0`, `request()` returns `tagged Invalid` and read data must be available
   from `response()` exactly `L` cycles later.
 
 The router tracks the winning client alongside a delayed read in an `L`-stage
@@ -62,7 +62,7 @@ win together. Requests to different banks issue independently, including the
 
 Each client has at most one read in flight and one response skid register. A
 return can bypass that register directly into a simultaneous `response()`
-call; otherwise it occupies the register until consumed. No response FIFO is
+call. Otherwise it occupies the register until consumed. No response FIFO is
 instantiated.
 
 While a read response is outstanding, writes remain eligible if there is no
@@ -160,4 +160,4 @@ BankedMemoryAccessor_ifc#(5, 4, 32, 4) memory <-
 ```
 
 This is a four-bank, dual-port-per-bank, five-client router. `C=P+3` only
-changes how often conflicts occur; it does not select a queued architecture.
+changes how often conflicts occur and does not select a queued architecture.

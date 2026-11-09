@@ -12,9 +12,9 @@ typedef enum {
 } BankedMemoryMap_t deriving(Bits, Eq, FShow);
 
 typedef struct {
-    Integer address_base;
-    Integer memory_size;
-    Integer bank_depth;
+    Integer           address_base;
+    Integer           memory_size;
+    Integer           bank_depth;
     BankedMemoryMap_t mapping;
 } BankedMemoryConfig_t;
 
@@ -22,7 +22,7 @@ typedef struct {
     Bit#(aw) address;
     Bit#(dw) data;
     Bit#(mw) write_mask;
-    Bool write;
+    Bool     write;
 } BankedMemoryRequest_t#(
     numeric type aw,
     numeric type dw,
@@ -31,7 +31,7 @@ typedef struct {
 
 typedef struct {
     Bit#(TLog#(n_banks)) bank;
-    Bit#(bank_aw) address;
+    Bit#(bank_aw)        address;
 } BankedMemoryAccess_t#(
     numeric type n_banks,
     numeric type bank_aw
@@ -122,8 +122,8 @@ module mkBankedAddressMapper#(
     endmethod
 
     method BankedMemoryAccess_t#(n_banks, bank_aw) map_address(Bit#(aw) address);
-        Bit#(TAdd#(aw, 1)) offset = zeroExtend(address) - fromInteger(cfg.address_base);
-        Bit#(TAdd#(aw, 1)) bank = 0;
+        Bit#(TAdd#(aw, 1)) offset        = zeroExtend(address) - fromInteger(cfg.address_base);
+        Bit#(TAdd#(aw, 1)) bank          = 0;
         Bit#(TAdd#(aw, 1)) local_address = 0;
 
         if(cfg.mapping == BANK_MAP_INTERLEAVED) begin
@@ -174,7 +174,8 @@ endmodule
 /* Combinational-read inferred memory with write masks. */
 module mkBankedMemoryLUTRAM1PortBE(
         BankedMemoryPort_ifc#(1, 0, aw, dw, mw)
-    ) provisos(
+    )
+    provisos(
         Div#(dw, mw, chunk_w),
         Mul#(chunk_w, mw, dw)
     );
@@ -184,7 +185,7 @@ module mkBankedMemoryLUTRAM1PortBE(
     function Bit#(dw) merge_write(Bit#(dw) old_data, Bit#(dw) new_data, Bit#(mw) write_mask);
         Vector#(mw, Bit#(chunk_w)) old_chunks = unpack(old_data);
         Vector#(mw, Bit#(chunk_w)) new_chunks = unpack(new_data);
-        Vector#(mw, Bit#(chunk_w)) result = old_chunks;
+        Vector#(mw, Bit#(chunk_w)) result     = old_chunks;
         for(Integer chunk = 0; chunk < valueof(mw); chunk = chunk + 1) begin
             if(write_mask[chunk] == 1)
                 result[chunk] = new_chunks[chunk];
@@ -401,8 +402,8 @@ module mkBankedMemoryAccessor#(
     Vector#(n_clients, Reg#(Bool)) rg_read_busy <- replicateM(mkReg(False));
     Vector#(n_clients, Reg#(Maybe#(Bit#(dw)))) rg_response <-
         replicateM(mkReg(tagged Invalid));
-    Vector#(n_clients, RWire#(Bit#(dw))) w_returned_data <- replicateM(mkRWire);
-    Vector#(n_clients, PulseWire) pw_response_taken <- replicateM(mkPulseWire);
+    Vector#(n_clients, RWire#(Bit#(dw))) w_returned_data   <- replicateM(mkRWire);
+    Vector#(n_clients, PulseWire)        pw_response_taken <- replicateM(mkPulseWire);
 
     Vector#(n_banks, Reg#(BankedMemoryClientId_t#(n_clients))) rg_next_client <- replicateM(mkReg(0));
     Vector#(n_banks, Vector#(n_memory_ports, Vector#(read_latency,
@@ -427,8 +428,8 @@ module mkBankedMemoryAccessor#(
     rule r_route_requests;
         Vector#(n_clients, Maybe#(BankedMemoryRequest_t#(aw, dw, mw))) active_request =
             replicate(tagged Invalid);
-        Vector#(n_clients, Bool) granted = replicate(False);
-        Vector#(n_clients, Bool) issued_read = replicate(False);
+        Vector#(n_clients, Bool)             granted       = replicate(False);
+        Vector#(n_clients, Bool)             issued_read   = replicate(False);
         Vector#(n_clients, Maybe#(Bit#(dw))) returned_data = replicate(tagged Invalid);
 
         for(Integer c = 0; c < valueof(n_clients); c = c + 1) begin
@@ -437,7 +438,7 @@ module mkBankedMemoryAccessor#(
         end
 
         for(Integer b = 0; b < valueof(n_banks); b = b + 1) begin
-            BankedMemoryClientId_t#(n_clients) start = rg_next_client[b];
+            BankedMemoryClientId_t#(n_clients)         start        = rg_next_client[b];
             Maybe#(BankedMemoryClientId_t#(n_clients)) final_winner = tagged Invalid;
 
             for(Integer p = 0; p < valueof(n_memory_ports); p = p + 1) begin
@@ -445,7 +446,7 @@ module mkBankedMemoryAccessor#(
 
                 if(memory[b].port[p].request_ready) begin
                     for(Integer offset = 0; offset < valueof(n_clients); offset = offset + 1) begin
-                        let client = add_wrapped_client(start, offset);
+                        let client  = add_wrapped_client(start, offset);
                         let request = active_request[client];
                         if(!isValid(selected) && !granted[client]) begin
                             if(request matches tagged Valid .req &&&
@@ -459,7 +460,7 @@ module mkBankedMemoryAccessor#(
                 end
 
                 if(selected matches tagged Valid .client) begin
-                    let req = fromMaybe(?, active_request[client]);
+                    let req    = fromMaybe(?, active_request[client]);
                     let access = i_mapper.map_address(req.address);
                     BankedMemoryRequest_t#(bank_aw, dw, mw) bank_request = BankedMemoryRequest_t {
                         address   : access.address,

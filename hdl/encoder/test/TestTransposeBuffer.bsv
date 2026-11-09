@@ -14,13 +14,13 @@ import TestHelper :: *;
 import SimRAM_AXI :: *;
 import TransposeBuffer :: *;
 
-module [Module] mkTestTransposeBuffer(TestHandler);
+module [Module] mkTestTransposeBuffer(TestHandler_ifc);
 
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
-    let t1 <- test;
-    let t2 <- testOpt;
+    let t1 <- mkTestCase;
+    let t2 <- mkTestCaseOpt;
 
     Stmt s = seq
         print_s("Testing mkTransposeBuffer...", BLUE);
@@ -31,19 +31,20 @@ module [Module] mkTestTransposeBuffer(TestHandler);
         while(!t2.done()) action endaction
     endseq;
 
-    FSM testFSM <- mkFSM(s);
+    FSM i_test_fsm <- mkFSM(s);
 
     method Action go();
-        testFSM.start();
+        i_test_fsm.start();
     endmethod
 
     method Bool done();
-        return testFSM.done();
+        return i_test_fsm.done();
     endmethod
 
 endmodule
 
-module [Module] test(TestHandler) provisos(
+module [Module] mkTestCase(TestHandler_ifc)
+    provisos(
         NumAlias#(8, mcu_w),
         NumAlias#(8, mcu_h),
         Mul#(mcu_w, mcu_h, pixels_in_mcu)
@@ -54,12 +55,12 @@ module [Module] test(TestHandler) provisos(
 
     TransposeBuffer_ifc#(Int#(16), mcu_w, mcu_h) dut <- mkTransposeBuffer(False);
 
-    Reg#(UInt#(32)) rg_iter         <- mkReg(0);
-    Reg#(Bit#(32))  rg_count_in     <- mkReg(0);
-    Reg#(Bit#(32))  rg_count_out    <- mkReg(0);
-    
-    Reg#(DU_t#(Int#(16), mcu_w, mcu_h)) rg_input_mcu     <- mkRegU;
-    Reg#(DU_t#(Int#(16), mcu_h, mcu_w)) rg_output_mcu    <- mkRegU;
+    Reg#(UInt#(32)) rg_iter      <- mkReg(0);
+    Reg#(Bit#(32))  rg_count_in  <- mkReg(0);
+    Reg#(Bit#(32))  rg_count_out <- mkReg(0);
+
+    Reg#(DU_t#(Int#(16), mcu_w, mcu_h)) rg_input_mcu  <- mkRegU;
+    Reg#(DU_t#(Int#(16), mcu_h, mcu_w)) rg_output_mcu <- mkRegU;
 
     Stmt s = seq
         while(rg_iter < 10) seq
@@ -74,7 +75,7 @@ module [Module] test(TestHandler) provisos(
                 end
                 rg_input_mcu <= DU_t { block: block };
             endaction
-            
+
             action
                 print_du(rg_input_mcu, "Input MCU", YELLOW);
             endaction
@@ -93,11 +94,11 @@ module [Module] test(TestHandler) provisos(
                     let v <- dut.transposed.get();
                     let x = rg_count_out % fromInteger(valueof(mcu_h));
                     let y = rg_count_out / fromInteger(valueof(mcu_h));
-                    
+
                     let block = rg_output_mcu.block;
                     block[y][x] = v;
                     rg_output_mcu <= DU_t { block: block };
-                    
+
                     rg_count_out <= rg_count_out + 1;
                 endaction
             endpar
@@ -109,10 +110,10 @@ module [Module] test(TestHandler) provisos(
                         //check for transpose: Output[y][x] should equal Input[x][y]
                         if(rg_input_mcu.block[y][x] != rg_output_mcu.block[x][y]) match_ = False;
                     end
-                
+
                 print_du(rg_output_mcu, "Output MCU", CYAN);
                 if(match_) print_s("Iteration Passed", GREEN);
-                else begin 
+                else begin
                     print_s("Iteration Failed", RED);
                 end
             endaction
@@ -122,31 +123,31 @@ module [Module] test(TestHandler) provisos(
         print_s("Finished all tests", BLUE);
     endseq;
 
-    FSM testFSM <- mkFSM(s);
+    FSM i_test_fsm <- mkFSM(s);
 
     method Action go();
-        testFSM.start();
+        i_test_fsm.start();
     endmethod
 
     method Bool done();
-        return testFSM.done();
+        return i_test_fsm.done();
     endmethod
 
 endmodule
 
-module [Module] testOpt(TestHandler);
+module [Module] mkTestCaseOpt(TestHandler_ifc);
 
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
     TransposeBufferOpt_ifc#(Int#(16)) dut <- mkTransposeBufferOpt;
 
-    Reg#(UInt#(32)) rg_iter         <- mkReg(0);
-    Reg#(Bit#(4))   rg_count_in     <- mkReg(0);
-    Reg#(Bit#(4))   rg_count_out    <- mkReg(0);
-    
-    Reg#(DU_t#(Int#(16), 8, 8)) rg_input_mcu     <- mkRegU;
-    Reg#(DU_t#(Int#(16), 8, 8)) rg_output_mcu    <- mkRegU;
+    Reg#(UInt#(32)) rg_iter      <- mkReg(0);
+    Reg#(Bit#(4))   rg_count_in  <- mkReg(0);
+    Reg#(Bit#(4))   rg_count_out <- mkReg(0);
+
+    Reg#(DU_t#(Int#(16), 8, 8)) rg_input_mcu  <- mkRegU;
+    Reg#(DU_t#(Int#(16), 8, 8)) rg_output_mcu <- mkRegU;
 
     Stmt s = seq
         dut.rewind();
@@ -161,7 +162,7 @@ module [Module] testOpt(TestHandler);
                 end
                 rg_input_mcu <= DU_t { block: block };
             endaction
-            
+
             action
                 print_du(rg_input_mcu, "Input MCU", YELLOW);
             endaction
@@ -175,11 +176,11 @@ module [Module] testOpt(TestHandler);
                     rg_count_in <= rg_count_in + 1;
                 endaction
                 while(rg_count_out < 8) action
-                    let v <- dut.transposed.get();
+                    let v     <- dut.transposed.get();
                     let block = rg_output_mcu.block;
                     block[rg_count_out] = v;
                     rg_output_mcu <= DU_t { block: block };
-                    
+
                     rg_count_out <= rg_count_out + 1;
                 endaction
             endpar
@@ -191,7 +192,7 @@ module [Module] testOpt(TestHandler);
                         //check for transpose: Output[y][x] should equal Input[x][y]
                         if(rg_input_mcu.block[y][x] != rg_output_mcu.block[x][y]) match_ = False;
                     end
-                
+
                 print_du(rg_output_mcu, "Output MCU", CYAN);
                 if(match_) print_s("Iteration Passed", GREEN);
                 else print_s("Iteration Failed", RED);
@@ -202,14 +203,14 @@ module [Module] testOpt(TestHandler);
         print_s("Finished all tests", BLUE);
     endseq;
 
-    FSM testFSM <- mkFSM(s);
+    FSM i_test_fsm <- mkFSM(s);
 
     method Action go();
-        testFSM.start();
+        i_test_fsm.start();
     endmethod
 
     method Bool done();
-        return testFSM.done();
+        return i_test_fsm.done();
     endmethod
 
 endmodule

@@ -10,7 +10,7 @@ import PrintUtil :: *;
 import TestHelper :: *;
 import DUDebug :: *;
 
-module [Module] mkTestDUDebug(TestHandler);
+module [Module] mkTestDUDebug(TestHandler_ifc);
 
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
@@ -28,24 +28,23 @@ module [Module] mkTestDUDebug(TestHandler);
             endaction
             while(rg_cnt_o < 128) action
                 let pix <- dut.pix_o.get();
-                if(pix != rg_cnt_o) 
+                if(pix != rg_cnt_o)
                     print_s("PIXEL MISMATCH", RED);
                 rg_cnt_o <= rg_cnt_o + 1;
             endaction
         endpar
     endseq;
 
-    FSM testFSM <- mkFSM(s);
+    FSM i_test_fsm <- mkFSM(s);
 
     method Action go();
-        testFSM.start();
+        i_test_fsm.start();
     endmethod
 
     method Bool done();
-        return testFSM.done();
+        return i_test_fsm.done();
     endmethod
 
 endmodule
-
 
 endpackage

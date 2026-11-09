@@ -11,27 +11,31 @@ import Types :: *;
 import PrintUtil :: *;
 
 function ReadOnly#(t) reg_to_read_only(Reg#(t) r) = regToReadOnly(r);
-    
-interface ClearOnRead#(type t);
+
+interface ClearOnRead_ifc#(type t);
     method ActionValue#(t) _read();
 endinterface
 
-function ClearOnRead#(t) regToClearOnRead(Reg#(t) r) provisos(Bits#(t, _sz), Literal#(t));
-    return (interface ClearOnRead
-        method _read = actionvalue 
+function ClearOnRead_ifc#(t) reg_to_clear_on_read(Reg#(t) r)
+    provisos(
+        Bits#(t, _sz),
+        Literal#(t)
+    );
+    return (interface ClearOnRead_ifc
+        method _read = actionvalue
             r <= 0;
             return r._read;
         endactionvalue;
     endinterface);
 endfunction
 
-function WriteOnly#(a) regToWriteOnly(Reg#(a) r);
+function WriteOnly#(a) reg_to_write_only(Reg#(a) r);
     return (interface WriteOnly
         method _write = r._write;
     endinterface);
 endfunction
 
-function Bool isPowerOf2(Integer v);
+function Bool is_power_of_2(Integer v);
     Bit#(64) x = fromInteger(v);
     return (x > 0) && ((x & (x-1)) == 0);
 endfunction
@@ -60,9 +64,9 @@ function Action read_req_to_bram(BRAMServer#(addr, data) bram_port, addr a);
     endaction
 endfunction
 
-function ActionValue#(UInt#(8)) rand_pix() = actionvalue 
+function ActionValue#(UInt#(8)) rand_pix() = actionvalue
     let v <- rand_i16(0, 255);
-    return truncate(unpack(v)); 
+    return truncate(unpack(v));
 endactionvalue;
 
 /*
@@ -84,16 +88,16 @@ endfunction
 * signed Q1.bits_frac, so values in [-2, 2) keep their integer bit instead of
 * truncating into the fractional field.
 */
-function Int#(bits) scaled_mul_s(Bool sat, Bool round, NumProxy#(bits_frac) _proxy, Int#(bits) val, Integer f)
+function Int#(bits) scaled_mul_s(Bool sat, Bool round, NumProxy_t#(bits_frac) _proxy, Int#(bits) val, Integer f)
     provisos(
         Add#(bits_frac, 2, coeff_bits),
         Add#(bits, coeff_bits, bits_mul)
     );
-    Int#(coeff_bits) f_const    = fromInteger(f);
-    Int#(bits_mul)   prod       = signedMul(val, f_const);
+    Int#(coeff_bits) f_const = fromInteger(f);
+    Int#(bits_mul)   prod    = signedMul(val, f_const);
 
     //rounding: add 2^(bits_frac-1) before shifting
-    Int#(bits_mul) prod_m       = ?;
+    Int#(bits_mul) prod_m = ?;
     if(round) begin
         //saturation only important when rounding is applied
         if(sat)
@@ -111,16 +115,16 @@ endfunction
 * Runtime variant: multiplies Int#(bits) by a runtime Int#(bits_frac) multiplier
 * that was pre-scaled by 2^bits_frac. Rounds and removes the scaling factor.
 */
-function Int#(bits) scaled_mul_rt(Bool sat, Bool round, NumProxy#(bits_frac) _proxy, Int#(bits) val, Int#(bits_frac) f) 
+function Int#(bits) scaled_mul_rt(Bool sat, Bool round, NumProxy_t#(bits_frac) _proxy, Int#(bits) val, Int#(bits_frac) f)
     provisos(
         Add#(bits_frac, 2, coeff_bits),
         Add#(bits, coeff_bits, bits_mul)
     );
-    Int#(coeff_bits) f_const    = signExtend(f);
-    Int#(bits_mul)   prod       = signedMul(val, f_const);
+    Int#(coeff_bits) f_const = signExtend(f);
+    Int#(bits_mul)   prod    = signedMul(val, f_const);
 
     //rounding: add 2^(bits_frac-1) before shifting
-    Int#(bits_mul) prod_m       = ?;
+    Int#(bits_mul) prod_m = ?;
     if(round) begin
         //saturation only important when rounding is applied
         if(sat)
@@ -179,8 +183,8 @@ function ActionValue#(Bit#(w1)) clz_pow2(Bit#(w) value)
     Bit#(w1) result = 0;
     if(value != 0) begin
         for(Integer i = valueof(w1) - 2; i >= 0; i = i - 1) begin
-            Integer b = 2**(i+1)-1;
-            Integer a = 2**i;
+            Integer b            = 2**(i+1)-1;
+            Integer a            = 2**i;
             Bit#(w) intermediate = value[2**(i+1)-1:2**i];
             if(intermediate == 0) begin
                 result[i] = 1;
@@ -204,7 +208,7 @@ function ActionValue#(Bit#(w1)) clz_gen(Bit#(w) value)
         Add#(_c, 1, w1)                 //w1 = _c + 1
     );
     //NOTE: for widths that are not a power of 2,
-    //the output width is 1 too large as the input 
+    //the output width is 1 too large as the input
     //gets extended to the next highest power of 2
     actionvalue
         Bit#(w1) res = 0;
@@ -218,19 +222,22 @@ function ActionValue#(Bit#(w1)) clz_gen(Bit#(w) value)
     endactionvalue
 endfunction
 
-function ActionValue#(Bit#(w1)) flog2(Bit#(w) x) 
+function ActionValue#(Bit#(w1)) flog2(Bit#(w) x)
     provisos(
         Add#(w, a__, TExp#(TLog#(w))),
         Add#(TLog#(w), 1, w1)
     );
     actionvalue
-        let lz <- clz_gen(x);
+        let      lz  <- clz_gen(x);
         Bit#(w1) res = fromInteger(valueof(w)) - lz - 1;
         return res;
     endactionvalue
 endfunction
 
-function Action print_du(DU_t#(t, w, h) mcu, String name, TermColor c) provisos(FShow#(t));
+function Action print_du(DU_t#(t, w, h) mcu, String name, TermColor c)
+    provisos(
+        FShow#(t)
+    );
     action
         print_mod_pre_color_t_s(name, c);
         for(Integer y=0; y<valueof(h); y=y+1) begin
@@ -251,7 +258,7 @@ endfunction
 
 function Put#(t) guard_put(Put#(t) sink, Bool cond);
     return (interface Put;
-        method put if (cond) = sink.put;
+        method put if(cond) = sink.put;
     endinterface);
 endfunction
 

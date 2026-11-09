@@ -1,10 +1,10 @@
 package BlueJPEGTestHelper;
 
 import StmtFSM :: *;
-import PrintUtil :: *;
-
 import BlueCSRCore :: *;
 import BlueCSRTb :: *;
+
+import PrintUtil :: *;
 
 function Action bjpeg_expect_wr_ok(BlueCSRTbAccessor_ifc#(32) cfg_acc);
     action
@@ -25,17 +25,17 @@ function Action bjpeg_expect(Bool cond, String msg);
     endaction
 endfunction
 
-//poll STATUS.ready until set (default table initialisation complete).
+//poll STATUS.ready until set (default table initialisation complete)
 function Stmt bjpeg_wait_tables_ready(
     BlueCSRTbAccessor_ifc#(32) cfg_acc,
     Reg#(Bit#(32)) rg_rsp);
     return seq
         rg_rsp <= 0;
-        while (!unpack(rg_rsp[0])) seq
+        while(!unpack(rg_rsp[0])) seq
             cfg_acc.read_reg_req("STS");
             action
-                let sts_rsp <- cfg_acc.read_reg_rsp();
-                let rdy_bit <- cfg_acc.field_bit("STS", "RDY");
+                let      sts_rsp  <- cfg_acc.read_reg_rsp();
+                let      rdy_bit  <- cfg_acc.field_bit("STS", "RDY");
                 Bit#(32) sts_data = tpl_1(sts_rsp);
                 rg_rsp <= zeroExtend(sts_data[rdy_bit]);
             endaction
@@ -44,7 +44,7 @@ function Stmt bjpeg_wait_tables_ready(
     endseq;
 endfunction
 
-//trigger Huffman codegen for htt_val and wait until STATUS.codegen_busy clears.
+//trigger Huffman codegen for htt_val and wait until STATUS.codegen_busy clears
 function Stmt bjpeg_trigger_codegen(
     BlueCSRTbAccessor_ifc#(32) cfg_acc,
     Reg#(Bit#(32)) rg_rsp,
@@ -58,11 +58,11 @@ function Stmt bjpeg_trigger_codegen(
             let _ <- cfg_acc.write_reg_rsp();
         endaction
         rg_rsp <= 1;
-        while (unpack(rg_rsp[0])) seq
+        while(unpack(rg_rsp[0])) seq
             cfg_acc.read_reg_req("STS");
             action
-                let sts_rsp <- cfg_acc.read_reg_rsp();
-                let cgb_bit <- cfg_acc.field_bit("STS", "CGB");
+                let      sts_rsp  <- cfg_acc.read_reg_rsp();
+                let      cgb_bit  <- cfg_acc.field_bit("STS", "CGB");
                 Bit#(32) sts_data = tpl_1(sts_rsp);
                 rg_rsp <= zeroExtend(sts_data[cgb_bit]);
             endaction
@@ -70,18 +70,18 @@ function Stmt bjpeg_trigger_codegen(
     endseq;
 endfunction
 
-//poll STATUS.done until set (or rg_finished already True), then assert rg_finished.
+//poll STATUS.done until set (or rg_finished already True), then assert rg_finished
 function Stmt bjpeg_poll_done(
     BlueCSRTbAccessor_ifc#(32) cfg_acc,
     Reg#(Bit#(32)) rg_rsp,
     Reg#(Bool) rg_finished);
     return seq
         rg_rsp <= 0;
-        while (!unpack(rg_rsp[0])) seq
+        while(!unpack(rg_rsp[0])) seq
             cfg_acc.read_reg_req("STS");
             action
-                let sts_rsp <- cfg_acc.read_reg_rsp();
-                let done_bit <- cfg_acc.field_bit("STS", "DONE");
+                let      sts_rsp  <- cfg_acc.read_reg_rsp();
+                let      done_bit <- cfg_acc.field_bit("STS", "DONE");
                 Bit#(32) sts_data = tpl_1(sts_rsp);
                 rg_rsp <= zeroExtend(sts_data[done_bit]);
             endaction

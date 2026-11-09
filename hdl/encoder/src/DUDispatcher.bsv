@@ -14,7 +14,7 @@ interface DUDispatcher_ifc;
     interface Get#(UInt#(8)) pix;
 endinterface
 
-//Dispatch one 8x8 DU per component in Y, Cb, Cr order.
+//dispatch one 8x8 DU per component in Y, Cb, Cr order
 
 module mkDUDispatcher(DUDispatcher_ifc);
 
@@ -39,12 +39,12 @@ module mkDUDispatcher(DUDispatcher_ifc);
         action
             f_out.enq(val);
             rg_count <= rg_count + 1;
-            if (rg_count == 63)
+            if(rg_count == 63)
                 advance_phase();
         endaction
     endfunction
 
-    //Buffer chroma while the splitter supplies the corresponding luma DU.
+    //buffer chroma while the splitter supplies the corresponding luma DU
     rule r_dispatch_cb (is_cb_phase);
         fdispatch(f_cb.first);
         f_cb.deq;

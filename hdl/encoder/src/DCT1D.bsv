@@ -120,7 +120,7 @@ endfunction
 
 function Vector#(8, Int#(bits)) aan_stage3(
     Bool safe_arith,
-    NumProxy#(bits_frac) scale_proxy,
+    NumProxy_t#(bits_frac) scale_proxy,
     AAN_Coeffs_t coeffs,
     Vector#(8, Int#(bits)) d
 )
@@ -144,7 +144,7 @@ endfunction
 
 function Int#(bits) aan_stage3_helper(
     Bool safe_arith,
-    NumProxy#(bits_frac) scale_proxy,
+    NumProxy_t#(bits_frac) scale_proxy,
     AAN_Coeffs_t coeffs,
     Int#(bits) helper2
 )
@@ -188,7 +188,7 @@ endfunction
 function Vector#(8, Int#(bits)) aan_stage6(
     Bool safe_arith,
     Bool scale_out,
-    NumProxy#(bits_frac) scale_proxy,
+    NumProxy_t#(bits_frac) scale_proxy,
     AAN_SCoeffs_t scoeffs,
     Vector#(8, Int#(bits)) f
 )
@@ -243,7 +243,7 @@ function Vector#(8, Int#(bits)) aan_stage6(
 endfunction
 
 
-module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_arith)(DCT1D_ifc#(bits))
+module mkDCT1D#(NumProxy_t#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_arith)(DCT1D_ifc#(bits))
     provisos(
         Add#(bits_frac, 2, coeff_bits), //required for multiplication coefficients > a4, s7
         Add#(bits, coeff_bits, bits_mul)
@@ -251,9 +251,9 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_ari
     //AAN algorithm, without scaling the output there are 5 multiplications total
 
     //maybe revise this later? but implicit control flow logic is nice...
-    Vector#(7, FIFO#(Vector#(8, Int#(bits)))) f_stages <- replicateM(mkPipelineFIFO);
-    FIFO#(Int#(bits)) f_helper2 <- mkPipelineFIFO;
-    FIFO#(Int#(bits)) f_helper3 <- mkPipelineFIFO;
+    Vector#(7, FIFO#(Vector#(8, Int#(bits)))) f_stages  <- replicateM(mkPipelineFIFO);
+    FIFO#(Int#(bits))                         f_helper2 <- mkPipelineFIFO;
+    FIFO#(Int#(bits))                         f_helper3 <- mkPipelineFIFO;
 
     FIFO#(Vector#(8, Int#(bits))) f_out;
 
@@ -262,53 +262,53 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_ari
     else
         f_out <- mkBypassFIFO;
 
-    Real scale = 2 ** fromInteger(valueof(bits_frac));
-    let coeffs  = prepare_coeffs(scale);
-    let scoeffs = prepare_scoeffs(scale);
+    Real scale   = 2 ** fromInteger(valueof(bits_frac));
+    let  coeffs  = prepare_coeffs(scale);
+    let  scoeffs = prepare_scoeffs(scale);
 
     //stage0
-    rule rstage0;
+    rule r_stage0;
         let in = f_stages[0].first; f_stages[0].deq;
         f_stages[1].enq(aan_stage0(safe_arith, in));
     endrule
 
     //stage1
-    rule rstage1;
+    rule r_stage1;
         let b = f_stages[1].first; f_stages[1].deq;
         f_stages[2].enq(aan_stage1(safe_arith, b));
     endrule
 
     //stage2
-    rule rstage2;
+    rule r_stage2;
         let c = f_stages[2].first; f_stages[2].deq;
         f_helper2.enq(aan_stage2_helper(safe_arith, c));
         f_stages[3].enq(aan_stage2(safe_arith, c));
     endrule
 
     //stage3 - multiplications
-    rule rstage3;
+    rule r_stage3;
         //helper stage to separate multiplications from additions
-        let d = f_stages[3].first; f_stages[3].deq;
+        let d       = f_stages[3].first; f_stages[3].deq;
         let helper2 = f_helper2.first; f_helper2.deq;
         f_helper3.enq(aan_stage3_helper(safe_arith, _scale_proxy, coeffs, helper2));
         f_stages[4].enq(aan_stage3(safe_arith, _scale_proxy, coeffs, d));
     endrule
 
     //stage4
-    rule rstage4;
-        let m = f_stages[4].first; f_stages[4].deq;
+    rule r_stage4;
+        let m       = f_stages[4].first; f_stages[4].deq;
         let helper3 = f_helper3.first; f_helper3.deq;
         f_stages[5].enq(aan_stage4(safe_arith, m, helper3));
     endrule
 
     //stage5
-    rule rstage5;
+    rule r_stage5;
         let e = f_stages[5].first; f_stages[5].deq;
         f_stages[6].enq(aan_stage5(safe_arith, e));
     endrule
 
     //stage6
-    rule rstage6;
+    rule r_stage6;
         let f = f_stages[6].first; f_stages[6].deq;
         f_out.enq(aan_stage6(safe_arith, scale_out, _scale_proxy, scoeffs, f));
     endrule
@@ -320,14 +320,14 @@ module mkDCT1D#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_ari
 endmodule
 
 
-module mkDCT1D_rigid#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_arith)(DCT1D_ifc#(bits))
+module mkDCT1D_rigid#(NumProxy_t#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_arith)(DCT1D_ifc#(bits))
     provisos(
         Add#(bits_frac, 2, coeff_bits), //required for multiplication coefficients > a4, s7
         Add#(bits, coeff_bits, bits_mul)
     );
 
-    Vector#(7, Reg#(Vector#(8, Int#(bits))))    rg_stages       <- replicateM(mkRegU);
-    Vector#(7, Reg#(Maybe#(Bit#(0))))           rg_stage_valid;
+    Vector#(7, Reg#(Vector#(8, Int#(bits)))) rg_stages <- replicateM(mkRegU);
+    Vector#(7, Reg#(Maybe#(Bit#(0))))        rg_stage_valid;
 
     //make the first register a DReg to avoid passing bubbles as valid elements
     rg_stage_valid[0] <- mkDReg(tagged Invalid);
@@ -340,9 +340,9 @@ module mkDCT1D_rigid#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool sa
 
     FIFOF#(Vector#(8, Int#(bits))) f_out <- mkFIFOF; //mkPipelineFIFOF;
 
-    Real scale = 2 ** fromInteger(valueof(bits_frac));
-    let coeffs  = prepare_coeffs(scale);
-    let scoeffs = prepare_scoeffs(scale);
+    Real scale   = 2 ** fromInteger(valueof(bits_frac));
+    let  coeffs  = prepare_coeffs(scale);
+    let  scoeffs = prepare_scoeffs(scale);
 
     Wire#(Bool) w_stall <- mkBypassWire;
 
@@ -354,53 +354,53 @@ module mkDCT1D_rigid#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool sa
     endaction;
 
     //first register is DReg for input convenience but during stalls, we have to hold its value manually because of the auto reset
-    rule rhold_stage0 if(w_stall);
+    rule r_hold_stage0 (w_stall);
         rg_stage_valid[0] <= rg_stage_valid[0];
     endrule
 
     for(Integer i = 1; i < 7; i = i + 1) begin
-        rule radvance if(!w_stall);
+        rule r_advance (!w_stall);
             rg_stage_valid[i] <= rg_stage_valid[i-1];
         endrule
     end
 
-    rule rstage0 if(!w_stall);
+    rule r_stage0 (!w_stall);
         rg_stages[1] <= aan_stage0(safe_arith, rg_stages[0]);
     endrule
 
-    rule rstage1 if(!w_stall);
+    rule r_stage1 (!w_stall);
         let b = rg_stages[1];
         rg_stages[2] <= aan_stage1(safe_arith, b);
     endrule
 
-    rule rstage2 if(!w_stall);
+    rule r_stage2 (!w_stall);
         let c = rg_stages[2];
         rg_helper2   <= aan_stage2_helper(safe_arith, c);
         rg_stages[3] <= aan_stage2(safe_arith, c);
     endrule
 
-    rule rstage3 if(!w_stall);
+    rule r_stage3 (!w_stall);
         let d = rg_stages[3];
         rg_helper3   <= aan_stage3_helper(safe_arith, _scale_proxy, coeffs, rg_helper2);
         rg_stages[4] <= aan_stage3(safe_arith, _scale_proxy, coeffs, d);
     endrule
 
-    rule rstage4 if(!w_stall);
+    rule r_stage4 (!w_stall);
         let m = rg_stages[4];
         rg_stages[5] <= aan_stage4(safe_arith, m, rg_helper3);
     endrule
 
-    rule rstage5 if(!w_stall);
+    rule r_stage5 (!w_stall);
         let e = rg_stages[5];
         rg_stages[6] <= aan_stage5(safe_arith, e);
     endrule
 
-    rule rstage6 if(!w_stall &&& rg_stage_valid[6] matches tagged Valid ._t);
+    rule r_stage6 (!w_stall &&& rg_stage_valid[6] matches tagged Valid ._t);
         let f = rg_stages[6];
         f_out.enq(aan_stage6(safe_arith, scale_out, _scale_proxy, scoeffs, f));
     endrule
 
-    rule rstall;
+    rule r_stall;
         w_stall <= !f_out.notFull;
     endrule
 
@@ -412,6 +412,5 @@ module mkDCT1D_rigid#(NumProxy#(bits_frac) _scale_proxy, Bool scale_out, Bool sa
     endinterface
 
 endmodule
-
 
 endpackage

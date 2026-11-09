@@ -9,10 +9,10 @@ import DUDispatcher :: *;
 import TestHelper :: *;
 import Types :: *;
 
-module mkTestDUDispatcher(TestHandler);
+module mkTestDUDispatcher(TestHandler_ifc);
 
-    ChannelSplitter_ifc i_splitter <- mkChannelSplitter;
-    DUDispatcher_ifc i_dispatcher <- mkDUDispatcher;
+    ChannelSplitter_ifc i_splitter   <- mkChannelSplitter;
+    DUDispatcher_ifc    i_dispatcher <- mkDUDispatcher;
     mkConnection(i_splitter.y, i_dispatcher.y);
     mkConnection(i_splitter.cb, i_dispatcher.cb);
     mkConnection(i_splitter.cr, i_dispatcher.cr);
@@ -41,13 +41,13 @@ module mkTestDUDispatcher(TestHandler);
             endaction
 
             while(rg_output_count < 384) seq
-                //Pause the consumer across DU boundaries to exercise backpressure.
+                //pause the consumer across DU boundaries to exercise backpressure
                 await(rg_cycles % 8 < 3);
                 action
-                    let actual <- i_dispatcher.pix.get();
-                    UInt#(9) mcu = rg_output_count / 192;
+                    let      actual    <- i_dispatcher.pix.get();
+                    UInt#(9) mcu       = rg_output_count / 192;
                     UInt#(9) component = (rg_output_count % 192) / 64;
-                    UInt#(8) expected = truncate(mcu * 64 + component * 64 + rg_output_count % 64);
+                    UInt#(8) expected  = truncate(mcu * 64 + component * 64 + rg_output_count % 64);
                     if(actual != expected) begin
                         $display("ERROR: dispatcher output %0d: got %0d, expected %0d",
                             rg_output_count, actual, expected);
@@ -60,12 +60,12 @@ module mkTestDUDispatcher(TestHandler);
         $display("DU dispatcher passed: two MCUs with output backpressure");
     endseq;
 
-    FSM fsm_test <- mkFSM(test);
+    FSM i_fsm_test <- mkFSM(test);
     method Action go();
-        fsm_test.start();
+        i_fsm_test.start();
     endmethod
     method Bool done();
-        return fsm_test.done();
+        return i_fsm_test.done();
     endmethod
 
 endmodule

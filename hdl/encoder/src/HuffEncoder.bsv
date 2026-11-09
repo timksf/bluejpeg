@@ -13,7 +13,7 @@ import Util :: *;
 typedef struct {
     PixType_t mode;
     Bool      is_last;
-} HuffDUMeta_t deriving(Eq, Bits, FShow);
+} HuffDUMeta_t deriving(Bits, Eq, FShow);
 
 typedef struct {
     Bool       is_dc;
@@ -21,7 +21,7 @@ typedef struct {
     Bit#(5)    mag;
     Bit#(bits) extra;
     Bool       last;
-} HuffPending_t#(numeric type bits) deriving(Eq, Bits, FShow);
+} HuffPending_t#(numeric type bits) deriving(Bits, Eq, FShow);
 
 interface HuffEncoder_ifc#(numeric type bits);
     interface Put#(HuffDUMeta_t) du_meta;
@@ -38,31 +38,31 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
     provisos(
         Add#(1, a__, bits), //bits >= 1
         Add#(b__, bits, 32), //bits <= 32 (for zeroExtend to Bit#(32))
-        Add#(bits, c__, TExp#(TLog#(bits))),  // for flog2/clz_gen
-        Add#(d__, 5, TAdd#(TLog#(bits), 1))   // for truncate in calc_magnitude
+        Add#(bits, c__, TExp#(TLog#(bits))),  //for flog2/clz_gen
+        Add#(d__, 5, TAdd#(TLog#(bits), 1))   //for truncate in calc_magnitude
     );
 
-    FIFO#(RLETag_t#(bits))      f_in        <- mkBypassFIFO;
-    FIFO#(HuffCode_t)           f_out       <- mkFIFO;
-    FIFO#(HuffPending_t#(bits)) f_pending   <- mkPipelineFIFO;
+    FIFO#(RLETag_t#(bits))      f_in      <- mkBypassFIFO;
+    FIFO#(HuffCode_t)           f_out     <- mkFIFO;
+    FIFO#(HuffPending_t#(bits)) f_pending <- mkPipelineFIFO;
 
     FIFO#(HuffDUMeta_t) f_meta       <- mkSizedFIFO(4);
     Reg#(Bit#(6))       rg_coeff_idx <- mkReg(0);
 
-    //Registered table addresses split symbol generation from LUTRAM lookup.
-    Reg#(HuffCodeDCIdx_t)     rg_dc_req <- mkReg(HuffCodeDCIdx_t { pt: Luma, idx: 0 });
-    Wire#(HuffTableEntry_t)   w_dc_resp <- mkWire;
-    Reg#(HuffCodeACIdx_t)     rg_ac_req <- mkReg(HuffCodeACIdx_t { pt: Luma, idx: 0 });
-    Wire#(HuffTableEntry_t)   w_ac_resp <- mkWire;
+    //registered table addresses split symbol generation from LUTRAM lookup
+    Reg#(HuffCodeDCIdx_t)   rg_dc_req <- mkReg(HuffCodeDCIdx_t { pt: Luma, idx: 0 });
+    Wire#(HuffTableEntry_t) w_dc_resp <- mkWire;
+    Reg#(HuffCodeACIdx_t)   rg_ac_req <- mkReg(HuffCodeACIdx_t { pt: Luma, idx: 0 });
+    Wire#(HuffTableEntry_t) w_ac_resp <- mkWire;
 
     //calculate magnitude (number of significant bits) of a signed value
     //this is equivalent to floor(log2(abs(val))) + 1 for val != 0
     //for val == 0, abs_bits is all zeros so no bit matches and mag = 0
     function Bit#(5) calc_magnitude(Int#(bits) val);
         Bit#(bits) abs_val = pack(abs(val));
-        Bit#(5) mag = 0;
-        for (Integer i = 0; i < valueOf(bits); i = i + 1)
-            if (abs_val[i] == 1) mag = fromInteger(i + 1);
+        Bit#(5)    mag     = 0;
+        for(Integer i = 0; i < valueOf(bits); i = i + 1)
+            if(abs_val[i] == 1) mag = fromInteger(i + 1);
         return mag;
     endfunction
 
@@ -75,7 +75,7 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
     endfunction
 
     rule r_prepare;
-        let tag = f_in.first; f_in.deq;
+        let tag  = f_in.first; f_in.deq;
         let meta = f_meta.first;
 
         HuffPending_t#(bits) pending = HuffPending_t {
@@ -87,7 +87,7 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         };
         Bit#(7) next_idx = 0;
 
-        case (tag) matches
+        case(tag) matches
             tagged DCDiff .val: begin
                 Bit#(5) mag = calc_magnitude(val);
                 rg_dc_req <= HuffCodeDCIdx_t { pt: meta.mode, idx: truncate(mag) };
@@ -100,7 +100,7 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
 
             tagged AC .ac: begin
                 Bit#(5) mag_ac = calc_magnitude(ac.val);
-                Bit#(4) mag4 = truncate(mag_ac);
+                Bit#(4) mag4   = truncate(mag_ac);
                 rg_ac_req <= HuffCodeACIdx_t { pt: meta.mode, idx: {ac.run, mag4} };
                 pending.has_extra = True;
                 pending.mag = mag_ac;
@@ -119,14 +119,14 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
             end
         endcase
 
-        //detect end-of-block: EOB always ends a block;
+        //detect end-of-block: EOB always ends a block
         //AC/ZRL end a block if the coefficient index wraps past 63
-        Bool is_eob = (tag matches tagged EOB ? True : False);
+        Bool is_eob          = (tag matches tagged EOB ? True : False);
         Bool is_end_of_block = is_eob || (next_idx >= 64);
 
         pending.last = meta.is_last && is_end_of_block;
 
-        if (is_end_of_block) f_meta.deq;
+        if(is_end_of_block) f_meta.deq;
 
         rg_coeff_idx <= truncate(next_idx); //truncation wraps >= 64 to 0
         f_pending.enq(pending);
@@ -142,9 +142,9 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
             last: pending.last
         };
 
-        if (pending.has_extra) begin
+        if(pending.has_extra) begin
             Bit#(32) code_mask = (1 << pending.mag) - 1;
-            Bit#(32) extra = zeroExtend(pending.extra) & code_mask;
+            Bit#(32) extra     = zeroExtend(pending.extra) & code_mask;
             out.huffcode = (zeroExtend(entry.code) << pending.mag) | extra;
             out.huffsize = entry.size + pending.mag;
         end

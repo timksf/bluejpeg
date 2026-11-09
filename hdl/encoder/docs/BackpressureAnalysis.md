@@ -21,7 +21,7 @@ PERF0 counts only S_RUNNING: it excludes initialization, code generation, and th
 
 ## Where data waits (double-buffered run)
 
-A blocked cycle means the source output FIFO is nonempty but is not dequeued in that cycle. Counts overlap across stages; do not add them to estimate total latency.
+A blocked cycle means the source output FIFO is nonempty but is not dequeued in that cycle. Counts overlap across stages, so do not add them to estimate total latency.
 
 | Boundary | Items transferred | Blocked cycles |
 |---|---:|---:|
@@ -60,14 +60,14 @@ Even after restoring one coefficient/sample per cycle, the shared DUProc is a st
 | 4:2:0 | 1.5 | 2/3 pixel/cycle |
 | Grayscale | 1 | 1 pixel/cycle |
 
-These are architectural ceilings, not measured results for the other modes. Sustained 4:4:4 at one image pixel/cycle requires at least three component samples/cycle of processing capacity (parallel lanes or appropriate faster-clock processing throughout the relevant path). A deeper input buffer alone absorbs finite bursts; it cannot compensate indefinitely for a lower average processing rate.
+These are architectural ceilings, not measured results for the other modes. Sustained 4:4:4 at one image pixel/cycle requires at least three component samples/cycle of processing capacity (parallel lanes or appropriate faster-clock processing throughout the relevant path). A deeper input buffer alone absorbs finite bursts, but it cannot compensate indefinitely for a lower average processing rate.
 
 For the UART context, replaying the measured double-buffered input service against one pixel arriving each cycle for this one frame gives a peak backlog of 29,181 pixels (87,543 bytes at 24 bits/pixel) ahead of the DUT. Single buffering gives 30,717 pixels. These are trace-specific finite-frame estimates with the same downstream behavior and timing origin, not universal FIFO sizing guarantees. At actual UART rates, the backlog must be recomputed with the actual arrival spacing.
 
 ## Method and limits
 
-Used normal Bluesim make sim RUN_TEST=TestBlueJPEG, with -keep-fires and VCD output. analyze.py samples rule-firing, AXI handshake and FIFO EMPTY_N/DEQ signals once per rising edge; summarize.py produces JSON. Checked 36,864 input transfers, 110,592 DU samples/coefficients, 5,479 symbols/codewords, and 3,527 output bytes. FIFO transfers with EMPTY_N low were zero at all sampled boundaries, and waveform S_RUNNING counts exactly match PERF0.
+Used normal Bluesim make sim RUN_TEST=TestBlueJPEG, with -keep-fires and VCD output. analyze.py samples rule-firing, AXI handshake and FIFO EMPTY_N/DEQ signals once per rising edge, and summarize.py produces JSON. Checked 36,864 input transfers, 110,592 DU samples/coefficients, 5,479 symbols/codewords, and 3,527 output bytes. FIFO transfers with EMPTY_N low were zero at all sampled boundaries, and waveform S_RUNNING counts exactly match PERF0.
 
-The test source stays valid continuously during the measured input interval; the test output is continuously consumed without deliberate sink throttling. Results describe this compressible sample and present default tables. More detailed/noisy images and different tables can put much greater pressure on RLE/Huffman/byte output, especially after the ZigZag limit is fixed. Zero waiting here does not prove those stages can sustain every possible input at a higher producer rate.
+The test source stays valid continuously during the measured input interval, and the test output is continuously consumed without deliberate sink throttling. Results describe this compressible sample and present default tables. More detailed/noisy images and different tables can put much greater pressure on RLE/Huffman/byte output, especially after the ZigZag limit is fixed. Zero waiting here does not prove those stages can sustain every possible input at a higher producer rate.
 
-Artifacts in this directory: double.log, single.log, double.sched, double.json, single.json, analyze.py, summarize.py, full VCDs and compact *.vcd.npz traces. Source snapshot is hdl/encoder; its final test configuration is single buffering. The original workspace remains unchanged by this analysis.
+Artifacts in this directory: double.log, single.log, double.sched, double.json, single.json, analyze.py, summarize.py, full VCDs and compact *.vcd.npz traces. Source snapshot is hdl/encoder, and its final test configuration is single buffering. The original workspace remains unchanged by this analysis.

@@ -16,7 +16,7 @@ import DCT2D_Optimized :: *;
 import ImageTilingEngine :: *;
 
 module [Module] mkDCT1D_16b(DCT1D_ifc#(16));
-    NumProxy#(12) f_scale = ?;
+    NumProxy_t#(12) f_scale = ?;
     DCT1D_ifc#(16) ifc();
     mkDCT1D#(f_scale, False, True) __int(ifc);
     return ifc;
@@ -24,7 +24,7 @@ endmodule
 
 
 module [Module] mkDCT1D_12b(DCT1D_ifc#(12));
-    NumProxy#(12) f_scale = ?;
+    NumProxy_t#(12) f_scale = ?;
     DCT1D_ifc#(12) ifc();
     mkDCT1D#(f_scale, False, True) __int(ifc);
     return ifc;
@@ -32,21 +32,21 @@ endmodule
 
 
 module [Module] mkDCT1D_12b_rigid(DCT1D_ifc#(12));
-    NumProxy#(12) f_scale = ?;
+    NumProxy_t#(12) f_scale = ?;
     DCT1D_ifc#(12) ifc();
     mkDCT1D_rigid#(f_scale, False, False) __int(ifc);
     return ifc;
 endmodule
 
 module [Module] mkDCT2D_Optimized_12b(DCT2DOpt_ifc#(12));
-    NumProxy#(8) f_scale = ?;
+    NumProxy_t#(8) f_scale = ?;
     DCT2DOpt_ifc#(12) ifc();
     mkDCT2D_Opt#(f_scale, False, True, False, True) __int(ifc);
     return ifc;
 endmodule
 
 module [Module] mkDCT2D_Optimized_rigid(DCT2DOptRigid_ifc#(8));
-    NumProxy#(12) f_scale = ?;
+    NumProxy_t#(12) f_scale = ?;
     DCT2DOptRigid_ifc#(8) ifc();
     mkDCT2D_Opt_rigid#(f_scale, False, True, False, False) __int(ifc);
     return ifc;
@@ -54,7 +54,7 @@ endmodule
 
 
 module [Module] mkDCT2D_Optimized_14b(DCT2DOpt_ifc#(14));
-    NumProxy#(12) f_scale = ?;
+    NumProxy_t#(12) f_scale = ?;
     DCT2DOpt_ifc#(14) ifc();
     mkDCT2D_Opt#(f_scale, False, True, False, True) __int(ifc);
     return ifc;
@@ -78,18 +78,18 @@ module [Module] mkRLE_16(RLE_ifc#(16));
     return ifc;
 endmodule
 
-module [Module] mkDUProc_16b(DUProcLegacy_t#(8, 16));
+module [Module] mkDUProc_16b(DUProcLegacy_ifc#(8, 16));
 
-    //this module [Module] is used for utilization analysis
+    //this module is used for utilization analysis
     //for simplicity, use the same clock for the DCT
 
     let clk <- exposeCurrentClock;
     let rst <- exposeCurrentReset;
 
-    NumProxy#(12) dct_scale     = ?;
-    NumProxy#(12) quant_scale   = ?;
+    NumProxy_t#(12) dct_scale   = ?;
+    NumProxy_t#(12) quant_scale = ?;
 
-    let mcuproc_cfg = DUProcCfg {
+    let mcuproc_cfg = DUProcCfg_t {
         slow_clock       : clk,
         slow_reset       : rst,
         buffer_in        : True,
@@ -101,21 +101,21 @@ module [Module] mkDUProc_16b(DUProcLegacy_t#(8, 16));
         dct_safe_arith   : False
     };
 
-    DUProcLegacy_t#(8, 16) ifc();
+    DUProcLegacy_ifc#(8, 16) ifc();
     mkDUProc#(mcuproc_cfg) __int(ifc);
     return ifc;
 endmodule
 
 
-module [Module] mkDUProc_Opt_8b(DUProc_t#(8));
+module [Module] mkDUProc_Opt_8b(DUProc_ifc#(8));
 
     let clk <- exposeCurrentClock;
     let rst <- exposeCurrentReset;
 
-    NumProxy#(12) dct_scale     = ?;
-    NumProxy#(12) quant_scale   = ?;
+    NumProxy_t#(12) dct_scale   = ?;
+    NumProxy_t#(12) quant_scale = ?;
 
-    let du_proc_cfg = DUProcCfg {
+    let du_proc_cfg = DUProcCfg_t {
         slow_clock       : clk,
         slow_reset       : rst,
         buffer_in        : True,
@@ -127,7 +127,7 @@ module [Module] mkDUProc_Opt_8b(DUProc_t#(8));
         dct_safe_arith   : False
     };
 
-    DUProc_t#(8) ifc();
+    DUProc_ifc#(8) ifc();
     mkDUProc_Opt#(du_proc_cfg) __int(ifc);
     return ifc;
 endmodule
@@ -140,7 +140,7 @@ endmodule
 
 
 module [Module] mkImageTilingEngine_1920(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
-    NumProxy#(1920) max_width = ?;
+    NumProxy_t#(1920) max_width = ?;
     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
     mkImageTilingEngine#(max_width, False) __int(ifc);
     return ifc;
@@ -148,7 +148,7 @@ endmodule
 
 // (* synthesize *)
 // module [Module] mkImageTilingEngine_2560(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
-//     NumProxy#(2560) max_width = ?;
+//     NumProxy_t#(2560) max_width = ?;
 //     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
 //     mkImageTilingEngine#(max_width, False) __int(ifc);
 //     return ifc;
@@ -156,7 +156,7 @@ endmodule
 
 // (* synthesize *)
 // module [Module] mkImageTilingEngine_3840(ImageTilingEngine_ifc#(Bit#(8), 8, 8));
-//     NumProxy#(3840) max_width = ?;
+//     NumProxy_t#(3840) max_width = ?;
 //     ImageTilingEngine_ifc#(Bit#(8), 8, 8) ifc();
 //     mkImageTilingEngine#(max_width, False) __int(ifc);
 //     return ifc;
@@ -171,9 +171,9 @@ module [Module] mkBlueJPEGTop_1920_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     let dct_reset <- mkResetSync(2, True, dct_clock);
 
-    NumProxy#(1920) maximw = ?;
-    NumProxy#(12)   fscale = ?;
-    NumProxy#(8)    pixel_width = ?;
+    NumProxy_t#(1920) maximw      = ?;
+    NumProxy_t#(12)   fscale      = ?;
+    NumProxy_t#(8)    pixel_width = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
         slow_clock          : dct_clock,
@@ -202,9 +202,9 @@ module [Module] mkBlueJPEGTop_2560_12_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     let dct_reset <- mkResetSync(2, True, dct_clock);
 
-    NumProxy#(2560) maximw = ?;
-    NumProxy#(12)   fscale = ?;
-    NumProxy#(8)    pixel_width = ?;
+    NumProxy_t#(2560) maximw      = ?;
+    NumProxy_t#(12)   fscale      = ?;
+    NumProxy_t#(8)    pixel_width = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
         slow_clock          : dct_clock,
@@ -233,9 +233,9 @@ module [Module] mkBlueJPEGGrayTop_1920_12_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     let dct_reset <- mkResetSync(2, True, dct_clock);
 
-    NumProxy#(1920) maximw = ?;
-    NumProxy#(12)   fscale = ?;
-    NumProxy#(8)    pixel_width = ?;
+    NumProxy_t#(1920) maximw      = ?;
+    NumProxy_t#(12)   fscale      = ?;
+    NumProxy_t#(8)    pixel_width = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
         slow_clock          : dct_clock,
@@ -264,9 +264,9 @@ module [Module] mkBlueJPEGGrayTop_720_12_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     let dct_reset <- mkResetSync(2, True, dct_clock);
 
-    NumProxy#(720) maximw = ?;
-    NumProxy#(12)   fscale = ?;
-    NumProxy#(8)    pixel_width = ?;
+    NumProxy_t#(720) maximw      = ?;
+    NumProxy_t#(12)  fscale      = ?;
+    NumProxy_t#(8)   pixel_width = ?;
 
     let jpeg_cfg = BlueJPEGCfg_t {
         slow_clock          : dct_clock,
@@ -284,6 +284,5 @@ module [Module] mkBlueJPEGGrayTop_720_12_12#(Clock dct_clock)(BlueJPEG_ifc);
 
     return ifc;
 endmodule
-
 
 endpackage

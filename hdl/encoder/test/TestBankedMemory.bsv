@@ -19,8 +19,8 @@ typedef 4 MaskWidth;
 
 module mkTestMemory2(BankedMemoryPort_ifc#(1, 2, 2, DataWidth, 1));
 
-    RegFile#(Bit#(2), Bit#(DataWidth)) i_memory <- mkRegFileFull;
-    Reg#(Bit#(2)) rg_read_address <- mkRegU;
+    RegFile#(Bit#(2), Bit#(DataWidth)) i_memory        <- mkRegFileFull;
+    Reg#(Bit#(2))                      rg_read_address <- mkRegU;
 
     function BankedMemoryPhysicalRWPort_ifc#(2, DataWidth, 1) make_port(
             Integer port_index
@@ -81,7 +81,7 @@ module mkTestBankedMemoryStructural(Empty);
 
 endmodule
 
-module [Module] mkTestBankedMemory(TestHandler);
+module [Module] mkTestBankedMemory(TestHandler_ifc);
 
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
@@ -199,7 +199,7 @@ module [Module] mkTestBankedMemory(TestHandler);
     Reg#(UInt#(32)) rg_cycle      <- mkReg(0);
     Reg#(UInt#(32)) rg_read_start <- mkReg(0);
 
-    Reg#(Bool)                  rg_fairness_active  <- mkReg(False);
+    Reg#(Bool)                 rg_fairness_active  <- mkReg(False);
     Vector#(3, Reg#(UInt#(8))) rg_fairness_accepts <- replicateM(mkReg(0));
 
     function BankedMemoryRequest_t#(addr_w, DataWidth, MaskWidth) write_req(
@@ -496,14 +496,14 @@ module [Module] mkTestBankedMemory(TestHandler);
         print_s("Finished successfully", GREEN);
     endseq;
 
-    FSM test_fsm <- mkFSM(test_seq);
+    FSM i_test_fsm <- mkFSM(test_seq);
 
     method Action go();
-        test_fsm.start();
+        i_test_fsm.start();
     endmethod
 
     method Bool done();
-        return test_fsm.done();
+        return i_test_fsm.done();
     endmethod
 
 endmodule

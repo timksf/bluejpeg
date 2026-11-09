@@ -17,9 +17,9 @@ endinterface
 
 module mkChannelSplitter(ChannelSplitter_ifc);
 
-    FIFO#(UInt#(8)) f_y     <- mkPipelineFIFO;
-    FIFO#(UInt#(8)) f_cb    <- mkPipelineFIFO;
-    FIFO#(UInt#(8)) f_cr    <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_y  <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_cb <- mkPipelineFIFO;
+    FIFO#(UInt#(8)) f_cr <- mkPipelineFIFO;
 
     interface Put pix;
         method Action put(YCbCr_t p);

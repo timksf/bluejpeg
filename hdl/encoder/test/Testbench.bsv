@@ -4,25 +4,25 @@ package Testbench;
 
     import TestHelper :: *;
 
-    // Project Modules
+    //project modules
     import `RUN_TEST :: *;
 
     typedef 1 TestAmount;
 
     (* synthesize *)
     module [Module] mkTestbench();
-        Vector#(TestAmount, TestHandler) testVec;
+        Vector#(TestAmount, TestHandler_ifc) testVec;
         testVec[0] <- `TESTNAME ();
 
-        Reg#(UInt#(32)) testCounter <- mkReg(0);
+        Reg#(UInt#(32)) rg_test_counter <- mkReg(0);
         Stmt s = {
             seq
-                for(testCounter <= 0;
-                    testCounter < fromInteger(valueOf(TestAmount));
-                    testCounter <= testCounter + 1)
+                for(rg_test_counter <= 0;
+                    rg_test_counter < fromInteger(valueOf(TestAmount));
+                    rg_test_counter <= rg_test_counter + 1)
                 seq
-                    testVec[testCounter].go();
-                    await(testVec[testCounter].done());
+                    testVec[rg_test_counter].go();
+                    await(testVec[rg_test_counter].done());
                 endseq
             endseq
         };

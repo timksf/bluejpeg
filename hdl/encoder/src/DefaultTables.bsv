@@ -7,9 +7,7 @@ import BuildVector :: *;
 
 import Types :: *;
 
-//-------------------------------------------------------------------
-// Standard JPEG Quantization tables (Annex K.1, ITU-T T.81)
-//-------------------------------------------------------------------
+//standard JPEG Quantization tables (Annex K.1, ITU-T T.81)
 
 //quantization defaults
 Vector#(64, Integer) std_LUMA_QUANT_c = vec(
@@ -37,7 +35,7 @@ Vector#(64, Integer) std_CHROMA_QUANT_c = vec(
 //AAN scaling factors combined with quantization, evaluated at compile time
 //result: round(2^scale_bits * s[row] * s[col] / q[i])
 //if transposed==True, indices are transposed so the table matches a transposed DCT output
-function Vector#(64, Integer) quant_mult(Vector#(64, Integer) q_table, NumProxy#(scale_bits) p, Bool transposed);
+function Vector#(64, Integer) quant_mult(Vector#(64, Integer) q_table, NumProxy_t#(scale_bits) p, Bool transposed);
     Vector#(8, Real) s = newVector;
     s[0] = 1.0 / (2.0 * sqrt(2.0));
     s[1] = 1.0 / (4.0 * cos(1.0 * pi / 16.0));
@@ -48,8 +46,8 @@ function Vector#(64, Integer) quant_mult(Vector#(64, Integer) q_table, NumProxy#
     s[6] = 1.0 / (4.0 * cos(6.0 * pi / 16.0));
     s[7] = 1.0 / (4.0 * cos(7.0 * pi / 16.0));
 
-    Vector#(64, Integer) res = newVector;
-    Real scale = 2.0 ** fromInteger(valueof(scale_bits));
+    Vector#(64, Integer) res   = newVector;
+    Real                 scale = 2.0 ** fromInteger(valueof(scale_bits));
     for(Integer i=0; i<64; i=i+1) begin
         Integer idx = transposed ? ((i%8)*8 + i/8) : i;
         res[i] = round(scale * s[idx/8] * s[idx%8] / fromInteger(q_table[idx]));
@@ -57,11 +55,9 @@ function Vector#(64, Integer) quant_mult(Vector#(64, Integer) q_table, NumProxy#
     return res;
 endfunction
 
-//-------------------------------------------------------------------
-// Standard JPEG Huffman tables (Annex K.3, ITU-T T.81)
-//-------------------------------------------------------------------
+//standard JPEG Huffman tables (Annex K.3, ITU-T T.81)
 
-// BITS tables (number of codes per code-length 1..16, stored at indices 0..15)
+//BITS tables (number of codes per code-length 1..16, stored at indices 0..15)
 Vector#(16, UInt#(8)) std_dc_luma_bits = vec(
     0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0
 );
@@ -75,10 +71,10 @@ Vector#(16, UInt#(8)) std_ac_chroma_bits = vec(
     0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119
 );
 
-// HUFFVAL: DC tables are simply {0,1,2,...,11}
+//HUFFVAL: DC tables are simply {0,1,2,...,11}
 Vector#(12, UInt#(8)) std_dc_val = vec(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
 
-// HUFFVAL: AC luminance (162 symbols, Table K.5)
+//HUFFVAL: AC luminance (162 symbols, Table K.5)
 UInt#(8) std_ac_luma_val_arr[162] = {
     'h01, 'h02, 'h03, 'h00, 'h04, 'h11, 'h05, 'h12,
     'h21, 'h31, 'h41, 'h06, 'h13, 'h51, 'h61, 'h07,
@@ -104,7 +100,7 @@ UInt#(8) std_ac_luma_val_arr[162] = {
 };
 Vector#(162, UInt#(8)) std_ac_luma_val = arrayToVector(std_ac_luma_val_arr);
 
-// HUFFVAL: AC chrominance (162 symbols, Table K.6)
+//HUFFVAL: AC chrominance (162 symbols, Table K.6)
 UInt#(8) std_ac_chroma_val_arr[162] = {
     'h00, 'h01, 'h02, 'h03, 'h11, 'h04, 'h05, 'h21,
     'h31, 'h06, 'h12, 'h41, 'h51, 'h07, 'h61, 'h71,
@@ -117,15 +113,15 @@ UInt#(8) std_ac_chroma_val_arr[162] = {
     'h49, 'h4a, 'h53, 'h54, 'h55, 'h56, 'h57, 'h58,
     'h59, 'h5a, 'h63, 'h64, 'h65, 'h66, 'h67, 'h68,
     'h69, 'h6a, 'h73, 'h74, 'h75, 'h76, 'h77, 'h78,
-    'h79, 'h7a, 'h82, 'h83, 'h84, 'h85, 'h86, 'h87, 
-    'h88, 'h89, 'h8a, 'h92, 'h93, 'h94, 'h95, 'h96, 
-    'h97, 'h98, 'h99, 'h9a, 'ha2, 'ha3, 'ha4, 'ha5, 
-    'ha6, 'ha7, 'ha8, 'ha9, 'haa, 'hb2, 'hb3, 'hb4, 
-    'hb5, 'hb6, 'hb7, 'hb8, 'hb9, 'hba, 'hc2, 'hc3, 
-    'hc4, 'hc5, 'hc6, 'hc7, 'hc8, 'hc9, 'hca, 'hd2, 
-    'hd3, 'hd4, 'hd5, 'hd6, 'hd7, 'hd8, 'hd9, 'hda, 
-    'he2, 'he3, 'he4, 'he5, 'he6, 'he7, 'he8, 'he9, 
-    'hea, 'hf2, 'hf3, 'hf4, 'hf5, 'hf6, 'hf7, 'hf8, 
+    'h79, 'h7a, 'h82, 'h83, 'h84, 'h85, 'h86, 'h87,
+    'h88, 'h89, 'h8a, 'h92, 'h93, 'h94, 'h95, 'h96,
+    'h97, 'h98, 'h99, 'h9a, 'ha2, 'ha3, 'ha4, 'ha5,
+    'ha6, 'ha7, 'ha8, 'ha9, 'haa, 'hb2, 'hb3, 'hb4,
+    'hb5, 'hb6, 'hb7, 'hb8, 'hb9, 'hba, 'hc2, 'hc3,
+    'hc4, 'hc5, 'hc6, 'hc7, 'hc8, 'hc9, 'hca, 'hd2,
+    'hd3, 'hd4, 'hd5, 'hd6, 'hd7, 'hd8, 'hd9, 'hda,
+    'he2, 'he3, 'he4, 'he5, 'he6, 'he7, 'he8, 'he9,
+    'hea, 'hf2, 'hf3, 'hf4, 'hf5, 'hf6, 'hf7, 'hf8,
     'hf9, 'hfa
 };
 Vector#(162, UInt#(8)) std_ac_chroma_val = arrayToVector(std_ac_chroma_val_arr);

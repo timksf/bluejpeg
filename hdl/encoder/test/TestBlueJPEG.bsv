@@ -4,11 +4,10 @@ import StmtFSM :: *;
 import GetPut :: *;
 import Connectable :: *;
 import Clocks :: *;
-
 import BlueAXI :: *;
 import BlueCSR :: *;
-import BlueJPEGTestHelper :: *;
 
+import BlueJPEGTestHelper :: *;
 import BDPI :: *;
 import Types :: *;
 import PrintUtil :: *;
@@ -33,31 +32,31 @@ typedef 16  QuantScale;
 typedef 8   PixelWidth;
 
 
-module [Module] mkTestBlueJPEG(TestHandler);
+module [Module] mkTestBlueJPEG(TestHandler_ifc);
 
     function print_s  = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
-    let t1 <- test;
+    let t1 <- mkTestCase;
 
     Stmt s = seq
         t1.go();
-        while (!t1.done()) action endaction
+        while(!t1.done()) action endaction
     endseq;
 
-    FSM fsm_test <- mkFSM(s);
+    FSM i_fsm_test <- mkFSM(s);
 
     method Action go();
-        fsm_test.start();
+        i_fsm_test.start();
     endmethod
 
     method Bool done();
-        return fsm_test.done();
+        return i_fsm_test.done();
     endmethod
 
 endmodule
 
-module [Module] test(TestHandler)
+module [Module] mkTestCase(TestHandler_ifc)
     provisos(
         NumAlias#(n_pixels, TMul#(InputWidth, InputHeight)),
         NumAlias#(ram_words, 'd3_000_000)
@@ -66,11 +65,11 @@ module [Module] test(TestHandler)
     function print_s  = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
-    // ---- clocks (same domain in simulation) ----
+    //clocks (same domain in simulation)
     let cur_clk <- exposeCurrentClock;
     let cur_rst <- exposeCurrentReset;
 
-    // ---- DUT: BlueJPEG ----
+    //DUT: BlueJPEG
     BlueJPEGCfg_t#(MaxImgWidth, DCTScale, QuantScale, PixelWidth) jpeg_cfg =
         BlueJPEGCfg_t {
             slow_clock          : cur_clk,
@@ -83,27 +82,27 @@ module [Module] test(TestHandler)
             double_buffer_tiler : True,
             en_chroma           : True
         };
-    BlueJPEG_ifc dut    <- mkBlueJPEG(jpeg_cfg);
-    let csr_defs        <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
+    BlueJPEG_ifc dut      <- mkBlueJPEG(jpeg_cfg);
+    let          csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);
 
-    // ---- AXI-Lite master for DUT configuration ----
-    AXI4_Lite_Master_Rd#(32, 32) cfg_rd <- mkAXI4_Lite_Master_Rd(1);
-    AXI4_Lite_Master_Wr#(32, 32) cfg_wr <- mkAXI4_Lite_Master_Wr(16);
-    let i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, cfg_rd, cfg_wr);
+    //AXI-Lite master for DUT configuration
+    AXI4_Lite_Master_Rd#(32, 32) i_cfg_rd  <- mkAXI4_Lite_Master_Rd(1);
+    AXI4_Lite_Master_Wr#(32, 32) i_cfg_wr  <- mkAXI4_Lite_Master_Wr(16);
+    let                          i_cfg_acc <- mkBlueCSRTbAccessorAXI4Lite(csr_defs, i_cfg_rd, i_cfg_wr);
 
-    // ---- AXI-Stream: pixel input (32-bit) ----
-    AXI4_Stream_Wr#(24, 0) axis_tx <- mkAXI4_Stream_Wr(128);
+    //AXI-Stream: pixel input (32-bit)
+    AXI4_Stream_Wr#(24, 0) i_axis_tx <- mkAXI4_Stream_Wr(128);
 
-    // ---- AXI-Stream: JPEG byte output (8-bit) ----
-    AXI4_Stream_Rd#(8, 0) axis_out <- mkAXI4_Stream_Rd(128);
+    //AXI-Stream: JPEG byte output (8-bit)
+    AXI4_Stream_Rd#(8, 0) i_axis_out <- mkAXI4_Stream_Rd(128);
 
-    // ---- connections ----
-    mkConnection(axis_tx.fab,       dut.s_axis);
-    mkConnection(dut.m_axis,        axis_out.fab);
-    mkConnection(dut.s_axi_cfg_rd, cfg_rd.fab);
-    mkConnection(dut.s_axi_cfg_wr, cfg_wr.fab);
+    //connections
+    mkConnection(i_axis_tx.fab,       dut.s_axis);
+    mkConnection(dut.m_axis,        i_axis_out.fab);
+    mkConnection(dut.s_axi_cfg_rd, i_cfg_rd.fab);
+    mkConnection(dut.s_axi_cfg_wr, i_cfg_wr.fab);
 
-    // ---- state ----
+    //state
     Reg#(UInt#(64)) rg_ram_ptr      <- mkRegU;
     Reg#(UInt#(64)) rg_img_load_ptr <- mkRegU;
     Reg#(Bit#(32))  rg_axil_rsp     <- mkRegU;
@@ -112,31 +111,31 @@ module [Module] test(TestHandler)
     Reg#(UInt#(32)) rg_pixel_idx    <- mkReg(0);
     Reg#(File)      rg_out_file     <- mkRegU;
 
-    // output write base address in SimRAM (word-addressed, after input image)
+    //output write base address in SimRAM (word-addressed, after input image)
     UInt#(64) out_base_addr = fromInteger(valueOf(n_pixels));
 
-    // ---- sub-FSMs ----
+    //sub-FSMs
 
-    // Feed pixels from SimRAM into DUT via AXI stream
-    // Interleaved format: one pixel per 64-bit word, R in low byte
-    // Truncate to 32 bits -> {0x00, B, G, R} per beat
+    //feed pixels from SimRAM into DUT via AXI stream
+    //interleaved format: one pixel per 64-bit word, R in low byte
+    //truncate to 32 bits -> {0x00, B, G, R} per beat
     Stmt feed_pixels = seq
         rg_pixel_idx <= 0;
-        while (rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
-            let word <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
+        while(rg_pixel_idx < fromInteger(valueOf(n_pixels))) action
+            let      word  <- read_word_SimRAM(rg_ram_ptr, extend(rg_pixel_idx));
             Bit#(24) pixel = truncate(pack(word));
             Bit#(32) ycbcr_raw = rgb2ycbcr_ref(
-                unpack(pixel[23:16]),   //R
-                unpack(pixel[15:08]),   //G
-                unpack(pixel[07:00])    //B
+                unpack(pixel[23:16]),   //r
+                unpack(pixel[15:08]),   //g
+                unpack(pixel[07:00])    //b
             );
-            YCbCr_t pix_ycbcr = YCbCr_t { 
+            YCbCr_t pix_ycbcr = YCbCr_t {
                 y:  unpack(ycbcr_raw[23:16]),
                 cb: unpack(ycbcr_raw[15:08]),
                 cr: unpack(ycbcr_raw[07:00])
             };
             let is_last = (rg_pixel_idx == fromInteger(valueOf(n_pixels) - 1));
-            axis_tx.pkg.put(AXI4_Stream_Pkg {
+            i_axis_tx.pkg.put(AXI4_Stream_Pkg {
                 data: pack(pix_ycbcr),
                 user: ?,
                 keep: unpack(-1),
@@ -146,45 +145,43 @@ module [Module] test(TestHandler)
             rg_pixel_idx <= rg_pixel_idx + 1;
         endaction
     endseq;
-    FSM fsm_feed_pixels <- mkFSM(feed_pixels);
+    FSM i_fsm_feed_pixels <- mkFSM(feed_pixels);
 
     //collect JPEG output bytes to output file and RAM output region
     Stmt collect_output = seq
         action
             let fd <- $fopen(output_jpeg_path, "wb");
-            if (fd == InvalidFile) begin
+            if(fd == InvalidFile) begin
                 print_s("ERROR: cannot open output file", RED);
                 $finish();
             end
             rg_out_file <= fd;
         endaction
-        while (!rg_finished) action
-            let pkg <- axis_out.pkg.get();
-            Bit#(8) b = pkg.data;
+        while(!rg_finished) action
+            let     pkg <- i_axis_out.pkg.get();
+            Bit#(8) b   = pkg.data;
             //write to SimRAM
             write_word_SimRAM(rg_ram_ptr, out_base_addr + extend(rg_out_count), unpack(extend(b)));
             //write to file
             $fwrite(rg_out_file, "%c", b);
             rg_out_count <= rg_out_count + 1;
-            if (pkg.last) begin
+            if(pkg.last) begin
                 print_fmt($format("Received TLAST, total bytes: %0d", rg_out_count + 1), GREEN);
                 rg_finished <= True;
             end
         endaction
         $fclose(rg_out_file);
     endseq;
-    FSM fsm_collect <- mkFSM(collect_output);
+    FSM i_fsm_collect <- mkFSM(collect_output);
 
     //poll CTRL register for done bit
-    FSM fsm_poll_done <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
+    FSM i_fsm_poll_done <- mkFSM(bjpeg_poll_done(i_cfg_acc, rg_axil_rsp, rg_finished));
 
     //wait for default table init (poll STATUS.ready)
-    FSM fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
+    FSM i_fsm_wait_ready <- mkFSM(bjpeg_wait_tables_ready(i_cfg_acc, rg_axil_rsp));
 
 
-    // ================================================================
-    // Main test sequence
-    // ================================================================
+    //main test sequence
 
     Stmt main = seq
         rg_out_count <= 0;
@@ -193,7 +190,7 @@ module [Module] test(TestHandler)
 
         print_fmt($format("=== TestBlueJPEG start ==="), GREEN);
 
-        // ---- phase 1: create SimRAM and load image ----
+        //phase 1: create SimRAM and load image
         action
             let ram <- create_SimRAM(fromInteger(valueOf(ram_words)), fromInteger(valueof(TDiv#(WordWidth, 8))));
             rg_ram_ptr <= ram;
@@ -206,14 +203,14 @@ module [Module] test(TestHandler)
         write_to_mem_interleaved_ImageLoader(rg_img_load_ptr, rg_ram_ptr, 0);
         print_s("Image loaded", GREEN);
 
-        // ---- phase 2: wait for table init ----
+        //phase 2: wait for table init
         print_s("Waiting for default table init...", YELLOW);
-        fsm_wait_ready.start();
-        await(fsm_wait_ready.done());
+        i_fsm_wait_ready.start();
+        await(i_fsm_wait_ready.done());
 
         //no codegen trigger: STS.RDY covers the code tables generated after reset
 
-        // ---- phase 4: configure BlueJPEG ----
+        //phase 4: configure BlueJPEG
         print_s("Configuring BlueJPEG...", YELLOW);
         action
             Bit#(16) img_height = fromInteger(valueof(InputHeight));
@@ -230,20 +227,20 @@ module [Module] test(TestHandler)
         bjpeg_expect_wr_ok(i_cfg_acc);
         bjpeg_expect(!dut.irq, "irq must stay low before the frame completes");
 
-        // ---- phase 5: start encoder ----
+        //phase 5: start encoder
         print_s("Starting BlueJPEG encoder...", YELLOW);
         action
-            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
+            let      start_bit  <- i_cfg_acc.field_bit("CTRL", "START");
             Bit#(32) start_mask = 1 << start_bit;
             i_cfg_acc.write_reg_req("CTRL", start_mask);
         endaction
         bjpeg_expect_wr_ok(i_cfg_acc);
 
-        // ---- phase 6: feed pixels + collect output + poll done ----
+        //phase 6: feed pixels + collect output + poll done
         par
-            seq fsm_feed_pixels.start(); await(fsm_feed_pixels.done()); endseq
-            seq fsm_collect.start();     await(fsm_collect.done());     endseq
-            seq fsm_poll_done.start();   await(fsm_poll_done.done());   endseq
+            seq i_fsm_feed_pixels.start(); await(i_fsm_feed_pixels.done()); endseq
+            seq i_fsm_collect.start();     await(i_fsm_collect.done());     endseq
+            seq i_fsm_poll_done.start();   await(i_fsm_poll_done.done());   endseq
         endpar
 
         i_cfg_acc.read_reg_req("PERF0");
@@ -288,7 +285,7 @@ module [Module] test(TestHandler)
         while(rg_axil_rsp == 0) seq
             i_cfg_acc.read_reg_req("IRQP");
             action
-                let rsp <- i_cfg_acc.read_reg_rsp();
+                let rsp     <- i_cfg_acc.read_reg_rsp();
                 let inv_bit <- i_cfg_acc.field_bit("IRQP", "INV");
                 rg_axil_rsp <= zeroExtend(tpl_1(rsp)[inv_bit]);
             endaction
@@ -302,14 +299,14 @@ module [Module] test(TestHandler)
         print_fmt($format("=== TestBlueJPEG PASSED ==="), GREEN);
     endseq;
 
-    FSM fsm_test <- mkFSM(main);
+    FSM i_fsm_test <- mkFSM(main);
 
     method Action go();
-        fsm_test.start();
+        i_fsm_test.start();
     endmethod
 
     method Bool done();
-        return fsm_test.done();
+        return i_fsm_test.done();
     endmethod
 
 endmodule

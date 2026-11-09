@@ -12,7 +12,7 @@ a ready-to-use core.
 
 | Parameter       | Purpose                                            | Example    |
 | --------------- | -------------------------------------------------- | ---------- |
-| `max_img_width` | Maximum supported image width; affects BRAM sizing | 1920       |
+| `max_img_width` | Maximum supported image width, sets BRAM sizing    | 1920       |
 | `dct_scale`     | Internal DCT fixed-point bit width                 | 12, 14, 16 |
 | `quant_scale`   | Quantization arithmetic bit width                  | 12, 14, 16 |
 | `pixel_width`   | Input component sample width (currently JPEG: 8)   | 8          |
@@ -28,9 +28,9 @@ The DU frontend is tiler → channel splitter → dispatcher.
 | 0x04   | CTRL     | `[0]` start                                    |
 | 0x08   | STS      | `[0]` ready, `[1]` codegen busy, `[4]` done      |
 | 0x0C   | IMSZ     | `[15:0]` width, `[31:16]` height                 |
-| 0x14   | CGEN     | `[1:0]` table type, `[31]` trigger (only needed after writing custom Huffman tables; default codes are generated after reset) |
+| 0x14   | CGEN     | `[1:0]` table type, `[31]` trigger (only needed after writing custom Huffman tables, because default codes are generated after reset) |
 | 0x18   | IRQP     | Pending, W1C: `[0]` frame done, `[1]` invalid config (latched even when disabled) |
-| 0x1C   | IRQE     | Enable, same bit layout; enabled pending bits drive the `irq` output |
+| 0x1C   | IRQE     | Enable, same bit layout. Enabled pending bits drive the `irq` output |
 | 0x30–0x38 | PERF  | Cycles, input pixels, output bytes              |
 | 0x100+ | TABLE WR | Quantization / Huffman table data writes       |
 
@@ -42,7 +42,7 @@ The DU frontend is tiler → channel splitter → dispatcher.
 
 - [x] 8×8 block tiling - `mkImageTilingEngine` (BRAM line-buffer, configurable max width, optional double buffering)
 - [x] Channel splitting - `mkChannelSplitter` (Y / Cb / Cr)
-- [x] DU dispatch - `mkDUDispatcher` (one Y, Cb, Cr block per 8×8 MCU; internal chroma FIFOs)
+- [x] DU dispatch - `mkDUDispatcher` (one Y, Cb, Cr block per 8×8 MCU, internal chroma FIFOs)
 - [x] Image Tiler optional (can be implemented with 2D DMA engines)
 
 #### DU processing (`mkDUProc`)
@@ -51,7 +51,7 @@ The DU frontend is tiler → channel splitter → dispatcher.
   - Separated row/column 1D transforms, 5 multiplications
   - Optimized variant saves ~36 % LUTs / ~65 % registers
 - [x] Quantization - `mkQuantize`, `mkQuantize_RT`
-  - Compile-time or runtime tables; AAN scaling factors integrated
+  - Compile-time or runtime tables, AAN scaling factors integrated
 - [x] Zigzag reorder - `mkZigZag`, `mkZigZag_Opt`
   - Standard + LUTRAM-optimised variant
 
