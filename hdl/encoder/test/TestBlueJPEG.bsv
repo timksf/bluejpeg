@@ -222,6 +222,14 @@ module [Module] test(TestHandler)
         endaction
         bjpeg_expect_wr_ok(i_cfg_acc);
 
+        //enable only the frame-done interrupt
+        action
+            let done_bit <- i_cfg_acc.field_bit("IRQE", "DONE");
+            i_cfg_acc.write_reg_req("IRQE", 1 << done_bit);
+        endaction
+        bjpeg_expect_wr_ok(i_cfg_acc);
+        bjpeg_expect(!dut.irq, "irq must stay low before the frame completes");
+
         // ---- phase 5: start encoder ----
         print_s("Starting BlueJPEG encoder...", YELLOW);
         action
@@ -258,6 +266,35 @@ module [Module] test(TestHandler)
                 $finish(1);
             end
         endaction
+
+        //frame-done interrupt is pending and clears with W1C
+        bjpeg_expect(dut.irq, "irq must be high after the frame completes");
+        action
+            let done_bit <- i_cfg_acc.field_bit("IRQP", "DONE");
+            i_cfg_acc.write_reg_req("IRQP", 1 << done_bit);
+        endaction
+        bjpeg_expect_wr_ok(i_cfg_acc);
+        bjpeg_expect(!dut.irq, "irq must clear after W1C of IRQP.DONE");
+
+        //a rejected start latches IRQP.INV but leaves the line low while INV is disabled
+        i_cfg_acc.write_reg_req("IMSZ", 0);
+        bjpeg_expect_wr_ok(i_cfg_acc);
+        action
+            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
+            i_cfg_acc.write_reg_req("CTRL", 1 << start_bit);
+        endaction
+        bjpeg_expect_wr_ok(i_cfg_acc);
+        rg_axil_rsp <= 0;
+        while(rg_axil_rsp == 0) seq
+            i_cfg_acc.read_reg_req("IRQP");
+            action
+                let rsp <- i_cfg_acc.read_reg_rsp();
+                let inv_bit <- i_cfg_acc.field_bit("IRQP", "INV");
+                rg_axil_rsp <= zeroExtend(tpl_1(rsp)[inv_bit]);
+            endaction
+        endseq
+        bjpeg_expect(!dut.irq, "irq must stay low for a disabled source");
+        print_s("Interrupt checks passed", GREEN);
 
         print_fmt($format("JPEG encoding complete, %0d bytes output", rg_out_count), GREEN);
         print_fmt($format("Output written to %s and SimRAM[%0d..]",

@@ -26,9 +26,11 @@ The DU frontend is tiler → channel splitter → dispatcher.
 | ------ | -------- | ---------------------------------------------- |
 | 0x00   | MIV      | Module ID and version                          |
 | 0x04   | CTRL     | `[0]` start                                    |
-| 0x08   | STS      | `[0]` ready, `[1]` codegen busy, `[4]` done, `[16]` error, `[17]` invalid config |
+| 0x08   | STS      | `[0]` ready, `[1]` codegen busy, `[4]` done      |
 | 0x0C   | IMSZ     | `[15:0]` width, `[31:16]` height                 |
 | 0x14   | CGEN     | `[1:0]` table type, `[31]` trigger (only needed after writing custom Huffman tables; default codes are generated after reset) |
+| 0x18   | IRQP     | Pending, W1C: `[0]` frame done, `[1]` invalid config (latched even when disabled) |
+| 0x1C   | IRQE     | Enable, same bit layout; enabled pending bits drive the `irq` output |
 | 0x30–0x38 | PERF  | Cycles, input pixels, output bytes              |
 | 0x100+ | TABLE WR | Quantization / Huffman table data writes       |
 

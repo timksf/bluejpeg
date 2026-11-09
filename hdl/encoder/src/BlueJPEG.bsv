@@ -42,6 +42,10 @@ interface BlueJPEG_ifc;
     interface AXI4_Lite_Slave_Rd_Fab#(32, 32) s_axi_cfg_rd;
     (* prefix="S_AXI_cfg" *)
     interface AXI4_Lite_Slave_Wr_Fab#(32, 32) s_axi_cfg_wr;
+
+    //level interrupt, high while any enabled IRQP bit is pending
+    (* always_ready, result="irq" *)
+    method Bool irq;
 endinterface
 
 typedef struct {
@@ -131,8 +135,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     // ---- AXI-Lite config ----
 
-    BlueCSRAccess_ifc#(32, 32, 0, BlueJPEGCfg_ifc)  csrs        <- create_blue_csr(blue_jpeg_csrs, False);
-    BlueCSR_AXI4Lite_ifc#(32, 32, 0)                axi_csrs    <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
+    BlueCSRAccess_ifc#(32, 32, 1, BlueJPEGCfg_ifc)  csrs        <- create_blue_csr(blue_jpeg_csrs, False);
+    BlueCSR_AXI4Lite_ifc#(32, 32, 1)                axi_csrs    <- mkBlueCSRAXI4LiteAdapter(csrs.external, 1, 1);
 
     //optional documentations generation for CSRs
     RegMapDoc_t#(32) doc <- doc_blue_csr(blue_jpeg_csrs);
@@ -231,14 +235,14 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     if(cfg.en_tiler) begin
         rule r_axis_to_tiler (rg_state == S_RUNNING);
-            csrs.internal.perf_pixels.tick_up(); //count ingested pixels
+            csrs.internal.perf_pixels.tick(); //count ingested pixels
             let pkg <- axis_rd.pkg.get();
             YCbCr_t pix = unpack(pkg.data);
             img_tiler.line_in.put(pix);
         endrule
     end else begin
         rule r_axis_to_chsplt;
-            csrs.internal.perf_pixels.tick_up();
+            csrs.internal.perf_pixels.tick();
             let pkg <- axis_rd.pkg.get();
             YCbCr_t pix = unpack(pkg.data);
             ch_splt.pix.put(pix);
@@ -270,7 +274,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             id   : ?
         };
         axis_wr.pkg.put(pkg);
-        csrs.internal.perf_byteso.tick_up();
+        csrs.internal.perf_byteso.tick();
     endrule
 
     // ---- DU mode / last tracking ----
@@ -382,7 +386,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     endrule
 
     rule rperf (rg_state == S_RUNNING);
-        csrs.internal.perf_cycles.tick_up();
+        csrs.internal.perf_cycles.tick();
     endrule
 
     // ---- done handling ----
@@ -400,6 +404,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     interface m_axis       = axis_wr.fab;
     interface s_axi_cfg_rd = axi_csrs.s_rd;
     interface s_axi_cfg_wr = axi_csrs.s_wr;
+
+    method irq             = axi_csrs.irqs[0];
 
 endmodule
 

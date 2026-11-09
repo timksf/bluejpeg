@@ -16,6 +16,15 @@ function Action bjpeg_expect_wr_ok(BlueCSRTbAccessor_ifc#(32) cfg_acc);
     endaction
 endfunction
 
+function Action bjpeg_expect(Bool cond, String msg);
+    action
+        if(!cond) begin
+            print_mod_pre_color_t_s(msg, RED);
+            $finish(1);
+        end
+    endaction
+endfunction
+
 //poll STATUS.ready until set (default table initialisation complete).
 function Stmt bjpeg_wait_tables_ready(
     BlueCSRTbAccessor_ifc#(32) cfg_acc,
