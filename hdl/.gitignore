@@ -1,7 +1,12 @@
+.deps
+.bsv_tools
+build/
+include/
+.Xil/
 *.o
 *.so
 *.ba
-*build/
-*.txt
-*.jpg
+*.bo
 *.log
+*.jou
+__pycache__/
