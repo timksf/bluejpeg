@@ -67,7 +67,7 @@ typedef struct {
     numeric type pixel_width
 );
 
-typedef enum { S_IDLE, S_CONFIGURE, S_RUNNING, S_FLUSH, S_DONE } FrameState_t deriving(Bits, Eq, FShow);
+typedef enum { S_IDLE, S_CONFIGURE, S_START, S_RUNNING, S_FLUSH, S_DONE } FrameState_t deriving(Bits, Eq, FShow);
 
 module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         max_imw,
@@ -134,7 +134,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     //AXI-Lite config
 
-    BlueCSRAccess_ifc#(32, 32, 1, BlueJPEGCfg_ifc) i_csrs     <- create_blue_csr(blue_jpeg_csrs, False);
+    BlueCSRAccess_ifc#(32, 32, 1, BlueJPEGCfg_ifc) i_csrs     <- create_blue_csr(blue_jpeg_csrs, True);
     BlueCSR_AXI4Lite_ifc#(32, 32, 1)               i_axi_csrs <- mkBlueCSRAXI4LiteAdapter(i_csrs.external, 1, 1);
 
     //optional documentations generation for CSRs
@@ -380,15 +380,21 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     endrule
 
     //start one cycle after configuration so submodules observe their new registers
+    (* fire_when_enabled, no_implicit_conditions *)
     rule r_configure (rg_state == S_CONFIGURE);
-        if(cfg.en_tiler)
-            i_img_tiler.start();
         //reset DC predictors and scan state before accepting frame pixels
         i_rle.rewind();
         i_huff.rewind();
         i_stuffer.rewind();
-        i_fwriter.start();
         i_csrs.internal.perf_rst();
+        rg_state <= S_START;
+    endrule
+
+    //keep guarded start handshakes out of the rewind distribution path
+    rule r_begin (rg_state == S_START);
+        if(cfg.en_tiler)
+            i_img_tiler.start();
+        i_fwriter.start();
         rg_state <= S_RUNNING;
     endrule
 

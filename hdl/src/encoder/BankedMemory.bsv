@@ -583,19 +583,23 @@ module mkBankedMemoryBRAM2Accessor#(
         BRAM_Configure bram_cfg
     )(BankedMemoryAccessor_ifc#(2, aw, dw, 1));
 
-    BankedMemoryConfig_t cfg = BankedMemoryConfig_t {
-        address_base     : 0,
-        memory_size      : bram_cfg.memorySize,
-        bank_depth       : bram_cfg.memorySize,
-        mapping          : BANK_MAP_CONTIGUOUS
-    };
+    //each client owns one physical port, so no bank or response-owner mux is needed
+    BankedMemoryPort_ifc#(2, 1, aw, dw, 1) i_bank <- mkBankedMemoryBRAM2Port(bram_cfg);
 
-    BankedMemoryPort_ifc#(2, 1, aw, dw, 1) i_bank <-
-        mkBankedMemoryBRAM2Port(bram_cfg);
-    Vector#(1, BankedMemoryPort_ifc#(2, 1, aw, dw, 1)) banks =
-        cons(i_bank, nil);
-    let ifc <- mkBankedMemoryAccessor(banks, cfg);
-    return ifc;
+    function BankedMemoryRWPort_ifc#(aw, dw, 1) make_port(Integer port_index);
+        return interface BankedMemoryRWPort_ifc;
+            method Action request(BankedMemoryRequest_t#(aw, dw, 1) req);
+                let unused <- i_bank.port[port_index].request(req);
+            endmethod
+            method response = i_bank.port[port_index].response;
+        endinterface;
+    endfunction
+
+    interface port = genWith(make_port);
+    method Bool in_range(Bit#(aw) address);
+        Bit#(TAdd#(aw, 1)) extended_address = zeroExtend(address);
+        return extended_address < fromInteger(bram_cfg.memorySize);
+    endmethod
 
 endmodule
 

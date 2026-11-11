@@ -71,11 +71,14 @@ module mkImageTilingEngine#(NumProxy_t#(max_img_width) _, Bool double_buffer)(Im
 
     FIFO#(t) f_line  <- mkFIFO;
     FIFO#(t) f_block <- mkFIFO;
+    FIFO#(Bit#(memory_addrw)) f_read_addr <- mkFIFO;
 
     BankedMemoryAccessor_ifc#(2, memory_addrw, bpp, 1) i_pixels <- mkBankedMemoryBRAM2Accessor(bram_cfg);
 
     Reg#(Bit#(line_w))        rg_imgw          <- mkRegU;
     Reg#(Bit#(buffer_countw)) rg_buf_threshold <- mkRegU;
+    Reg#(Bit#(buffer_countw)) rg_wr_last       <- mkRegU;
+    Reg#(Bit#(buffer_addrw))  rg_row_step      <- mkRegU;
     Reg#(Bit#(buffer_addrw))  rg_wr_addr       <- mkRegU;
     Reg#(Bit#(buffer_addrw))  rg_rd_addr       <- mkRegU;
     Reg#(Bit#(buffer_countw)) rg_rd_pix_cnt    <- mkRegU;
@@ -108,14 +111,20 @@ module mkImageTilingEngine#(NumProxy_t#(max_img_width) _, Bool double_buffer)(Im
 
     function Action read_pixel(Bit#(1) buffer_index, Bit#(buffer_addrw) address);
         action
-            i_pixels.port[1].request(BankedMemoryRequest_t {
-                address   : buffer_address(buffer_index, address),
-                data      : 0,
-                write_mask: 0,
-                write     : False
-            });
+            f_read_addr.enq(buffer_address(buffer_index, address));
         endaction
     endfunction
+
+    //register read addresses before the physical memory port
+    rule r_issue_read (rg_running);
+        i_pixels.port[1].request(BankedMemoryRequest_t {
+            address:    f_read_addr.first,
+            data:       0,
+            write_mask: 0,
+            write:      False
+        });
+        f_read_addr.deq;
+    endrule
 
     /*
         We start filling a new MCU when all relevant pixels have been fetched
@@ -126,7 +135,7 @@ module mkImageTilingEngine#(NumProxy_t#(max_img_width) _, Bool double_buffer)(Im
 
     function Action advance_write(Reg#(Bool) buffer_ready);
         action
-            if(zeroExtend(rg_wr_addr) == rg_buf_threshold - 1) begin
+            if(zeroExtend(rg_wr_addr) == rg_wr_last) begin
                 rg_wr_addr <= 0;
                 if(double_buffer) rg_wr_buf <= ~rg_wr_buf;
                 buffer_ready <= True;
@@ -147,7 +156,7 @@ module mkImageTilingEngine#(NumProxy_t#(max_img_width) _, Bool double_buffer)(Im
             let next_addr = rg_rd_addr;
             if((rg_block_idx & fromInteger(valueof(mcu_w) - 1)) == fromInteger(valueof(mcu_w) - 1)) begin
                 /* move to next scanline */
-                next_addr = next_addr + zeroExtend(rg_imgw) - fromInteger(valueof(mcu_w)) + 1;
+                next_addr = next_addr + rg_row_step;
             end else begin
                 next_addr = next_addr + 1;
             end
@@ -207,8 +216,11 @@ module mkImageTilingEngine#(NumProxy_t#(max_img_width) _, Bool double_buffer)(Im
 
     method Action set_img_width(Bit#(13) w) = action
         Bit#(line_w) w_trunc = truncate(w);
+        Bit#(buffer_countw) threshold = zeroExtend(w_trunc) * fromInteger(valueof(mcu_h));
         rg_imgw <= w_trunc;
-        rg_buf_threshold <= zeroExtend(w_trunc) * fromInteger(valueof(mcu_h));
+        rg_buf_threshold <= threshold;
+        rg_wr_last <= threshold - 1;
+        rg_row_step <= zeroExtend(w_trunc) - fromInteger(valueof(mcu_w)) + 1;
     endaction;
 
     method start if(!rg_running) = action

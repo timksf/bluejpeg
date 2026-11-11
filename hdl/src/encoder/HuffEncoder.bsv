@@ -1,6 +1,7 @@
 package HuffEncoder;
 
 import FIFO :: *;
+import FIFOF :: *;
 import Vector :: *;
 import GetPut :: *;
 import ClientServer :: *;
@@ -42,27 +43,36 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         Add#(d__, 5, TAdd#(TLog#(bits), 1))   //for truncate in calc_magnitude
     );
 
-    FIFO#(RLETag_t#(bits))      f_in      <- mkBypassFIFO;
-    FIFO#(HuffCode_t)           f_out     <- mkFIFO;
-    FIFO#(HuffPending_t#(bits)) f_pending <- mkPipelineFIFO;
+    FIFO#(RLETag_t#(bits)) f_in  <- mkBypassFIFO;
+    FIFOF#(HuffCode_t)    f_out <- mkGFIFOF(True, False);
+
+    Reg#(HuffPending_t#(bits)) rg_symbol  <- mkRegU;
+    Reg#(Bit#(bits))           rg_abs     <- mkRegU;
+    Reg#(Bit#(4))              rg_run     <- mkRegU;
+    Reg#(PixType_t)            rg_mode    <- mkRegU;
+    Reg#(HuffPending_t#(bits)) rg_pending <- mkRegU;
+    Reg#(HuffPending_t#(bits)) rg_emit    <- mkRegU;
+    Reg#(HuffTableEntry_t)     rg_entry   <- mkRegU;
+    Vector#(3, Reg#(Bool))     rg_valid   <- replicateM(mkReg(False));
+    PulseWire                  pw_input   <- mkPulseWire;
 
     FIFO#(HuffDUMeta_t) f_meta       <- mkSizedFIFO(4);
     Reg#(Bit#(6))       rg_coeff_idx <- mkReg(0);
 
     //rewind only pulses, r_rewind owns the reset and the processing rules stand still in that cycle
     PulseWire pw_rewind <- mkPulseWire;
+    Bool      advance    = f_out.notFull && !pw_rewind;
 
     //registered table addresses split symbol generation from LUTRAM lookup
     Reg#(HuffCodeDCIdx_t)   rg_dc_req <- mkReg(HuffCodeDCIdx_t { pt: Luma, idx: 0 });
-    Wire#(HuffTableEntry_t) w_dc_resp <- mkWire;
+    Wire#(HuffTableEntry_t) w_dc_resp <- mkDWire(?);
     Reg#(HuffCodeACIdx_t)   rg_ac_req <- mkReg(HuffCodeACIdx_t { pt: Luma, idx: 0 });
-    Wire#(HuffTableEntry_t) w_ac_resp <- mkWire;
+    Wire#(HuffTableEntry_t) w_ac_resp <- mkDWire(?);
 
     //calculate magnitude (number of significant bits) of a signed value
     //this is equivalent to floor(log2(abs(val))) + 1 for val != 0
     //for val == 0, abs_bits is all zeros so no bit matches and mag = 0
-    function Bit#(5) calc_magnitude(Int#(bits) val);
-        Bit#(bits) abs_val = pack(abs(val));
+    function Bit#(5) calc_magnitude(Bit#(bits) abs_val);
         Bit#(5)    mag     = 0;
         for(Integer i = 0; i < valueOf(bits); i = i + 1)
             if(abs_val[i] == 1) mag = fromInteger(i + 1);
@@ -77,47 +87,44 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         return (val < 0) ? ~abs_bits : abs_bits;
     endfunction
 
-    rule r_prepare (!pw_rewind);
+    rule r_prepare (advance);
         let tag  = f_in.first; f_in.deq;
         let meta = f_meta.first;
 
         HuffPending_t#(bits) pending = HuffPending_t {
-            is_dc: False,
+            is_dc:     False,
             has_extra: False,
-            mag: 0,
-            extra: 0,
-            last: False
+            mag:       0,
+            extra:     0,
+            last:      False
         };
-        Bit#(7) next_idx = 0;
+        Bit#(7)    next_idx = 0;
+        Bit#(bits) magnitude = 0;
+        Bit#(4)    run       = 0;
 
         case(tag) matches
             tagged DCDiff .val: begin
-                Bit#(5) mag = calc_magnitude(val);
-                rg_dc_req <= HuffCodeDCIdx_t { pt: meta.mode, idx: truncate(mag) };
+                magnitude = pack(abs(val));
                 pending.is_dc = True;
                 pending.has_extra = True;
-                pending.mag = mag;
                 pending.extra = calc_extra_bits(val);
                 next_idx = 1;
             end
 
             tagged AC .ac: begin
-                Bit#(5) mag_ac = calc_magnitude(ac.val);
-                Bit#(4) mag4   = truncate(mag_ac);
-                rg_ac_req <= HuffCodeACIdx_t { pt: meta.mode, idx: {ac.run, mag4} };
+                magnitude = pack(abs(ac.val));
+                run = ac.run;
                 pending.has_extra = True;
-                pending.mag = mag_ac;
                 pending.extra = calc_extra_bits(ac.val);
                 next_idx = zeroExtend(rg_coeff_idx) + zeroExtend(ac.run) + 1;
             end
 
             tagged ZRL: begin
-                rg_ac_req <= HuffCodeACIdx_t { pt: meta.mode, idx: 8'hF0 };
+                run = 'hf;
                 next_idx = zeroExtend(rg_coeff_idx) + 16;
             end
 
             tagged EOB: begin
-                rg_ac_req <= HuffCodeACIdx_t { pt: meta.mode, idx: 8'h00 };
                 next_idx = 0;
             end
         endcase
@@ -132,13 +139,46 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         if(is_end_of_block) f_meta.deq;
 
         rg_coeff_idx <= truncate(next_idx); //truncation wraps >= 64 to 0
-        f_pending.enq(pending);
+        rg_symbol <= pending;
+        rg_abs    <= magnitude;
+        rg_run    <= run;
+        rg_mode   <= meta.mode;
+        pw_input.send;
     endrule
 
-    rule r_emit (!pw_rewind);
-        let pending = f_pending.first; f_pending.deq;
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_valid (advance);
+        rg_valid[0] <= pw_input;
+        rg_valid[1] <= rg_valid[0];
+        rg_valid[2] <= rg_valid[1];
+    endrule
 
-        HuffTableEntry_t entry = pending.is_dc ? w_dc_resp : w_ac_resp;
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_symbol (advance);
+        let pending = rg_symbol;
+        Bit#(5) mag = pending.has_extra ? calc_magnitude(rg_abs) : 0;
+        pending.mag = mag;
+        rg_pending <= pending;
+        rg_dc_req <= HuffCodeDCIdx_t {
+            pt:  rg_mode,
+            idx: truncate(mag)
+        };
+        rg_ac_req <= HuffCodeACIdx_t {
+            pt:  rg_mode,
+            idx: {rg_run, truncate(mag)}
+        };
+    endrule
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_lookup (advance);
+        rg_entry <= rg_pending.is_dc ? w_dc_resp : w_ac_resp;
+        rg_emit  <= rg_pending;
+    endrule
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_emit (advance && rg_valid[2]);
+        let pending = rg_emit;
+        let entry   = rg_entry;
         HuffCode_t out = HuffCode_t {
             huffcode: zeroExtend(entry.code),
             huffsize: entry.size,
@@ -146,7 +186,7 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         };
 
         if(pending.has_extra) begin
-            Bit#(32) code_mask = (1 << pending.mag) - 1;
+            Bit#(32) code_mask = ~(32'hffffffff << pending.mag);
             Bit#(32) extra     = zeroExtend(pending.extra) & code_mask;
             out.huffcode = (zeroExtend(entry.code) << pending.mag) | extra;
             out.huffsize = entry.size + pending.mag;
@@ -160,7 +200,7 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
         rg_coeff_idx <= 0;
         f_meta.clear;
         f_in.clear;
-        f_pending.clear;
+        writeVReg(rg_valid, replicate(False));
         f_out.clear;
     endrule
 

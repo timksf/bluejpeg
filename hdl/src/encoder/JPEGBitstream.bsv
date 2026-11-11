@@ -1,6 +1,7 @@
 package JPEGBitstream;
 
 import FIFO :: *;
+import FIFOF :: *;
 import GetPut :: *;
 import ClientServer :: *;
 import SpecialFIFOs :: *;
@@ -16,21 +17,21 @@ endinterface
 module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
 
     FIFO#(HuffCode_t) f_in;
-    FIFO#(Bit#(8))    f_out <- mkFIFO;
+    FIFO#(Bit#(8))  f_out   <- mkFIFO;
+    FIFOF#(Bit#(8)) f_bytes <- mkFIFOF;
 
     if(buffer_in)
         f_in <- mkFIFO;
     else
         f_in <- mkBypassFIFO;
 
-    //64 bit accumulator, the CReg allows r_emit (port 0) and r_accumulate (port 1) to fire in the same cycle
-    //valid bits are in positions [rg_bits-1:0]
-    //port 0: emit / flush rules and rewind, port 1: accumulate
-    Reg#(Bit#(64)) rg_buffer[2] <- mkCReg(2, 0);
-    Reg#(UInt#(7)) rg_bits[2]   <- mkCReg(2, 0);
+    //only the low rg_bits bits are valid, emission changes the count without clearing data
+    //the count CReg allows emission and accumulation in the same cycle
+    Reg#(Bit#(64)) rg_buffer  <- mkReg(0);
+    Reg#(UInt#(7)) rg_bits[2] <- mkCReg(2, 0);
 
     //stuffing: after emitting 0xFF, must emit 0x00
-    Reg#(Bool) rg_stuff[2] <- mkCReg(2, False);
+    Reg#(Bool) rg_stuff <- mkReg(False);
 
     //flush state machine
     Reg#(Bool) rg_finishing    <- mkReg(False); //seen last flag, draining bytes
@@ -40,60 +41,63 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
     //rewind only pulses, r_rewind owns the reset and the other rules stand still in that cycle
     PulseWire pw_rewind <- mkPulseWire;
 
-    //all port-0 rules are mutually exclusive
+    //emission and flush rules can update the low count port without priority
     (* conflict_free = "r_emit, r_stuff, r_pad, r_pad_done, r_check_done" *)
 
     //accept new codeword when buffer has room (port 1 sees emit updates)
-    rule r_accumulate (!pw_rewind && !rg_finishing && rg_bits[1] <= 32 && !rg_stuff[1]);
+    rule r_accumulate (!pw_rewind && !rg_finishing && rg_bits[1] <= 32);
         let cw = f_in.first; f_in.deq;
 
-        Bit#(7)  sz       = zeroExtend(cw.huffsize);
-        Bit#(64) mask     = (1 << sz) - 1;
-        Bit#(64) new_bits = zeroExtend(cw.huffcode) & mask;
+        Bit#(5)  sz       = cw.huffsize;
+        Bit#(32) mask     = ~(32'hffffffff << sz);
+        Bit#(64) new_bits = zeroExtend(cw.huffcode & mask);
 
-        rg_buffer[1] <= (rg_buffer[1] << sz) | new_bits;
-        rg_bits[1]   <= rg_bits[1] + unpack(sz);
+        rg_buffer  <= (rg_buffer << sz) | new_bits;
+        rg_bits[1] <= rg_bits[1] + zeroExtend(unpack(sz));
 
         if(cw.last) rg_finishing <= True;
     endrule
 
     //emit full bytes from the accumulator msb-first (port 0)
-    rule r_emit (!pw_rewind && rg_bits[0] >= 8 && !rg_stuff[0]);
+    rule r_emit (!pw_rewind && rg_bits[0] >= 8);
         Bit#(7) shift_amt = pack(rg_bits[0] - 8);
-        Bit#(8) out_byte  = truncate(rg_buffer[0] >> shift_amt);
-        f_out.enq(out_byte);
+        Bit#(8) out_byte  = truncate(rg_buffer >> shift_amt);
+        f_bytes.enq(out_byte);
         rg_bits[0] <= rg_bits[0] - 8;
+    endrule
 
-        //clear emitted bits so port 1 (accumulate) sees a clean buffer
-        Bit#(64) remain_mask = (1 << shift_amt) - 1;
-        rg_buffer[0] <= rg_buffer[0] & remain_mask;
-
-        if(out_byte == 8'hFF) rg_stuff[0] <= True;
+    //a registered byte boundary separates extraction from stuffing detection
+    rule r_forward (!pw_rewind && !rg_stuff);
+        let out_byte = f_bytes.first;
+        f_bytes.deq;
+        f_out.enq(out_byte);
+        rg_stuff <= out_byte == 8'hff;
     endrule
 
     //emit 0x00 stuffing byte after 0xFF
-    rule r_stuff (!pw_rewind && rg_stuff[0]);
+    rule r_stuff (!pw_rewind && rg_stuff);
         f_out.enq(8'h00);
-        rg_stuff[0] <= False;
+        rg_stuff <= False;
     endrule
 
     //flush: inject 1-bit padding to complete the final byte
-    rule r_pad (!pw_rewind && rg_finishing && !rg_pad_injected && rg_bits[0] > 0 && rg_bits[0] < 8 && !rg_stuff[0]);
-        Bit#(7)  pad  = pack(8 - rg_bits[0]);
-        Bit#(64) ones = (1 << pad) - 1;
-        rg_buffer[0] <= (rg_buffer[0] << pad) | ones;
+    rule r_pad (!pw_rewind && rg_finishing && !rg_pad_injected && rg_bits[0] > 0 && rg_bits[0] < 8 && !rg_stuff);
+        Bit#(3) pad  = truncate(pack(8 - rg_bits[0]));
+        Bit#(8) ones = ~(8'hff << pad);
+        Bit#(8) tail = truncate(rg_buffer);
+        rg_buffer <= zeroExtend((tail << pad) | ones);
         rg_bits[0] <= 8;
         rg_pad_injected <= True;
     endrule
 
     //flush with zero remaining bits (codeword aligned to byte boundary)
-    rule r_pad_done (!pw_rewind && rg_finishing && !rg_pad_injected && rg_bits[0] == 0 && !rg_stuff[0]);
+    rule r_pad_done (!pw_rewind && rg_finishing && !rg_pad_injected && rg_bits[0] == 0 && !rg_stuff && !f_bytes.notEmpty);
         rg_done <= True;
         rg_finishing <= False;
     endrule
 
     //final byte emitted and all stuffing done -> signal completion
-    rule r_check_done (!pw_rewind && rg_finishing && rg_pad_injected && rg_bits[0] == 0 && !rg_stuff[0]);
+    rule r_check_done (!pw_rewind && rg_finishing && rg_pad_injected && rg_bits[0] == 0 && !rg_stuff && !f_bytes.notEmpty);
         rg_done <= True;
         rg_finishing <= False;
         rg_pad_injected <= False;
@@ -101,14 +105,15 @@ module mkJPEGBitstream#(Bool buffer_in)(JPEGBitstream_ifc);
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule r_rewind (pw_rewind);
-        rg_buffer[0]    <= 0;
-        rg_bits[0]      <= 0;
-        rg_stuff[0]     <= False;
+        rg_buffer       <= 0;
+        rg_bits[0]       <= 0;
+        rg_stuff        <= False;
         rg_finishing    <= False;
         rg_pad_injected <= False;
         rg_done         <= False;
         f_in.clear;
         f_out.clear;
+        f_bytes.clear;
     endrule
 
     method Bool scan_done() = rg_done;

@@ -39,6 +39,7 @@ module mkRLE(RLE_ifc#(bits))
 
     FIFO#(Int#(bits))      f_in  <- mkBypassFIFO;
     FIFO#(RLETag_t#(bits)) f_out <- mkFIFO;
+    FIFO#(Tuple2#(Bool, Int#(bits))) f_classified <- mkFIFO;
 
     Reg#(Bit#(6)) rg_idx      <- mkReg(0);
     Reg#(Bit#(6)) rg_zero_run <- mkReg(0);
@@ -60,8 +61,15 @@ module mkRLE(RLE_ifc#(bits))
     //rewind only pulses, r_rewind owns the reset and the processing rules stand still in that cycle
     PulseWire pw_rewind <- mkPulseWire;
 
+    rule r_classify (!pw_rewind);
+        let val = f_in.first;
+        f_in.deq;
+        f_classified.enq(tuple2(val == 0, val));
+    endrule
+
     rule r_process_dc (!pw_rewind && rg_idx == 0 && !isValid(rg_stall_val));
-        let val = f_in.first; f_in.deq;
+        match {.is_zero, .val} = f_classified.first;
+        f_classified.deq;
 
         let comp = f_comp.first;
         let prev = prev_dc_reg(comp);
@@ -74,9 +82,10 @@ module mkRLE(RLE_ifc#(bits))
     endrule
 
     rule r_process_ac (!pw_rewind && rg_idx > 0 && !isValid(rg_stall_val));
-        let val = f_in.first; f_in.deq;
+        match {.is_zero, .val} = f_classified.first;
+        f_classified.deq;
 
-        if(val == 0) begin
+        if(is_zero) begin
             if(rg_idx == 63) begin
                 //if last value is zero, emit EOB
                 f_out.enq(tagged EOB);
@@ -136,6 +145,7 @@ module mkRLE(RLE_ifc#(bits))
         rg_stall_val <= tagged Invalid;
         f_comp.clear;
         f_in.clear;
+        f_classified.clear;
         f_out.clear;
     endrule
 

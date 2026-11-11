@@ -81,6 +81,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
 
     //pre-computed sum(BITS) for current DHT table
     Reg#(UInt#(9)) rg_huffval_total <- mkReg(0);
+    Reg#(UInt#(9)) rg_huffval_last  <- mkRegU;
 
     //combinational table read wires (client side)
     Wire#(QuantTableIdx_t) w_qraw_req  <- mkWire;
@@ -272,8 +273,9 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
             rg_huffval_total <= rg_huffval_total + extend(w_hbits_resp);
             rg_cnt <= rg_cnt + 1;
         end else begin
-            rg_cnt   <= 0;
-            rg_state <= DHT_HEAD;
+            rg_huffval_last <= rg_huffval_total - 1;
+            rg_cnt          <= 0;
+            rg_state        <= DHT_HEAD;
         end
     endrule
 
@@ -317,7 +319,7 @@ module mkJPEGFramewriter#(Bool en_chroma)(JPEGFramewriter_ifc);
     //emit HUFFVAL bytes
     rule r_dht_val (rg_state == DHT_VAL);
         enq_out(pack(w_hval_resp), False);
-        if(rg_cnt == rg_huffval_total - 1) begin
+        if(rg_cnt == rg_huffval_last) begin
             rg_cnt           <= 0;
             rg_huffval_total <= 0;
             if(last_dht_table(rg_dht))

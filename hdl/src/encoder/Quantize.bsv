@@ -1,6 +1,7 @@
 package Quantize;
 
 import FIFO :: *;
+import FIFOF :: *;
 import Vector :: *;
 import GetPut :: *;
 import Connectable :: *;
@@ -141,8 +142,8 @@ module mkQuantize_RT#(NumProxy_t#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#
         Add#(a__, bits_frac, 32)         //bits_frac <= 32
     );
 
-    FIFO#(Int#(bits)) f_i;
-    FIFO#(Int#(bits)) f_o <- mkFIFO;
+    FIFO#(Int#(bits))  f_i;
+    FIFOF#(Int#(bits)) f_o <- mkGFIFOF(True, False);
 
     if(buffer_in)
         f_i <- mkFIFO;
@@ -152,56 +153,77 @@ module mkQuantize_RT#(NumProxy_t#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#
     Reg#(Bit#(6))    rg_pxcnt <- mkReg(0);
     FIFO#(PixType_t) f_mode   <- mkSizedFIFO(4);
 
-    FIFO#(Int#(bits))                   f_table_pending <- mkPipelineFIFO;
-    FIFO#(QuantMul_t#(bits, bits_frac)) f_mul           <- mkPipelineFIFO;
-    FIFO#(Int#(bits_mul))               f_prod          <- mkPipelineFIFO;
+    Reg#(QuantTableIdx_t) rg_tableidx <- mkRegU;
+    Wire#(Int#(32))       w_mult      <- mkDWire(?);
+    PulseWire            pw_rewind   <- mkPulseWire;
+    PulseWire            pw_input    <- mkPulseWire;
+    Bool                 advance      = f_o.notFull && !pw_rewind;
 
-    Reg#(QuantTableIdx_t) rg_tableidx <- mkReg(QuantTableIdx_t { pt: Luma, idx: 0 });
-    Wire#(Int#(32))       w_mult      <- mkWire;
+    //rigid stages isolate table lookup, operand magnitudes, multiplication and signed rounding
+    Reg#(Int#(bits))        rg_value        <- mkRegU;
+    Reg#(UInt#(bits))       rg_magnitude    <- mkRegU;
+    Reg#(UInt#(coeff_bits)) rg_multiplier   <- mkRegU;
+    Reg#(Bool)              rg_negative     <- mkRegU;
+    Reg#(UInt#(bits_mul))   rg_product      <- mkRegU;
+    Reg#(Bool)              rg_product_sign <- mkRegU;
+    Reg#(Int#(bits_mul))    rg_signed       <- mkRegU;
+    Vector#(4, Reg#(Bool))  rg_valid        <- replicateM(mkReg(False));
 
-    rule r_table_req;
+    rule r_table_req (advance);
         let val = f_i.first;
         f_i.deq;
-
-        rg_tableidx <= QuantTableIdx_t { pt: f_mode.first, idx: rg_pxcnt };
-        f_table_pending.enq(val);
-
+        rg_tableidx <= QuantTableIdx_t {
+            pt:  f_mode.first,
+            idx: rg_pxcnt
+        };
+        rg_value <= val;
+        pw_input.send;
         if(rg_pxcnt == 63) f_mode.deq;
         rg_pxcnt <= rg_pxcnt + 1;
     endrule
 
-    rule r_table_resp;
-        let val = f_table_pending.first;
-        f_table_pending.deq;
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_valid (advance);
+        rg_valid[0] <= pw_input;
+        for(Integer stage = 1; stage < 4; stage = stage + 1)
+            rg_valid[stage] <= rg_valid[stage - 1];
+    endrule
 
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_magnitudes (advance);
         Int#(bits_frac) mult = truncate(w_mult);
-        f_mul.enq(QuantMul_t { val: val, mult: mult });
+        UInt#(bits_frac) magnitude_mult = unpack(pack(abs(mult)));
+        rg_magnitude  <= unpack(pack(abs(rg_value)));
+        rg_multiplier <= zeroExtend(magnitude_mult);
+        rg_negative   <= (rg_value < 0) != (mult < 0);
     endrule
 
-    rule r_mul;
-        let qm = f_mul.first;
-        f_mul.deq;
-
-        Int#(coeff_bits) f_const = signExtend(qm.mult);
-        Int#(bits_mul)   prod    = signedMul(qm.val, f_const);
-        f_prod.enq(prod);
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_mul (advance);
+        rg_product      <= zeroExtend(rg_magnitude) * zeroExtend(rg_multiplier);
+        rg_product_sign <= rg_negative;
     endrule
 
-    rule r_quant;
-        let prod = f_prod.first;
-        f_prod.deq;
-
-        Int#(bits_mul) prod_r = satPlus(Sat_Bound, prod, (1 << fromInteger(valueOf(bits_frac) - 1)));
-        f_o.enq(truncate(prod_r >> valueOf(bits_frac)));
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_sign (advance);
+        Int#(bits_mul) prod = unpack(pack(rg_product));
+        rg_signed <= rg_product_sign ? -prod : prod;
     endrule
 
-    method Action rewind();
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_quant (advance && rg_valid[3]);
+        Int#(bits_mul) rounded = satPlus(Sat_Bound, rg_signed, (1 << fromInteger(valueOf(bits_frac) - 1)));
+        f_o.enq(truncate(rounded >> valueOf(bits_frac)));
+    endrule
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_rewind (pw_rewind);
         rg_pxcnt <= 0;
         f_mode.clear;
-        f_table_pending.clear;
-        f_mul.clear;
-        f_prod.clear;
-    endmethod
+        writeVReg(rg_valid, replicate(False));
+    endrule
+
+    method rewind = pw_rewind.send;
 
     interface du_mode   = toPut(f_mode);
     interface qtable    = toGPClient(rg_tableidx, asReg(w_mult));

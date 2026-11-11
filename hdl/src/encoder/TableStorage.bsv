@@ -27,6 +27,12 @@ typedef enum {
     HuffvalChromaAC
 } TableType_t deriving(Bits, Eq, FShow);
 
+typedef struct {
+    HuffTableType_t      table_id;
+    HuffTableEntry_t     entry;
+    Vector#(4, UInt#(8)) symbols;
+} HuffCodegenWrite_t deriving(Bits, Eq, FShow);
+
 //huff table to index (in case bit encoding is unexpected)
 function Bit#(2) huff_table_idx(HuffTableType_t htt);
     return case(htt)
@@ -160,13 +166,15 @@ module mkTableStorage#(NumProxy_t#(qwidth) qp, Bool transposed)(TableStorage_ifc
     endrule
 
     //Annex C.2 code generation FSM
-    Reg#(Bool)              rg_cg_active <- mkReg(False);
-    Reg#(HuffTableType_t)   rg_cg_table  <- mkRegU;
-    Reg#(Bit#(5))           rg_cg_si     <- mkRegU; //current code length (1..16)
-    Reg#(UInt#(8))          rg_cg_j      <- mkRegU; //counter within current length
-    Reg#(Bit#(9))           rg_cg_k      <- mkRegU; //running HUFFVAL index
-    Reg#(Bit#(16))          rg_cg_code   <- mkRegU; //running code value
-    FIFO#(HuffTableWrite_t) f_cg_write   <- mkPipelineFIFO;
+    Reg#(Bool)                rg_cg_active <- mkReg(False);
+    Reg#(HuffTableType_t)     rg_cg_table  <- mkRegU;
+    Reg#(Bit#(5))             rg_cg_si     <- mkRegU; //current code length (1..16)
+    Reg#(UInt#(8))            rg_cg_j      <- mkRegU; //counter within current length
+    Reg#(Bit#(9))             rg_cg_k      <- mkRegU; //running HUFFVAL index
+    Reg#(Bit#(16))            rg_cg_code   <- mkRegU; //running code value
+    Reg#(Bool)                rg_cg_load   <- mkReg(False);
+    Reg#(UInt#(8))            rg_cg_count  <- mkRegU;
+    FIFO#(HuffCodegenWrite_t) f_cg_write   <- mkPipelineFIFO;
 
     //code tables start uninitialized, so all four are generated from the default tables once after reset
     Reg#(UInt#(3)) rg_boot_cg   <- mkReg(0);
@@ -181,6 +189,7 @@ module mkTableStorage#(NumProxy_t#(qwidth) qp, Bool transposed)(TableStorage_ifc
             rg_cg_j      <= 0;
             rg_cg_k      <= 0;
             rg_cg_code   <= 0;
+            rg_cg_load   <= True;
         endaction
     endfunction
 
@@ -194,43 +203,46 @@ module mkTableStorage#(NumProxy_t#(qwidth) qp, Bool transposed)(TableStorage_ifc
         f_cg_write.deq;
 
         case(wr.table_id)
-            DC_Luma:    i_huff_code_dc[0].upd(truncate(wr.addr), wr.entry);
-            DC_Chroma:  i_huff_code_dc[1].upd(truncate(wr.addr), wr.entry);
-            AC_Luma:    i_huff_code_ac[0].upd(wr.addr, wr.entry);
-            AC_Chroma:  i_huff_code_ac[1].upd(wr.addr, wr.entry);
+            DC_Luma:    i_huff_code_dc[0].upd(truncate(pack(wr.symbols[0])), wr.entry);
+            DC_Chroma:  i_huff_code_dc[1].upd(truncate(pack(wr.symbols[1])), wr.entry);
+            AC_Luma:    i_huff_code_ac[0].upd(pack(wr.symbols[2]), wr.entry);
+            AC_Chroma:  i_huff_code_ac[1].upd(pack(wr.symbols[3]), wr.entry);
         endcase
     endrule
 
-    rule r_codegen (rg_cg_active);
-        //steps:
-        //1. retrieve number of symbols length rg_cg_si
-        //2. build as many codes of that length as required
-        //3. increase length and repeat until length 16
+    rule r_codegen_count (rg_cg_active && rg_cg_load);
+        rg_cg_count <= i_huff_bits[huff_table_idx(rg_cg_table)].sub(truncate(rg_cg_si - 1));
+        rg_cg_load <= False;
+    endrule
 
-        let bits_count = i_huff_bits[huff_table_idx(rg_cg_table)].sub(truncate(rg_cg_si - 1));
+    rule r_codegen (rg_cg_active && !rg_cg_load);
+        //the per-length count is registered before the code-generation loop
+
         if(rg_cg_si > 16) begin
             //done
             rg_cg_active <= False;
             //could terminate size table with a 0 here
-        end else if(rg_cg_j >= bits_count) begin
+        end else if(rg_cg_j >= rg_cg_count) begin
             //no more symbols at this length
             rg_cg_code <= rg_cg_code << 1;
             rg_cg_si   <= rg_cg_si + 1;
             rg_cg_j    <= 0;
+            rg_cg_load <= rg_cg_si < 16;
         end else begin
             //write generated code into code table
-            let tbl_idx = huff_table_idx(rg_cg_table);
             //symbol (index into huffman table) retrieved from huffval (contains symbols sorted by length)
-            UInt#(8) symbol = i_huff_val[tbl_idx].sub(truncate(rg_cg_k));
+            Vector#(4, UInt#(8)) symbols = newVector;
+            for(Integer table_index = 0; table_index < 4; table_index = table_index + 1)
+                symbols[table_index] = i_huff_val[table_index].sub(truncate(rg_cg_k));
             let entry = HuffTableEntry_t {
                 code: rg_cg_code,
                 size: truncate(rg_cg_si)
             };
 
-            f_cg_write.enq(HuffTableWrite_t {
+            f_cg_write.enq(HuffCodegenWrite_t {
                 table_id: rg_cg_table,
-                addr: pack(symbol),
-                entry: entry
+                entry:    entry,
+                symbols:  symbols
             });
 
             //TODO stop if symbol 0?
