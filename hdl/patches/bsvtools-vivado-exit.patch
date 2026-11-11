@@ -1,0 +1,33 @@
+diff --git a/scripts/bsvTools.py b/scripts/bsvTools.py
+index c525421..13492fe 100755
+--- a/scripts/bsvTools.py
++++ b/scripts/bsvTools.py
+@@ -242,6 +242,7 @@ set top_module {{{top_module}}}
+ set script_path {{{script_path}}}
+ 
+ puts "Creating project $project_name at path $project_dir"
++if {{[catch {{
+ create_project -part {part} -force $project_name $project_dir
+ 
+ read_verilog [glob -directory $src_path *.v]
+@@ -252,6 +253,11 @@ if {{[file exists $script_path]}} {{
+ }}
+ 
+ close_project
++}} message options]}} {{
++    puts stderr "ERROR: $message"
++    puts stderr [dict get $options -errorinfo]
++    exit 1
++}}
+ exit 0
+ """
+ 
+@@ -288,6 +294,8 @@ exit 0
+         for line in proc.stdout:
+             print(line, end="")
+     os.remove('temp.tcl')
++    if proc.returncode:
++        sys.exit(proc.returncode)
+ 
+ commands = {'mkVivado': mkVivado, 'mkVivadoTCL': mkVivadoTCL}
+ 

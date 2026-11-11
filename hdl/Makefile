@@ -5,6 +5,14 @@
 #   make bitstream                              PA200T bitstream via BSVTools vivado_tcl (src/fpga/pa200t/script/synth.tcl)
 #   make bitstream SYNTH=ooc TOP_MODULE=mkBlueJPEGTop_1920_12   out-of-context synthesis of a core variant (src/synth)
 
+ifeq ($(SYSTEM),udp)
+UDP_MEMORY      ?= mig
+MAIN_MODULE      := fpga/pa200t_udp/PA200T_UDP_JPEG
+TOP_MODULE       ?= mkPA200T_UDP_JPEG_Top
+PROJECT_NAME     := BlueJPEG_PA200T_UDP
+SCRIPT           := $(CURDIR)/src/fpga/pa200t_udp/script/synth.tcl
+endif
+
 ifeq ($(SYNTH),ooc)
 MAIN_MODULE      := synth/SynthTest
 TOP_MODULE       ?= mkBlueJPEGTop_1920_12
@@ -24,7 +32,7 @@ BSV_TOOLS        ?= $(abspath ../dep/BSVTools)
 PART             := xc7a200tfbg484-2
 SCRIPT           ?= $(CURDIR)/src/fpga/pa200t/script/synth.tcl
 
-BUILDDIR ?= build/$(if $(filter VERILOG,$(SIM_TYPE)),$(PROJECT_NAME),$(RUN_TEST))
+BUILDDIR ?= build/$(if $(filter VERILOG,$(SIM_TYPE)),$(PROJECT_NAME)$(if $(filter udp,$(SYSTEM)),_$(UDP_MEMORY)),$(RUN_TEST))
 
 ASSETS_DIR := $(abspath ../assets)
 ROM_DIR    := $(CURDIR)/rom
@@ -32,13 +40,27 @@ ROM_FILES  := $(wildcard $(ROM_DIR)/*.mem)
 
 VIVADO_ADD_PARAMS :=
 CONSTRAINT_FILES  :=
-EXTRA_BSV_LIBS    := $(addprefix $(CURDIR)/src/,encoder system synth fpga/pa200t) $(TEST_DIR)/bdpi
+EXTRA_BSV_LIBS    := $(addprefix $(CURDIR)/src/,encoder system system_udp synth fpga/pa200t fpga/pa200t_udp) $(TEST_DIR)/bdpi
 EXTRA_LIBRARIES   := png X11 z pthread
 RUN_FLAGS         :=
 
 EXTRA_FLAGS := -D "RUN_TEST=$(RUN_TEST)" -D "TESTNAME=mk$(RUN_TEST)"
 EXTRA_FLAGS += -show-schedule -D "BSV_TIMESCALE=1ns/1ps" -aggressive-conditions
 EXTRA_FLAGS += -D ASSETS_DIR=\"$(ASSETS_DIR)\"
+
+ifeq ($(UDP_TEST_1080P),1)
+EXTRA_FLAGS += -D UDP_TEST_1080P
+endif
+
+ifeq ($(SYSTEM),udp)
+ifeq ($(UDP_MEMORY),bram)
+EXTRA_FLAGS += -D UDP_USE_BRAM
+else ifeq ($(UDP_MEMORY),mig)
+VERILOGDIR_EXTRAS += $(CURDIR)/src/fpga/pa200t_udp/ip/mig_wrapper.v
+else
+$(error UDP_MEMORY must be mig or bram)
+endif
+endif
 
 # Bluesim only: C++ reference models (test/bdpi) and image I/O
 CXX_NO_OPT := 1

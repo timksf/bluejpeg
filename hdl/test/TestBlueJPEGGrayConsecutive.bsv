@@ -138,6 +138,8 @@ module [Module] mkBlueJPEGConsecutiveTest#(Bool en_chroma, Bool double_buffer_ti
                 id: 0,
                 last: is_last
             });
+            //a request during a running frame must not queue another frame
+            if(rg_pixel_idx == 16) dut.start_frame();
             rg_pixel_idx <= rg_pixel_idx + 1;
         endaction
     endseq;
@@ -187,12 +189,14 @@ module [Module] mkBlueJPEGConsecutiveTest#(Bool en_chroma, Bool double_buffer_ti
     endseq;
 
     Stmt start_frame = seq
-        action
-            let start_bit <- i_cfg_acc.field_bit("CTRL", "START");
-            Bit#(32) start_mask = 1 << start_bit;
-            i_cfg_acc.write_reg_req("CTRL", start_mask);
-        endaction
-        bjpeg_expect_wr_ok(i_cfg_acc);
+        if(rg_frame_idx == 0) seq
+            action
+                let      start_bit  <- i_cfg_acc.field_bit("CTRL", "START");
+                Bit#(32) start_mask = 1 << start_bit;
+                i_cfg_acc.write_reg_req("CTRL", start_mask);
+            endaction
+            bjpeg_expect_wr_ok(i_cfg_acc);
+        endseq else dut.start_frame();
 
         await(dut.s_axis.tready());
 
@@ -297,6 +301,14 @@ module [Module] mkBlueJPEGConsecutiveTest#(Bool en_chroma, Bool double_buffer_ti
                 end
             endaction
         endseq
+
+        delay(32);
+        action
+            if(dut.busy) begin
+                print_s("ERROR: a start request made while busy queued an extra frame", RED);
+                $fatal(1);
+            end
+        endaction
 
         print_fmt($format("Two byte-identical JPEG frames complete, total bytes: %0d",
             rg_total_count), GREEN);

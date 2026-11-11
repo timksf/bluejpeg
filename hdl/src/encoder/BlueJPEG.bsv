@@ -45,6 +45,9 @@ interface BlueJPEG_ifc;
     //a frame is in progress, from the accepted start request until done
     (* always_ready, result="busy" *)
     method Bool busy;
+
+    //request a frame, same effect as writing CTRL.START
+    method Action start_frame();
 endinterface
 
 typedef struct {
@@ -199,9 +202,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     //control state
 
-    Reg#(FrameState_t) rg_state    <- mkReg(S_IDLE);
-    Reg#(Bool)         rg_booted   <- mkReg(False); //tables were ready once since reset
-    PulseWire          pw_pixel_in <- mkPulseWire;  //a pixel entered the pipeline this cycle
+    Reg#(FrameState_t) rg_state       <- mkReg(S_IDLE);
+    Reg#(Bool)         rg_booted      <- mkReg(False); //tables were ready once since reset
+    PulseWire          pw_pixel_in    <- mkPulseWire;  //a pixel entered the pipeline this cycle
+    PulseWire          pw_start_frame <- mkPulseWire;
 
     //DU counting: tracks phase through interleaved MCU scan
     Reg#(Bit#(16)) rg_mcu_w <- mkRegU;
@@ -336,10 +340,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
             rg_du_pix <= rg_du_pix + 1;
     endrule
 
-    //start handling (driven by CTRL register)
+    //start handling from the CTRL register or the system frame request
 
     //a pending codegen request runs before a start is accepted
-    rule r_start (rg_state == S_IDLE && i_csrs.internal.start() && !i_csrs.internal.codegen_trig() && i_tables.ready());
+    rule r_start (rg_state == S_IDLE && (i_csrs.internal.start() || pw_start_frame) && !i_csrs.internal.codegen_trig() && i_tables.ready());
         //consume each request once, including rejected configurations
         i_csrs.internal.clear_start();
         let cfg_valid = True;
@@ -420,6 +424,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     method irq             = i_axi_csrs.irqs[0];
     method busy            = rg_state != S_IDLE;
+    method start_frame     = pw_start_frame.send;
 
 endmodule
 

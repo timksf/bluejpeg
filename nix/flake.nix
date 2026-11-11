@@ -58,6 +58,8 @@
                         ninja
                         bluespec
                         iverilog
+                        openocd
+                        tcl
                         vscode-extensions.ms-vscode.cmake-tools
                     ]);
                 };

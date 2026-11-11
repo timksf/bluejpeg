@@ -8,6 +8,9 @@ a ready-to-use core.
 
 [Hardware architecture diagram](assets/architecture/bluejpeg-architecture.pdf)
 
+The separate PA200T DDR3/UDP test system, host tools and validation commands are
+documented in [UDP system bring-up](docs/udp-system.md).
+
 ### Compile-time parameters
 
 | Parameter       | Purpose                                            | Example    |

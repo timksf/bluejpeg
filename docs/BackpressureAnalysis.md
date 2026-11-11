@@ -1,5 +1,9 @@
 # BlueJPEG backpressure measurement
 
+Historical measurement from 2026-09-20. The ZigZag scheduling conflict described
+below has since been fixed. See [the current UDP encoder analysis](udp-encoder-analysis.md)
+for current resource counts, critical paths and the tiler read-rate bottleneck.
+
 Measured 2026-09-20 using the current working-tree TestBlueJPEG and sample_192x192.bmp, 4:4:4, chroma enabled, same clock for both DU clock domains, default tables. Two isolated builds changed only double_buffer_tiler. No production source changes. Both simulations passed, produced byte-identical 3,527-byte JPEGs, and decoded to 192x192.
 
 ## Timing and input backpressure
