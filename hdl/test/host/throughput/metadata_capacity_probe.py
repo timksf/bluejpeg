@@ -22,7 +22,7 @@ manifest = {'depth': args.depth, 'packages': {}}
 for filename, fifo, expected in [('HuffEncoder.bsv', 'f_meta', 1), ('RLE.bsv', 'f_comp', 1), ('Quantize.bsv', 'f_mode', 2)]:
     source = repo / 'hdl/src/encoder' / filename
     original = source.read_text()
-    modified, count = re.subn(r'(' + fifo + r'\s*<-\s*mkSizedFIFO\()4(\))', lambda m: m[1] + str(args.depth) + m[2], original)
+    modified, count = re.subn(r'(' + fifo + r'\s*<-\s*mkSizedFIFO\()\d+(\))', lambda m: m[1] + str(args.depth) + m[2], original)
     assert count == expected, (filename, count)
     (args.output / filename).write_text(modified)
     manifest['packages'][filename] = {'fifo': fifo, 'source_sha256': hashlib.sha256(original.encode()).hexdigest(), 'changed_declarations': count}

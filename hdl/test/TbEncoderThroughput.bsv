@@ -166,6 +166,12 @@ module [Module] mkEncoderThroughput#(Integer dct_divider)(TestHandler_ifc);
             action
                 let response <- i_cfg.read_reg_rsp;
                 $display("DIRECT_TOTAL %0d", tpl_1(response));
+                // Allow 5% for strip filling and draining, including the smaller fixture.
+                // Four DU metadata credits at main/8 exceed this budget by a wide margin.
+                if(tpl_2(response) != CSR_OKAY || tpl_1(response) > fromInteger(3 * pixels * 105 / 100)) begin
+                    $display("ERROR: encoder throughput below budget (DCT divider %0d)", dct_divider);
+                    $fatal(1);
+                end
             endaction
             rg_frame <= rg_frame + 1;
         endseq

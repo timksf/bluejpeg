@@ -44,8 +44,8 @@ module mkRLE(RLE_ifc#(bits))
     Reg#(Bit#(6)) rg_idx      <- mkReg(0);
     Reg#(Bit#(6)) rg_zero_run <- mkReg(0);
 
-    //per-DU component ID via FIFO (0=Y, 1=Cb, 2=Cr)
-    FIFO#(Bit#(2)) f_comp <- mkSizedFIFO(4);
+    // Per-DU component ID (0=Y, 1=Cb, 2=Cr); eight credits cover the main/8 DCT latency.
+    FIFO#(Bit#(2)) f_comp <- mkSizedFIFO(8);
 
     //separate DC predictor per component (JPEG requires per-component)
     Vector#(3, Reg#(Int#(bits))) rg_prev_dc <- replicateM(mkReg(0));

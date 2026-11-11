@@ -56,7 +56,8 @@ module mkHuffEncoder(HuffEncoder_ifc#(bits))
     Vector#(3, Reg#(Bool))     rg_valid   <- replicateM(mkReg(False));
     PulseWire                  pw_input   <- mkPulseWire;
 
-    FIFO#(HuffDUMeta_t) f_meta       <- mkSizedFIFO(4);
+    // Match the dispatch credit window through quantization and RLE at main/8.
+    FIFO#(HuffDUMeta_t) f_meta       <- mkSizedFIFO(8);
     Reg#(Bit#(6))       rg_coeff_idx <- mkReg(0);
 
     //rewind only pulses, r_rewind owns the reset and the processing rules stand still in that cycle

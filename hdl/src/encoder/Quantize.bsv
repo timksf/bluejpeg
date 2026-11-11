@@ -150,8 +150,9 @@ module mkQuantize_RT#(NumProxy_t#(bits_frac) f_scale, Bool buffer_in)(Quant_ifc#
     else
         f_i <- mkBypassFIFO;
 
+    // Eight DU credits cover the main/8 DCT latency; see docs/throughput-cycles.md.
     Reg#(Bit#(6))    rg_pxcnt <- mkReg(0);
-    FIFO#(PixType_t) f_mode   <- mkSizedFIFO(4);
+    FIFO#(PixType_t) f_mode   <- mkSizedFIFO(8);
 
     Reg#(QuantTableIdx_t) rg_tableidx <- mkRegU;
     Wire#(Int#(32))       w_mult      <- mkDWire(?);
