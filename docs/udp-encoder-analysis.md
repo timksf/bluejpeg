@@ -1,5 +1,7 @@
 # UDP encoder resources, timing and throughput
 
+This is the historical pre-timing-fix measurement. See [the current cycle-only throughput analysis](throughput-cycles.md) for the resolved tiler limit, the 8:1 metadata-capacity bottleneck, and UDP output stalls.
+
 Measured on the PA200T with the completed DDR3 UDP system on 2026-11-10.
 The encoder configuration is 1920-pixel maximum width, 8-bit YCbCr 4:4:4,
 12-bit DCT and quantization scales, double-buffered tiling, and one shared
