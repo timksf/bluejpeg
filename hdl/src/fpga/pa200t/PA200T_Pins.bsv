@@ -5,7 +5,7 @@ interface PadIn_ifc;
     //pad side, a method of the synthesized top
     method Action  pad(Bit#(1) b);
     //buffered value without clock and reset, the reader synchronizes it
-    method Bit#(1) i();
+    method Bit#(1) i;
 endinterface
 
 /*
@@ -20,7 +20,7 @@ module mkPadIn#(Clock pad_clk)(PadIn_ifc);
     default_reset no_reset;
     input_clock pad_clk() = pad_clk;
 
-    method pad(I) enable((*inhigh*) EN_PAD) clocked_by(pad_clk) reset_by(no_reset);
+    method pad(I) enable((* inhigh *) EN_PAD) clocked_by(pad_clk) reset_by(no_reset);
     method O i() clocked_by(no_clock) reset_by(no_reset);
 
     path(I, O);

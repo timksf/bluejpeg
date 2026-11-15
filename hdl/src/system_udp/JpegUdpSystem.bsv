@@ -3,7 +3,6 @@ package JpegUdpSystem;
 import Clocks :: *;
 import Connectable :: *;
 import GetPut :: *;
-
 import AXI4_Lite_Slave :: *;
 import AXI4_Master :: *;
 import AXI4_Stream :: *;
@@ -37,38 +36,38 @@ interface JpegUdpSystem_ifc;
 endinterface
 
 module [Module] mkJpegUdpSystem#(Bool calibrated)(JpegUdpSystem_ifc);
-    let clk <- exposeCurrentClock;
-    let rst <- exposeCurrentReset;
-    let i_sys <- mkJpegUdpSystemDct(calibrated, clk, rst);
+    Clock             clk_sys <- exposeCurrentClock;
+    Reset             rst_sys <- exposeCurrentReset;
+    JpegUdpSystem_ifc i_sys   <- mkJpegUdpSystemDct(calibrated, clk_sys, rst_sys);
     return i_sys;
 endmodule
 
-module [Module] mkUdpEncoder#(Clock dct_clock, Reset dct_reset)(BlueJPEG_ifc);
+module [Module] mkUdpEncoder#(Clock clk_dct, Reset rst_dct)(BlueJPEG_ifc);
     BlueJPEGCfg_t#(1920, 12, 12, 8) cfg = BlueJPEGCfg_t {
-        slow_clock         : dct_clock,
-        slow_reset         : dct_reset,
-        _prx_miw           : ?,
-        _prx_dsc           : ?,
-        _prx_qsc           : ?,
-        _prx_pixw          : ?,
-        en_tiler           : True,
+        slow_clock:          clk_dct,
+        slow_reset:          rst_dct,
+        _prx_miw:            ?,
+        _prx_dsc:            ?,
+        _prx_qsc:            ?,
+        _prx_pixw:           ?,
+        en_tiler:            True,
         double_buffer_tiler: True,
-        en_chroma          : True
+        en_chroma:           True
     };
-    let i_encoder <- mkBlueJPEG(cfg);
+    BlueJPEG_ifc i_encoder <- mkBlueJPEG(cfg);
     return i_encoder;
 endmodule
 
-module [Module] mkJpegUdpSystemDct#(Bool calibrated, Clock dct_clock, Reset dct_reset)(JpegUdpSystem_ifc);
-    let i_encoder <- mkUdpEncoder(dct_clock, dct_reset);
-    let i_sys <- mkJpegUdpSystemEncoder(calibrated, i_encoder);
+module [Module] mkJpegUdpSystemDct#(Bool calibrated, Clock clk_dct, Reset rst_dct)(JpegUdpSystem_ifc);
+    BlueJPEG_ifc      i_encoder <- mkUdpEncoder(clk_dct, rst_dct);
+    JpegUdpSystem_ifc i_sys     <- mkJpegUdpSystemEncoder(calibrated, i_encoder);
     return i_sys;
 endmodule
 
-module [Module] mkJpegUdpSystemAsync#(Bool calibrated, Clock encoder_clock, Reset encoder_reset, Clock dct_clock, Reset dct_reset)(JpegUdpSystem_ifc);
-    let i_encoder <- mkUdpEncoder(dct_clock, dct_reset, clocked_by encoder_clock, reset_by encoder_reset);
-    let i_encoder_cdc <- mkBlueJPEGClockCrossing(encoder_clock, encoder_reset, i_encoder);
-    let i_sys <- mkJpegUdpSystemEncoder(calibrated, i_encoder_cdc);
+module [Module] mkJpegUdpSystemAsync#(Bool calibrated, Clock clk_enc, Reset rst_enc, Clock clk_dct, Reset rst_dct)(JpegUdpSystem_ifc);
+    BlueJPEG_ifc      i_encoder     <- mkUdpEncoder(clk_dct, rst_dct, clocked_by clk_enc, reset_by rst_enc);
+    BlueJPEG_ifc      i_encoder_cdc <- mkBlueJPEGClockCrossing(clk_enc, rst_enc, i_encoder);
+    JpegUdpSystem_ifc i_sys         <- mkJpegUdpSystemEncoder(calibrated, i_encoder_cdc);
     return i_sys;
 endmodule
 
@@ -78,16 +77,16 @@ module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(Jpe
     UdpPacketizer_ifc i_packetizer <- mkUdpPacketizer;
 
     BlueCSRAccess_ifc#(32, 32, 0, JpegUdpRegs_ifc) i_regs <- create_blue_csr(jpeg_udp_regs, False);
-
-    let i_axi <- mkBlueCSRAXI4LiteAdapter(i_regs.external, 1, 1);
-    let regs  = i_regs.internal;
+    BlueCSR_AXI4Lite_ifc#(32, 32, 0)               i_axi  <- mkBlueCSRAXI4LiteAdapter(i_regs.external, 1, 1);
+    JpegUdpRegs_ifc                                regs   = i_regs.internal;
 
     AXI4_Stream_Wr#(24, 0) i_pixels <- mkAXI4_Stream_Wr(2);
     AXI4_Stream_Rd#(8, 0)  i_jpeg   <- mkAXI4_Stream_Rd(2);
-    mkConnection(i_store.pixels, i_pixels.pkg);
-    mkConnection(i_pixels.fab, i_enc.s_axis);
-    mkConnection(i_enc.m_axis, i_jpeg.fab);
-    mkConnection(i_jpeg.pkg, i_packetizer.jpeg);
+
+    mkConnection(i_store.pixels,  i_pixels.pkg);
+    mkConnection(i_pixels.fab,    i_enc.s_axis);
+    mkConnection(i_enc.m_axis,    i_jpeg.fab);
+    mkConnection(i_jpeg.pkg,      i_packetizer.jpeg);
     mkConnection(i_loader.pixels, i_store.load);
 
     Reg#(Bool)     rg_frame          <- mkReg(False);
@@ -104,8 +103,9 @@ module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(Jpe
     PulseWire      pw_memory_start   <- mkPulseWire;
     PulseWire      pw_memory_done    <- mkPulseWire;
 
-    Bool idle        = !rg_frame && !i_enc.busy && i_store.idle && !i_loader.active && !rg_memory_pending;
-    Bool valid_frame = udp_frame_range_valid(regs.base, regs.npix);
+    Bool idle           = !rg_frame && !i_enc.busy && i_store.idle && !i_loader.active && !rg_memory_pending;
+    Bool valid_frame    = udp_frame_range_valid(regs.base, regs.npix);
+    Bool memory_allowed = calibrated && idle && regs.memaddr < 'h10000000;
 
     rule r_loader_config;
         i_loader.configure(calibrated && !rg_frame && !i_enc.busy && !rg_memory_pending && (i_store.idle || i_store.loading) && valid_frame && regs.load_enable && !regs.start && !regs.repeat_frames && !regs.verify && !regs.memory_pending, regs.base, regs.npix);
@@ -129,7 +129,6 @@ module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(Jpe
         regs.clear_verify;
     endrule
 
-    Bool memory_allowed = calibrated && idle && regs.memaddr < 'h10000000;
     rule r_memory_request (regs.memory_pending && !rg_memory_pending && memory_allowed);
         let request <- regs.memory_request.get;
         i_store.memory(regs.memaddr, request.wr, request.wdata, request.wstrb);
@@ -138,18 +137,12 @@ module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(Jpe
 
     rule r_memory_reject (regs.memory_pending && !rg_memory_pending && !memory_allowed);
         let request <- regs.memory_request.get;
-        regs.memory_response.put(BlueCSR_Rsp_t {
-            rdata: 0,
-            resp : CSR_SLVERR
-        });
+        regs.memory_response.put(BlueCSR_Rsp_t { rdata: 0, resp: CSR_SLVERR });
     endrule
 
     rule r_memory_response (rg_memory_pending);
         match {.data, .error} <- i_store.memory_response.get;
-        regs.memory_response.put(BlueCSR_Rsp_t {
-            rdata: data,
-            resp : error ? CSR_SLVERR : CSR_OKAY
-        });
+        regs.memory_response.put(BlueCSR_Rsp_t { rdata: data, resp: error ? CSR_SLVERR : CSR_OKAY });
         pw_memory_done.send;
     endrule
 
@@ -166,6 +159,7 @@ module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(Jpe
         Bool out_started = !pw_start && rg_out_started;
         Bool out_done    = !pw_start && rg_out_done;
         Bool frame       = pw_start || rg_frame;
+
         if((in_started || in_hs) && !in_done) regs.in_cycles.tick;
         if((in_started || in_hs) && !in_done && in_valid && !in_hs) regs.in_stalls.tick;
         if(out_hs) regs.out_bytes.tick;
@@ -174,11 +168,13 @@ module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(Jpe
         if(frame && !out_done) regs.total_cycles.tick;
         if(i_packetizer.packet_sent) regs.packets.tick;
         if(i_packetizer.frame_done) regs.frame_done;
+
         if(pw_start) begin
             regs.period(rg_had_start ? rg_cycle - rg_last_start : 0);
             rg_last_start <= rg_cycle;
             rg_had_start  <= True;
         end
+
         rg_cycle          <= rg_cycle + 1;
         rg_frame          <= frame && !i_packetizer.frame_done;
         rg_encoder_seen   <= !pw_start && (rg_encoder_seen || i_enc.busy);
@@ -190,8 +186,7 @@ module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(Jpe
     endrule
 
     rule r_status;
-        regs.status({pack(i_store.error), pack(i_loader.active), pack(i_store.reader_active), pack(i_store.verify_done), pack(calibrated), pack(rg_frame)},
-            i_store.checksum1, i_store.checksum2, i_loader.packets, i_loader.pixels_written, i_loader.dropped);
+        regs.status({pack(i_store.error), pack(i_loader.active), pack(i_store.reader_active), pack(i_store.verify_done), pack(calibrated), pack(rg_frame)}, i_store.checksum1, i_store.checksum2, i_loader.packets, i_loader.pixels_written, i_loader.dropped);
     endrule
 
     interface s_jpeg_rd  = i_enc.s_axi_cfg_rd;
@@ -204,8 +199,8 @@ module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(Jpe
     interface rx_payload = i_loader.rx_payload;
     interface tx_header  = i_packetizer.tx_header;
     interface tx_payload = i_packetizer.tx_payload;
-    method    irq        = i_enc.irq;
-    method    busy       = rg_frame;
+    method irq           = i_enc.irq;
+    method busy          = rg_frame;
 endmodule
 
 endpackage

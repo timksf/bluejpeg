@@ -6,12 +6,11 @@ import FIFO :: *;
 import FIFOF :: *;
 import GetPut :: *;
 import RWire :: *;
-
 import AXI4_Master :: *;
 import AXI4_Stream :: *;
 import AXI4_Types :: *;
 
-typedef enum { UdpStoreIdle, UdpStoreRead, UdpStoreVerify, UdpStorePeek, UdpStoreWrite } UdpStoreMode_t deriving(Bits, Eq, FShow);
+typedef enum { STORE_IDLE, STORE_READ, STORE_VERIFY, STORE_PEEK, STORE_WRITE } UdpStoreMode_t deriving(Bits, Eq, FShow);
 
 typedef struct {
     UdpStoreMode_t mode;
@@ -58,7 +57,7 @@ module mkUdpFrameStore(UdpFrameStore_ifc);
     FIFOF#(AXI4_Stream_Pkg#(24, 0))      f_pixels      <- mkSizedBRAMFIFOF(512);
     FIFOF#(Tuple2#(Bit#(32), Bool))      f_memory      <- mkFIFOF;
 
-    Reg#(UdpStoreMode_t) rg_mode          <- mkReg(UdpStoreIdle);
+    Reg#(UdpStoreMode_t) rg_mode          <- mkReg(STORE_IDLE);
     Reg#(UInt#(32))      rg_address       <- mkReg(0);
     Reg#(UInt#(32))      rg_request_left  <- mkReg(0);
     Reg#(UInt#(32))      rg_response_left <- mkReg(0);
@@ -80,25 +79,18 @@ module mkUdpFrameStore(UdpFrameStore_ifc);
     PulseWire                       pw_written      <- mkPulseWire;
     PulseWire                       pw_error        <- mkPulseWire;
 
-    rule r_accept (rg_mode == UdpStoreIdle && (f_commands.notEmpty || f_load.notEmpty));
+    rule r_accept (rg_mode == STORE_IDLE && (f_commands.notEmpty || f_load.notEmpty));
         if(f_commands.notEmpty) begin
             w_begin.wset(f_commands.first);
             f_commands.deq;
         end else begin
             let pixel = f_load.first;
             f_load.deq;
-            w_begin.wset(UdpStoreCommand_t {
-                mode   : UdpStoreWrite,
-                address: tpl_1(pixel),
-                count  : 0,
-                data   : zeroExtend(tpl_2(pixel)),
-                strb   : '1,
-                reply  : False
-            });
+            w_begin.wset(UdpStoreCommand_t { mode: STORE_WRITE, address: tpl_1(pixel), count: 0, data: zeroExtend(tpl_2(pixel)), strb: '1, reply: False });
         end
     endrule
 
-    rule r_issue ((rg_mode == UdpStoreRead || rg_mode == UdpStoreVerify || rg_mode == UdpStorePeek) && rg_request_left != 0);
+    rule r_issue ((rg_mode == STORE_READ || rg_mode == STORE_VERIFY || rg_mode == STORE_PEEK) && rg_request_left != 0);
         UInt#(32)               boundary = 1024 - zeroExtend(unpack(pack(rg_address)[9:0]));
         UInt#(32)               count    = min(256, min(boundary, rg_request_left));
         AXI4_Read_Rq#(30, 4, 0) request  = defaultValue;
@@ -111,41 +103,27 @@ module mkUdpFrameStore(UdpFrameStore_ifc);
         w_issued.wset(count);
     endrule
 
-    rule r_receive (rg_mode == UdpStoreRead || rg_mode == UdpStoreVerify || rg_mode == UdpStorePeek);
+    rule r_receive (rg_mode == STORE_READ || rg_mode == STORE_VERIFY || rg_mode == STORE_PEEK);
         let  response <- i_rd.response.get;
         Bool last     = rg_response_left == 1;
-        if(rg_mode == UdpStoreRead)
-            f_pixels.enq(AXI4_Stream_Pkg {
-                data: truncate(response.data),
-                keep: '1,
-                user: 0,
-                dest: 0,
-                id  : 0,
-                last: last
-            });
-        if(rg_mode == UdpStorePeek)
-            f_memory.enq(tuple2(response.data, response.resp != OKAY));
-        if(last && rg_mode != UdpStoreRead) pw_read_finish.send;
+        if(rg_mode == STORE_READ) f_pixels.enq(AXI4_Stream_Pkg { data: truncate(response.data), keep: '1, user: 0, dest: 0, id: 0, last: last });
+        if(rg_mode == STORE_PEEK) f_memory.enq(tuple2(response.data, response.resp != OKAY));
+        if(last && rg_mode != STORE_READ) pw_read_finish.send;
         if(response.last) f_outstanding.deq;
         w_received.wset(response);
     endrule
 
-    rule r_write (rg_mode == UdpStoreWrite && !rg_written);
+    rule r_write (rg_mode == STORE_WRITE && !rg_written);
         AXI4_Write_Rq_Addr#(30, 4, 0) request = defaultValue;
         request.addr       = truncate(pack(rg_address << 2));
         request.burst_size = B4;
         request.burst_type = INCR;
         i_wr.request_addr.put(request);
-        i_wr.request_data.put(AXI4_Write_Rq_Data {
-            data: rg_data,
-            strb: rg_strb,
-            last: True,
-            user: 0
-        });
+        i_wr.request_data.put(AXI4_Write_Rq_Data { data: rg_data, strb: rg_strb, last: True, user: 0 });
         pw_written.send;
     endrule
 
-    rule r_write_response (rg_mode == UdpStoreWrite && rg_written);
+    rule r_write_response (rg_mode == STORE_WRITE && rg_written);
         let response <- i_wr.response.get;
         if(rg_reply) f_memory.enq(tuple2(0, response.resp != OKAY));
         if(response.resp != OKAY) pw_error.send;
@@ -165,7 +143,7 @@ module mkUdpFrameStore(UdpFrameStore_ifc);
             rg_strb          <= command.strb;
             rg_reply         <= command.reply;
             rg_written       <= False;
-            if(command.mode == UdpStoreVerify) begin
+            if(command.mode == STORE_VERIFY) begin
                 rg_sum1     <= 0;
                 rg_sum2     <= 0;
                 rg_verified <= False;
@@ -178,7 +156,7 @@ module mkUdpFrameStore(UdpFrameStore_ifc);
             if(w_received.wget matches tagged Valid .response) begin
                 rg_response_left <= rg_response_left - 1;
                 if(response.resp != OKAY) failed = True;
-                if(rg_mode == UdpStoreVerify) begin
+                if(rg_mode == STORE_VERIFY) begin
                     let sum = rg_sum1 + response.data;
                     rg_sum1 <= sum;
                     rg_sum2 <= rg_sum2 + sum;
@@ -186,15 +164,18 @@ module mkUdpFrameStore(UdpFrameStore_ifc);
             end
             if(pw_written) rg_written <= True;
             if(pw_read_finish || pw_write_finish || pw_pixel_finish) begin
-                rg_mode <= UdpStoreIdle;
-                if(rg_mode == UdpStoreVerify) rg_verified <= True;
+                rg_mode <= STORE_IDLE;
+                if(rg_mode == STORE_VERIFY) rg_verified <= True;
             end
         end
         if(failed) rg_error <= True;
     endrule
 
-    interface m_rd = i_rd.fab;
-    interface m_wr = i_wr.fab;
+    interface m_rd            = i_rd.fab;
+    interface m_wr            = i_wr.fab;
+    interface load            = toPut(f_load);
+    interface memory_response = toGet(f_memory);
+
     interface Get pixels;
         method ActionValue#(AXI4_Stream_Pkg#(24, 0)) get;
             let pixel = f_pixels.first;
@@ -203,31 +184,18 @@ module mkUdpFrameStore(UdpFrameStore_ifc);
             return pixel;
         endmethod
     endinterface
-    interface load            = toPut(f_load);
-    interface memory_response = toGet(f_memory);
-    method Action start(UInt#(32) base, UInt#(32) count, Bool verify) if(rg_mode == UdpStoreIdle && !f_commands.notEmpty && !f_pixels.notEmpty);
-        f_commands.enq(UdpStoreCommand_t {
-            mode   : verify ? UdpStoreVerify : UdpStoreRead,
-            address: base,
-            count  : count,
-            data   : 0,
-            strb   : 0,
-            reply  : False
-        });
+
+    method Action start(UInt#(32) base, UInt#(32) count, Bool verify) if(rg_mode == STORE_IDLE && !f_commands.notEmpty && !f_pixels.notEmpty);
+        f_commands.enq(UdpStoreCommand_t { mode: verify ? STORE_VERIFY : STORE_READ, address: base, count: count, data: 0, strb: 0, reply: False });
     endmethod
-    method Action memory(UInt#(32) address, Bool write, Bit#(32) data, Bit#(4) strb) if(rg_mode == UdpStoreIdle && !f_commands.notEmpty);
-        f_commands.enq(UdpStoreCommand_t {
-            mode   : write ? UdpStoreWrite : UdpStorePeek,
-            address: address,
-            count  : 1,
-            data   : data,
-            strb   : strb,
-            reply  : True
-        });
+
+    method Action memory(UInt#(32) address, Bool write, Bit#(32) data, Bit#(4) strb) if(rg_mode == STORE_IDLE && !f_commands.notEmpty);
+        f_commands.enq(UdpStoreCommand_t { mode: write ? STORE_WRITE : STORE_PEEK, address: address, count: 1, data: data, strb: strb, reply: True });
     endmethod
-    method idle          = rg_mode == UdpStoreIdle && !f_commands.notEmpty && !f_load.notEmpty && !f_pixels.notEmpty;
-    method reader_active = rg_mode == UdpStoreRead;
-    method loading       = (rg_mode == UdpStoreWrite && !rg_reply) || f_load.notEmpty;
+
+    method idle          = rg_mode == STORE_IDLE && !f_commands.notEmpty && !f_load.notEmpty && !f_pixels.notEmpty;
+    method reader_active = rg_mode == STORE_READ;
+    method loading       = (rg_mode == STORE_WRITE && !rg_reply) || f_load.notEmpty;
     method verify_done   = rg_verified;
     method checksum1     = rg_sum1;
     method checksum2     = rg_sum2;

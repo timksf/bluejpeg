@@ -3,11 +3,10 @@ package UdpLoader;
 import BRAMFIFO :: *;
 import FIFOF :: *;
 import GetPut :: *;
-
 import AXI4_Stream :: *;
 import EthernetTypes :: *;
 
-typedef enum { UdpLoadIdle, UdpLoadReceive, UdpLoadValidate, UdpLoadCommit, UdpLoadDiscard } UdpLoadState_t deriving(Bits, Eq, FShow);
+typedef enum { LOAD_IDLE, LOAD_RECEIVE, LOAD_VALIDATE, LOAD_COMMIT, LOAD_DISCARD } UdpLoadState_t deriving(Bits, Eq, FShow);
 
 interface UdpLoader_ifc;
     interface Put#(UdpRxHeader)                  rx_header;
@@ -34,7 +33,7 @@ module mkUdpLoader(UdpLoader_ifc);
     Wire#(UInt#(32))                     w_base    <- mkDWire(0);
     Wire#(UInt#(32))                     w_count   <- mkDWire(0);
 
-    Reg#(UdpLoadState_t) rg_state       <- mkReg(UdpLoadIdle);
+    Reg#(UdpLoadState_t) rg_state       <- mkReg(LOAD_IDLE);
     Reg#(Bool)           rg_bad         <- mkReg(False);
     Reg#(UInt#(16))      rg_length      <- mkReg(0);
     Reg#(UInt#(17))      rg_received    <- mkReg(0);
@@ -52,7 +51,7 @@ module mkUdpLoader(UdpLoader_ifc);
 
     rule r_loader;
         case(rg_state)
-            UdpLoadIdle: begin
+            LOAD_IDLE: begin
                 let header = f_headers.first;
                 f_headers.deq;
                 UInt#(16) length = unpack(header.length) - 8;
@@ -67,9 +66,9 @@ module mkUdpLoader(UdpLoader_ifc);
                 rg_limit       <= w_count;
                 rg_committed   <= 0;
                 if(header.length <= 8) rg_dropped <= rg_dropped + 1;
-                else rg_state <= UdpLoadReceive;
+                else                   rg_state   <= LOAD_RECEIVE;
             end
-            UdpLoadReceive: begin
+            LOAD_RECEIVE: begin
                 let  byte_in <- i_in.pkg.get;
                 Bool bad     = rg_bad || byte_in.user != 0 || byte_in.keep != 1 || rg_received >= zeroExtend(rg_length);
                 rg_received <= min(rg_received + 1, 65536);
@@ -90,27 +89,27 @@ module mkUdpLoader(UdpLoader_ifc);
                     end
                 end
                 rg_bad <= bad;
-                if(byte_in.last) rg_state <= UdpLoadValidate;
+                if(byte_in.last) rg_state <= LOAD_VALIDATE;
             end
-            UdpLoadValidate: begin
+            LOAD_VALIDATE: begin
                 if(rg_bad || rg_received != zeroExtend(rg_length) || rg_component != 0 || rg_pixel_count == 0 || zeroExtend(rg_pixel_count) > rg_available) begin
                     rg_dropped <= rg_dropped + 1;
-                    rg_state   <= UdpLoadDiscard;
+                    rg_state   <= LOAD_DISCARD;
                 end else begin
                     rg_packets <= rg_packets + 1;
-                    rg_state   <= UdpLoadCommit;
+                    rg_state   <= LOAD_COMMIT;
                 end
             end
-            UdpLoadCommit: begin
+            LOAD_COMMIT: begin
                 f_pixels.enq(tuple2(rg_base + unpack(rg_index) + zeroExtend(rg_committed), f_packet.first));
                 f_packet.deq;
                 rg_pixels    <= rg_pixels + 1;
                 rg_committed <= rg_committed + 1;
-                if(rg_committed + 1 == rg_pixel_count) rg_state <= UdpLoadIdle;
+                if(rg_committed + 1 == rg_pixel_count) rg_state <= LOAD_IDLE;
             end
-            UdpLoadDiscard: begin
+            LOAD_DISCARD: begin
                 if(f_packet.notEmpty) f_packet.deq;
-                else rg_state <= UdpLoadIdle;
+                else                  rg_state <= LOAD_IDLE;
             end
         endcase
     endrule
@@ -118,12 +117,14 @@ module mkUdpLoader(UdpLoader_ifc);
     interface rx_header  = toPut(f_headers);
     interface rx_payload = i_in.fab;
     interface pixels     = toGet(f_pixels);
+
     method Action configure(Bool enabled, UInt#(32) base, UInt#(32) count);
         w_enabled <= enabled;
         w_base    <= base;
         w_count   <= count;
     endmethod
-    method active         = rg_state != UdpLoadIdle || f_headers.notEmpty || f_pixels.notEmpty;
+
+    method active         = rg_state != LOAD_IDLE || f_headers.notEmpty || f_pixels.notEmpty;
     method packets        = rg_packets;
     method pixels_written = rg_pixels;
     method dropped        = rg_dropped;

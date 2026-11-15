@@ -1,7 +1,6 @@
 package UdpMig;
 
 import Clocks :: *;
-
 import AXI4_Slave :: *;
 import AXI4_Types :: *;
 
@@ -95,15 +94,15 @@ module mkUdpMigRaw#(Clock sys_clk, Reset sys_reset_n)(UdpMigRaw_ifc);
     method wvalid(s_axi_wvalid) enable((* inhigh *) EN_wvalid) clocked_by(ui_clk) reset_by(ui_reset_n);
     method bready(s_axi_bready) enable((* inhigh *) EN_bready) clocked_by(ui_clk) reset_by(ui_reset_n);
     method rready(s_axi_rready) enable((* inhigh *) EN_rready) clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_wready wready clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_bvalid bvalid clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_bid bid clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_bresp bresp clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_rvalid rvalid clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_rid rid clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_rdata rdata clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_rresp rresp clocked_by(ui_clk) reset_by(ui_reset_n);
-    method s_axi_rlast rlast clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_wready        wready     clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_bvalid        bvalid     clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_bid           bid        clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_bresp         bresp      clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_rvalid        rvalid     clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_rid           rid        clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_rdata         rdata      clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_rresp         rresp      clocked_by(ui_clk) reset_by(ui_reset_n);
+    method s_axi_rlast         rlast      clocked_by(ui_clk) reset_by(ui_reset_n);
     method init_calib_complete calibrated clocked_by(ui_clk) reset_by(ui_reset_n);
     schedule (arready, awready, wready, bvalid, bid, bresp, rvalid, rid, rdata, rresp, rlast, calibrated, pins.addr, pins.ba, pins.ras_n, pins.cas_n, pins.we_n, pins.reset_n, pins.ck_p, pins.ck_n, pins.cke, pins.cs_n, pins.dm, pins.odt) CF (arready, awready, wready, bvalid, bid, bresp, rvalid, rid, rdata, rresp, rlast, calibrated, pins.addr, pins.ba, pins.ras_n, pins.cas_n, pins.we_n, pins.reset_n, pins.ck_p, pins.ck_n, pins.cke, pins.cs_n, pins.dm, pins.odt, ar, arvalid, aw, awvalid, write_data, wvalid, bready, rready);
     schedule ar C ar;
@@ -125,11 +124,13 @@ endmodule
 
 (* no_default_clock *)
 module mkUdpMig#(Clock sys_clk, Reset sys_reset_n)(UdpMig_ifc);
-    let i_mig <- mkUdpMigRaw(sys_clk, sys_reset_n);
+    UdpMigRaw_ifc i_mig <- mkUdpMigRaw(sys_clk, sys_reset_n);
+
     interface ui_clk     = i_mig.ui_clk;
     interface ui_reset_n = i_mig.ui_reset_n;
     interface pins       = i_mig.pins;
-    method    calibrated = i_mig.calibrated;
+    method calibrated    = i_mig.calibrated;
+
     interface AXI4_Slave_Rd_Fab s_rd;
         method parvalid = i_mig.arvalid;
         method arready  = i_mig.arready;
@@ -144,6 +145,7 @@ module mkUdpMig#(Clock sys_clk, Reset sys_reset_n)(UdpMig_ifc);
             i_mig.ar(id, addr, len, size, burst, lock, cache, prot, qos);
         endmethod
     endinterface
+
     interface AXI4_Slave_Wr_Fab s_wr;
         method pawvalid = i_mig.awvalid;
         method awready  = i_mig.awready;

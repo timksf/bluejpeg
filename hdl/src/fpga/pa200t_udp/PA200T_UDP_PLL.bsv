@@ -2,7 +2,6 @@ package PA200T_UDP_PLL;
 
 import Clocks :: *;
 import DefaultValue :: *;
-
 import BlueXLNX :: *;
 
 interface PA200T_UDP_PLL_ifc;
@@ -30,22 +29,25 @@ module mkPA200T_UDP_PLL#(Clock clk_200)(PA200T_UDP_PLL_ifc);
     cfg.p_CLKOUT4_DIVIDE  = 5;
     cfg.p_COMPENSATION    = "INTERNAL";
     cfg.p_IS_RST_INVERTED = 1;
-    let rst_board  <- exposeCurrentReset;
-    let i_feedback <- mkClockWire(clocked_by clk_200);
-    let i_pll      <- mkPLLE2_ADV(cfg, clk_200, noClock, i_feedback.clk, clk_200, clocked_by clk_200);
-    let feedback   <- mkClockValue(i_pll.clkfbout);
-    let clk_gtx    <- mkBUFGClock(i_pll.clkout0);
-    let clk_gtx90  <- mkBUFGClock(i_pll.clkout1);
-    let clk_sys    <- mkBUFGClock(i_pll.clkout2);
-    let clk_slow   <- mkBUFGClock(i_pll.clkout3);
-    let clk_fast   <- mkBUFGClock(i_pll.clkout4);
-    let i_lock     <- mkResetWire(i_pll.locked);
-    let rst_source <- mkResetEither(rst_board, i_lock.rst, clocked_by clk_200);
-    let rst_gtx    <- mkAsyncReset(2, rst_source, clk_gtx);
-    let rst_sys    <- mkAsyncReset(2, rst_source, clk_sys);
-    let rst_ref    <- mkAsyncReset(16, rst_source, clk_200);
+
+    Reset              rst_board        <- exposeCurrentReset;
+    ClockWire_ifc      i_feedback       <- mkClockWire(clocked_by clk_200);
+    PLLE2_ADV_ifc      i_pll            <- mkPLLE2_ADV(cfg, clk_200, noClock, i_feedback.clk, clk_200, clocked_by clk_200);
+    ReadOnly#(Bit#(1)) i_feedback_value <- mkClockValue(i_pll.clkfbout);
+    Clock              clk_gtx          <- mkBUFGClock(i_pll.clkout0);
+    Clock              clk_gtx90        <- mkBUFGClock(i_pll.clkout1);
+    Clock              clk_sys          <- mkBUFGClock(i_pll.clkout2);
+    Clock              clk_slow         <- mkBUFGClock(i_pll.clkout3);
+    Clock              clk_fast         <- mkBUFGClock(i_pll.clkout4);
+
+    ResetWire_ifc i_lock     <- mkResetWire(i_pll.locked);
+    Reset         rst_source <- mkResetEither(rst_board, i_lock.rst, clocked_by clk_200);
+    Reset         rst_gtx    <- mkAsyncReset(2, rst_source, clk_gtx);
+    Reset         rst_sys    <- mkAsyncReset(2, rst_source, clk_sys);
+    Reset         rst_ref    <- mkAsyncReset(16, rst_source, clk_200);
+
     rule r_inputs;
-        i_feedback.drive(feedback);
+        i_feedback.drive(i_feedback_value);
         i_pll.clkinsel(1);
         i_pll.pwrdwn(0);
         i_pll.daddr(0);
@@ -53,6 +55,7 @@ module mkPA200T_UDP_PLL#(Clock clk_200)(PA200T_UDP_PLL_ifc);
         i_pll.d_i(0);
         i_pll.dwe(0);
     endrule
+
     interface clk_125    = clk_gtx;
     interface clk_125_90 = clk_gtx90;
     interface clk_bram   = clk_sys;
