@@ -7,6 +7,11 @@
 
 ifeq ($(SYSTEM),udp)
 UDP_MEMORY      ?= mig
+ifeq ($(UDP_DEMO_200),1)
+ifneq ($(UDP_MEMORY),mig)
+$(error UDP_DEMO_200 requires UDP_MEMORY=mig)
+endif
+endif
 MAIN_MODULE      := fpga/pa200t_udp/PA200T_UDP_JPEG
 TOP_MODULE       ?= mkPA200T_UDP_JPEG_Top
 PROJECT_NAME     := BlueJPEG_PA200T_UDP
@@ -32,7 +37,7 @@ BSV_TOOLS        ?= $(abspath ../dep/BSVTools)
 PART             := xc7a200tfbg484-2
 SCRIPT           ?= $(CURDIR)/src/fpga/pa200t/script/synth.tcl
 
-BUILDDIR ?= build/$(if $(filter VERILOG,$(SIM_TYPE)),$(PROJECT_NAME)$(if $(filter udp,$(SYSTEM)),_$(UDP_MEMORY)),$(RUN_TEST))
+BUILDDIR ?= build/$(if $(filter VERILOG,$(SIM_TYPE)),$(PROJECT_NAME)$(if $(filter udp,$(SYSTEM)),_$(UDP_MEMORY)$(if $(filter 1,$(UDP_DEMO_200)),_200)),$(RUN_TEST))
 
 ASSETS_DIR := $(abspath ../assets)
 ROM_DIR    := $(CURDIR)/rom
@@ -53,6 +58,9 @@ EXTRA_FLAGS += -D UDP_TEST_1080P
 endif
 
 ifeq ($(SYSTEM),udp)
+ifeq ($(UDP_DEMO_200),1)
+EXTRA_FLAGS += -D UDP_DEMO_200
+endif
 ifeq ($(UDP_MEMORY),bram)
 EXTRA_FLAGS += -D UDP_USE_BRAM
 else ifeq ($(UDP_MEMORY),mig)

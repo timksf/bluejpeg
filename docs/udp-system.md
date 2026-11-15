@@ -5,6 +5,10 @@ pixels into a frame store, encodes 4:4:4 JPEG, and sends numbered UDP packets.
 The default FPGA build uses the board's DDR3 through MIG. A BRAM variant retains
 the 192×192 pattern for Ethernet validation.
 
+The experimental 200 MHz encoder / 125 MHz UDP DDR3 build and 1080p30 tests are described
+in [1080p30 demonstration](1080p30-demo.md). That split-clock image is now
+running at 31.95 fps on the board, with a live frame-counter preview.
+
 Enter the development environment from the repository root:
 
 ```sh

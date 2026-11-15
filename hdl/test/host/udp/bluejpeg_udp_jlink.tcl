@@ -20,12 +20,13 @@ foreach {name value} {
     udp_peer_ip 192.168.178.23
     udp_width 1920
     udp_height 1080
+    udp_mdio_divider 83
 } {
     if {![info exists $name]} { set $name $value }
 }
 bluejpeg_udp_check_ids pa200t.tap
 bluejpeg_udp_wait pa200t.tap 2 2
-bluej_mdio_init pa200t.tap 83 0x3
+bluej_mdio_init pa200t.tap $udp_mdio_divider 0x3
 bluej_phy_wait_link pa200t.tap 1 10000 0x3
 bluej_eth_setup pa200t.tap $udp_mac $udp_local_ip $udp_netmask $udp_gateway $udp_peer_ip 5000 5001 0x3
 bluej_eth_status pa200t.tap 0x3

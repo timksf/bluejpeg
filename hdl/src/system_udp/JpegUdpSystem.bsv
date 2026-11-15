@@ -13,6 +13,7 @@ import EthernetTypes :: *;
 import UdpRgmiiCsr :: *;
 
 import BlueJPEG :: *;
+import BlueJPEGClockCrossing :: *;
 import BlueJPEGRegs :: *;
 import JpegUdpRegs :: *;
 import UdpFrameStore :: *;
@@ -38,10 +39,14 @@ endinterface
 module [Module] mkJpegUdpSystem#(Bool calibrated)(JpegUdpSystem_ifc);
     let clk <- exposeCurrentClock;
     let rst <- exposeCurrentReset;
+    let i_sys <- mkJpegUdpSystemDct(calibrated, clk, rst);
+    return i_sys;
+endmodule
 
+module [Module] mkUdpEncoder#(Clock dct_clock, Reset dct_reset)(BlueJPEG_ifc);
     BlueJPEGCfg_t#(1920, 12, 12, 8) cfg = BlueJPEGCfg_t {
-        slow_clock         : clk,
-        slow_reset         : rst,
+        slow_clock         : dct_clock,
+        slow_reset         : dct_reset,
         _prx_miw           : ?,
         _prx_dsc           : ?,
         _prx_qsc           : ?,
@@ -50,7 +55,24 @@ module [Module] mkJpegUdpSystem#(Bool calibrated)(JpegUdpSystem_ifc);
         double_buffer_tiler: True,
         en_chroma          : True
     };
-    BlueJPEG_ifc      i_enc        <- mkBlueJPEG(cfg);
+    let i_encoder <- mkBlueJPEG(cfg);
+    return i_encoder;
+endmodule
+
+module [Module] mkJpegUdpSystemDct#(Bool calibrated, Clock dct_clock, Reset dct_reset)(JpegUdpSystem_ifc);
+    let i_encoder <- mkUdpEncoder(dct_clock, dct_reset);
+    let i_sys <- mkJpegUdpSystemEncoder(calibrated, i_encoder);
+    return i_sys;
+endmodule
+
+module [Module] mkJpegUdpSystemAsync#(Bool calibrated, Clock encoder_clock, Reset encoder_reset, Clock dct_clock, Reset dct_reset)(JpegUdpSystem_ifc);
+    let i_encoder <- mkUdpEncoder(dct_clock, dct_reset, clocked_by encoder_clock, reset_by encoder_reset);
+    let i_encoder_cdc <- mkBlueJPEGClockCrossing(encoder_clock, encoder_reset, i_encoder);
+    let i_sys <- mkJpegUdpSystemEncoder(calibrated, i_encoder_cdc);
+    return i_sys;
+endmodule
+
+module [Module] mkJpegUdpSystemEncoder#(Bool calibrated, BlueJPEG_ifc i_enc)(JpegUdpSystem_ifc);
     UdpFrameStore_ifc i_store      <- mkUdpFrameStore;
     UdpLoader_ifc     i_loader     <- mkUdpLoader;
     UdpPacketizer_ifc i_packetizer <- mkUdpPacketizer;

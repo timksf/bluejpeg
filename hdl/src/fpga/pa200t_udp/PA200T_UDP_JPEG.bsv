@@ -19,6 +19,7 @@ import PA200T_UDP_PLL :: *;
 import UdpPatternRam :: *;
 import UdpMig :: *;
 import UdpBoardPins :: *;
+import UdpMemoryCdc :: *;
 
 (* always_enabled *)
 interface PA200T_UDP_JPEG_ifc;
@@ -88,9 +89,33 @@ module [Module] mkPA200T_UDP_JPEG_Clocks#(Clock tck, Clock rgmii_rxc, Bit#(1) tm
         clocked_by i_pll.clk_bram, reset_by i_pll.rst_bram);
 `else
     let rst_board <- exposeCurrentReset;
+`ifdef UDP_DEMO_200
+    let i_mig     <- mkUdpMig(clk_200, i_pll.rst_200);
+`else
     let i_mig     <- mkUdpMig(clk_200, rst_board);
+`endif
+`ifdef UDP_DEMO_200
+    //reset every transaction domain from the same source, including MIG on PLL loss
+    let rst_mig_ref <- mkAsyncReset(2, i_mig.ui_reset_n, clk_200);
+    let rst_source <- mkResetEither(i_pll.rst_200, rst_mig_ref);
+    let rst_system  <- mkAsyncReset(4, rst_source, i_pll.clk_125);
+    let rst_encoder <- mkAsyncReset(4, rst_source, i_pll.clk_app);
+    let rst_dct     <- mkAsyncReset(2, rst_source, i_pll.clk_dct);
+    let rst_memory  <- mkAsyncReset(2, rst_source, i_mig.ui_clk);
+    let rst_jtag_demo <- mkAsyncReset(2, rst_source, tck);
+    let i_cdc       <- mkUdpMemoryCdc(i_mig.ui_clk, rst_memory, clocked_by i_pll.clk_125, reset_by rst_system);
+    mkConnection(i_cdc.m_rd, i_mig.s_rd);
+    mkConnection(i_cdc.m_wr, i_mig.s_wr);
+    SyncBitIfc#(Bit#(1)) i_calibrated <- mkSyncBit(i_mig.ui_clk, i_mig.ui_reset_n, i_pll.clk_125);
+    rule r_calibrated;
+        i_calibrated.send(pack(i_mig.calibrated));
+    endrule
+    let inst <- mkPA200T_UDP_JPEG(tck, rst_jtag_demo, tms_in, tdi_in, rgmii_rxc, clk_200, i_pll.rst_200, i_pll.clk_125, i_pll.clk_125_90, rst_system, i_pll.clk_app, rst_encoder, i_pll.clk_dct, rst_dct, i_calibrated.read == 1, i_cdc.s_rd, i_cdc.s_wr, i_mig.pins,
+        clocked_by i_pll.clk_125, reset_by rst_system);
+`else
     let inst      <- mkPA200T_UDP_JPEG(tck, rst_jtag, tms_in, tdi_in, rgmii_rxc, clk_200, i_pll.rst_200, i_pll.clk_125, i_pll.clk_125_90, i_pll.rst_125, i_mig.calibrated, i_mig.s_rd, i_mig.s_wr, i_mig.pins,
         clocked_by i_mig.ui_clk, reset_by i_mig.ui_reset_n);
+`endif
 `endif
     return inst;
 endmodule
@@ -104,6 +129,9 @@ module mkUdpTapInputs#(Bit#(1) tms_in, Bit#(1) tdi_in, JTAGSystem_ifc#(PA200T_UD
 endmodule
 
 module [Module] mkPA200T_UDP_JPEG#(Clock tck, Reset rst_jtag, Bit#(1) tms_in, Bit#(1) tdi_in, Clock rgmii_rxc, Clock clk_200, Reset rst_200, Clock clk_125, Clock clk_125_90, Reset rst_125,
+`ifdef UDP_DEMO_200
+    Clock encoder_clock, Reset encoder_reset, Clock dct_clock, Reset dct_reset,
+`endif
     Bool calibrated, AXI4_Slave_Rd_Fab#(30, 32, 4, 0) mem_rd, AXI4_Slave_Wr_Fab#(30, 32, 4, 0) mem_wr
 `ifndef UDP_USE_BRAM
     , UdpDdr3Pins_ifc ddr3_pins
@@ -113,7 +141,11 @@ module [Module] mkPA200T_UDP_JPEG#(Clock tck, Reset rst_jtag, Bit#(1) tms_in, Bi
     let rst    <- exposeCurrentReset;
     let i_jtag <- mkPA200T_UDP_JTAG_NATIVE(clk, rst, clocked_by tck, reset_by rst_jtag);
     mkUdpTapInputs(tms_in, tdi_in, i_jtag, clocked_by tck, reset_by rst_jtag);
+`ifdef UDP_DEMO_200
+    let i_sys <- mkJpegUdpSystemAsync(calibrated, encoder_clock, encoder_reset, dct_clock, dct_reset);
+`else
     let i_sys  <- mkJpegUdpSystem(calibrated);
+`endif
     let i_eth  <- mkPA200T_UDP_ETH(clk_125, clk_125_90, rst_125, rgmii_rxc, clk_200, rst_200);
     let i_mdio <- mkPA200T_UDP_MDIO;
     mkConnection(i_sys.m_mem_rd, mem_rd);

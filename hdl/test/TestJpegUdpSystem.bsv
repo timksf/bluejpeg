@@ -1,13 +1,16 @@
 package TestJpegUdpSystem;
 
 import Connectable :: *;
+import Clocks :: *;
 import DefaultValue :: *;
 import GetPut :: *;
 import StmtFSM :: *;
 
 import AXI4_Lite_Master :: *;
 import AXI4_Lite_Types :: *;
+import AXI4_Master :: *;
 import AXI4_Stream :: *;
+import AXI4_Types :: *;
 import BlueCSRCore :: *;
 import BlueCSRTb :: *;
 import EthernetTypes :: *;
@@ -21,6 +24,7 @@ import JpegUdpSystem :: *;
 import SimRAM_AXI :: *;
 import TestHelper :: *;
 import UdpModel :: *;
+import UdpMemoryCdc :: *;
 
 import "BDPI" function Action prepare_udp_test_image(String path, Bool full_size);
 
@@ -38,11 +42,34 @@ Bool   udp_large_test  = False;
 
 //the package name follows the repository test selector
 module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
-    JpegUdpSystem_ifc                       i_dut <- mkJpegUdpSystem(True);
-    SimRAM_AXI4_ifc#(3000000, 30, 32, 4, 0) i_ram <- mkSimRAM_AXI(False);
+    let clk <- exposeCurrentClock;
+    let rst <- exposeCurrentReset;
+    let i_dut <- mkJpegUdpSystem(True);
+    let i_test <- mkJpegUdpSystemTest(False, i_dut, clk, rst);
+    return i_test;
+endmodule
+
+module [Module] mkJpegUdpSystemTest#(Bool demo, JpegUdpSystem_ifc i_dut, Clock memory_clock, Reset memory_reset)(TestHandler_ifc);
+    SimRAM_AXI4_ifc#(3000000, 30, 32, 4, 0) i_ram <- mkSimRAM_AXI(False, clocked_by memory_clock, reset_by memory_reset);
+    //transfer the simulation-only handle once, after the memory model initializes
+    SyncFIFOIfc#(UInt#(64)) f_memory_handle <- mkSyncFIFOToCC(2, memory_clock, memory_reset);
+    Reg#(Bool) rg_handle_sent <- mkReg(False, clocked_by memory_clock, reset_by memory_reset);
+    Reg#(UInt#(64)) rg_memory_handle <- mkRegU;
+    rule r_memory_handle (!rg_handle_sent);
+        f_memory_handle.enq(i_ram.ram_instance);
+        rg_handle_sent <= True;
+    endrule
     UdpModel_ifc                            i_udp <- mkUdpModel;
-    mkConnection(i_dut.m_mem_rd, i_ram.fab_rd);
-    mkConnection(i_dut.m_mem_wr, i_ram.fab_wr);
+    if(demo) begin
+        let i_cdc <- mkUdpMemoryCdc(memory_clock, memory_reset);
+        mkConnection(i_dut.m_mem_rd, i_cdc.s_rd);
+        mkConnection(i_dut.m_mem_wr, i_cdc.s_wr);
+        mkConnection(i_cdc.m_rd, i_ram.fab_rd);
+        mkConnection(i_cdc.m_wr, i_ram.fab_wr);
+    end else begin
+        mkConnection(i_dut.m_mem_rd, i_ram.fab_rd);
+        mkConnection(i_dut.m_mem_wr, i_ram.fab_wr);
+    end
     mkConnection(i_udp.rx_header, i_dut.rx_header);
     mkConnection(i_udp.rx_payload, i_dut.rx_payload);
     mkConnection(i_dut.tx_header, i_udp.tx_header);
@@ -62,6 +89,7 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
     mkConnection(i_dut.s_sys_wr, i_sys_wr.fab);
 
     UInt#(32)       npix                = fromInteger(valueOf(UdpTestWidth) * valueOf(UdpTestHeight));
+    UInt#(32)       upload_pixels       = demo ? min(480, npix) : npix;
     UInt#(32)       base                = 1009;
     Reg#(UInt#(64)) rg_source           <- mkReg(0);
     Reg#(UInt#(64)) rg_reference        <- mkReg(0);
@@ -116,6 +144,14 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
             end
         endaction
     endfunction
+
+    rule r_check_bursts (i_dut.m_mem_rd.arvalid);
+        let address = i_dut.m_mem_rd.araddr;
+        UInt#(13) bytes = (zeroExtend(i_dut.m_mem_rd.arlen) + 1) << 2;
+        UInt#(13) limit = zeroExtend(unpack(address[11:0])) + bytes;
+        check(address[1:0] == 0 && limit <= 4096, $format("unaligned read or burst crossing 4 KiB"));
+        check(i_dut.m_mem_rd.arsize == B4 && i_dut.m_mem_rd.arburst == INCR, $format("invalid read burst format"));
+    endrule
 
     function Stmt read_reg(String name);
         return seq
@@ -255,6 +291,10 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
     endseq;
 
     Stmt main = seq
+        action
+            rg_memory_handle <= f_memory_handle.first;
+            f_memory_handle.deq;
+        endaction
         prepare_udp_test_image(udp_input_image, udp_large_test);
         action
             let source    <- create_SimRAM(3000000, 4);
@@ -282,10 +322,16 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
         write_reg("MEMDATA", 'h12345678);
         read_reg("MEMDATA");
         check(rg_rsp == 'h12345678, $format("peek/poke mismatch"));
+        write_reg("BASE", 'h0fffffff);
+        write_reg("CTRL", 1);
+        delay(16);
+        check(!i_dut.busy && rg_starts == 0, $format("out-of-range frame must not start"));
+        write_reg("CTRL", 0);
+        write_reg("BASE", pack(base));
         write_reg("CTRL", 4);
         rg_packet_base <= 0;
-        while(rg_packet_base < npix) seq
-            rg_packet_pixels <= min(480, npix - rg_packet_base);
+        while(rg_packet_base < upload_pixels) seq
+            rg_packet_pixels <= min(480, upload_pixels - rg_packet_base);
             send_packet(False);
             rg_packet_base <= rg_packet_base + rg_packet_pixels;
         endseq
@@ -298,6 +344,9 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
             let      rgb   <- read_word_SimRAM(rg_source, extend(rg_pixel_index));
             Bit#(32) word  = pack(truncate(rgb));
             let      pixel = rgb2ycbcr_ref(unpack(word[23:16]), unpack(word[15:8]), unpack(word[7:0]));
+            //the demo test checks loader CDC on one packet and preloads the remainder to avoid millions of single-write round trips
+            if(demo && rg_pixel_index >= upload_pixels)
+                write_word_SimRAM(rg_memory_handle, extend(base + rg_pixel_index), unpack(zeroExtend(pixel)));
             let      sum   = rg_sum1 + pixel;
             rg_sum1        <= sum;
             rg_sum2        <= rg_sum2 + sum;
@@ -311,9 +360,9 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
         read_reg("CHK2");
         check(rg_rsp == rg_sum2, $format("CHK2 mismatch"));
         read_reg("LDPKT");
-        check(unpack(rg_rsp) == (npix + 479) / 480 + 1, $format("LDPKT mismatch"));
+        check(unpack(rg_rsp) == (upload_pixels + 479) / 480 + 1, $format("LDPKT mismatch"));
         read_reg("LDPIX");
-        check(unpack(rg_rsp) == npix + 7, $format("LDPIX mismatch"));
+        check(unpack(rg_rsp) == upload_pixels + 7, $format("LDPIX mismatch"));
         read_reg("LDDROP");
         check(rg_rsp == 1, $format("LDDROP mismatch"));
         i_udp.hold_tx(True);
@@ -329,6 +378,11 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
         check(unpack(rg_rsp) == rg_reference_length, $format("OUTB mismatch"));
         read_reg("PERIOD");
         check(rg_rsp == 0, $format("first PERIOD must be zero"));
+        check(i_dut.irq, $format("frame interrupt must cross to the system clock"));
+        i_jpeg_acc.write_reg_req("IRQP", 1);
+        bjpeg_expect_wr_ok(i_jpeg_acc);
+        delay(8);
+        check(!i_dut.irq, $format("cleared frame interrupt must cross to the system clock"));
         write_reg("CTRL", 2);
         rg_rx_frame <= 1;
         receive_frame;
@@ -342,6 +396,7 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
         check(rg_rsp == 3, $format("repeat frame count"));
         read_reg("PERIOD");
         check(rg_rsp == rg_expected_period && rg_starts == 3, $format("PERIOD must match the observed start interval"));
+        if(demo && udp_large_test) check(unpack(rg_rsp) <= UInt#(32)'(4166666), $format("1080p30 cycle budget exceeded: %0d", rg_rsp));
         read_reg("PKTS");
         check(unpack(rg_rsp) == rg_first_packets, $format("PKTS mismatch"));
         read_reg("STS");
@@ -353,6 +408,7 @@ module [Module] mkTestJpegUdpSystem(TestHandler_ifc);
         read_reg("OUTSTL"); $display("OUTSTL %0d", rg_rsp);
         read_reg("TOTAL"); $display("TOTAL %0d", rg_rsp);
         read_reg("PERIOD"); $display("PERIOD %0d", rg_rsp);
+        if(demo) $display("SYSTEM_HZ 125000000 ENCODER_HZ 200000000");
         $display("TestJpegUdpSystem PASSED (%0dx%0d)", valueOf(UdpTestWidth), valueOf(UdpTestHeight));
     endseq;
     FSM i_fsm <- mkFSM(main);

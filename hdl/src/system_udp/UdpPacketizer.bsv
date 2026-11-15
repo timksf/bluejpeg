@@ -9,7 +9,12 @@ import AXI4_Stream :: *;
 import EthernetTypes :: *;
 import UdpRgmiiCsr :: *;
 
-typedef enum { UdpCollect, UdpRequest, UdpHeader, UdpPayload } UdpPacketState_t deriving(Bits, Eq, FShow);
+typedef enum { UdpRequest, UdpHeader, UdpPayload } UdpPacketState_t deriving(Bits, Eq, FShow);
+
+typedef struct {
+    UInt#(11) length;
+    Bool      last;
+} UdpPacket_t deriving(Bits, Eq, FShow);
 
 interface UdpPacketizer_ifc;
     interface Put#(AXI4_Stream_Pkg#(8, 0)) jpeg;
@@ -20,22 +25,24 @@ interface UdpPacketizer_ifc;
 endinterface
 
 module mkUdpPacketizer(UdpPacketizer_ifc);
-    FIFOF#(Bit#(8))                f_bytes         <- mkSizedBRAMFIFOF(1024);
-    AXI4_Stream_Wr#(8, 1)          i_out           <- mkAXI4_Stream_Wr(2);
-    Reg#(UdpPacketState_t)         rg_state        <- mkReg(UdpCollect);
-    Reg#(UInt#(11))                rg_length       <- mkReg(0);
-    Reg#(UInt#(11))                rg_sent         <- mkReg(0);
-    Reg#(UInt#(4))                 rg_header_index <- mkReg(0);
-    Reg#(Bit#(16))                 rg_frame        <- mkReg(0);
-    Reg#(Bit#(16))                 rg_sequence     <- mkReg(0);
-    Reg#(Bool)                     rg_last         <- mkReg(False);
-    Reg#(Bool)                     rg_wait_final   <- mkReg(False);
-    RWire#(AXI4_Stream_Pkg#(8, 0)) w_byte          <- mkRWire;
-    PulseWire                      pw_request      <- mkPulseWire;
-    PulseWire                      pw_header       <- mkPulseWire;
-    PulseWire                      pw_payload      <- mkPulseWire;
-    PulseWire                      pw_packet       <- mkPulseWire;
-    PulseWire                      pw_done         <- mkPulseWire;
+    //two packets of byte storage allow collection to overlap transmission
+    FIFOF#(Bit#(8))                f_bytes           <- mkSizedBRAMFIFOF(2048);
+    FIFOF#(UdpPacket_t)            f_packets         <- mkSizedFIFOF(2);
+    AXI4_Stream_Wr#(8, 1)          i_out             <- mkAXI4_Stream_Wr(2);
+    Reg#(UdpPacketState_t)         rg_state          <- mkReg(UdpRequest);
+    Reg#(UInt#(11))                rg_collect_length <- mkReg(0);
+    Reg#(UInt#(11))                rg_length         <- mkReg(0);
+    Reg#(UInt#(11))                rg_sent           <- mkReg(0);
+    Reg#(UInt#(4))                 rg_header_index   <- mkReg(0);
+    Reg#(Bit#(16))                 rg_frame          <- mkReg(0);
+    Reg#(Bit#(16))                 rg_sequence       <- mkReg(0);
+    Reg#(Bool)                     rg_last           <- mkReg(False);
+    Reg#(Bool)                     rg_wait_final     <- mkReg(False);
+    RWire#(UdpPacket_t)            w_packet          <- mkRWire;
+    PulseWire                      pw_header         <- mkPulseWire;
+    PulseWire                      pw_payload        <- mkPulseWire;
+    PulseWire                      pw_packet         <- mkPulseWire;
+    PulseWire                      pw_done           <- mkPulseWire;
 
     rule r_header (rg_state == UdpHeader);
         Bit#(16) length = zeroExtend(pack(rg_length));
@@ -82,13 +89,9 @@ module mkUdpPacketizer(UdpPacketizer_ifc);
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule r_state;
-        if(w_byte.wget matches tagged Valid .byte_in) begin
-            rg_length <= rg_length + 1;
-            if(byte_in.last || rg_length == 1023) begin
-                rg_last  <= byte_in.last;
-                rg_state <= UdpRequest;
-            end
-        end else if(pw_request) begin
+        if(w_packet.wget matches tagged Valid .packet) begin
+            rg_length       <= packet.length;
+            rg_last         <= packet.last;
             rg_state        <= UdpHeader;
             rg_header_index <= 0;
             rg_sent         <= 0;
@@ -100,24 +103,30 @@ module mkUdpPacketizer(UdpPacketizer_ifc);
             if(rg_sent + 1 == rg_length) rg_wait_final <= True;
         end else if(pw_packet) begin
             rg_wait_final <= False;
-            rg_state      <= UdpCollect;
-            rg_length     <= 0;
+            rg_state      <= UdpRequest;
             rg_sequence   <= rg_last ? 0 : rg_sequence + 1;
             if(rg_last) rg_frame <= rg_frame + 1;
         end
     endrule
 
     interface Put jpeg;
-        method Action put(AXI4_Stream_Pkg#(8, 0) byte_in) if(rg_state == UdpCollect);
+        method Action put(AXI4_Stream_Pkg#(8, 0) byte_in);
             f_bytes.enq(byte_in.data);
-            w_byte.wset(byte_in);
+            Bool complete = byte_in.last || rg_collect_length == 1023;
+            rg_collect_length <= complete ? 0 : rg_collect_length + 1;
+            if(complete) f_packets.enq(UdpPacket_t {
+                length: rg_collect_length + 1,
+                last  : byte_in.last
+            });
         endmethod
     endinterface
     interface Get tx_header;
         method ActionValue#(UdpTxRequest) get if(rg_state == UdpRequest);
-            pw_request.send;
+            let packet = f_packets.first;
+            f_packets.deq;
+            w_packet.wset(packet);
             return UdpTxRequest {
-                payload_length: zeroExtend(pack(rg_length)) + 8,
+                payload_length: zeroExtend(pack(packet.length)) + 8,
                 checksum      : 0
             };
         endmethod

@@ -56,6 +56,10 @@ module [Module] mkPA200T_UDP_ETH#(Clock clk_125, Clock clk_125_90, Reset rst_125
     cfg_udp.checksum_payload_fifo_depth = 2048;
     cfg_udp.arp_request_retry_interval  = 162500000;
     cfg_udp.arp_request_timeout         = 2437500000;
+`ifdef UDP_DEMO_200
+    cfg_udp.arp_request_retry_interval  = 250000000;
+    cfg_udp.arp_request_timeout         = 3750000000;
+`endif
     RgmiiMacParameters      cfg_mac    = defaultValue;
     let                     i_eth      <- mkUdpRgmiiAxiLite(cfg_udp, cfg_mac, clk_125, clk_125_90, rst_125, rgmii_rxc);
     IDELAYE2s_Fixed_ifc#(5) i_rx_delay <- mkIDELAYE2s_Fixed(idelaye2_fixed(11), clocked_by rgmii_rxc, reset_by noReset);
