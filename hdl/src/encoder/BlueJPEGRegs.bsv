@@ -119,7 +119,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_csrs(BlueJPEGCfg_ifc);
     //an ID register is usefuls in designs with many peripherals
     csr_reg_def('h00, "MIV", "Module ID & Version Register.");
     csr_reg_rc('h00, Bit#(12)'('h001),   0, "MID", "Module ID",      "Unique ID for this module.");
-    csr_reg_rc('h00, Bit#(3)'('h0),     16, "VRS", "Module Version", "Module verion.");
+    csr_reg_rc('h00, Bit#(3)'('h0),     16, "VRS", "Module Version", "Module version.");
 
 
     csr_reg_def('h04, "CTRL", "Control Register.");
