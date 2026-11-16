@@ -98,43 +98,42 @@ per 32-bit word. The table is generated from the register definitions in
 `hdl/src/encoder/BlueJPEGRegs.bsv`.
 
 <!-- regmap:begin -->
-BlueJPEG Register File for BlueJPEG encoder.
-
-| Address | Register | Register Description | Field | Bits | Access | Reset | Field Description |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 0x0000 | MIV | Module ID & Version Register. | MID | [11:00] | RC | 0x1 | Unique ID for this module. |
-|  |  |  | VRS | [18:16] | RC | 0x0 | Module verion. |
-| 0x0004 | CTRL | Control Register. | START | [00:00] | RW | 0x0 | Writing 1 requests processing. Hardware clears the request when it is accepted or rejected. |
-| 0x0008 | STS | Status Register. | RDY | [00:00] | RO | 0x0 | Set once the default tables are loaded and their Huffman codes generated after reset. Low while a codegen runs. |
-|  |  |  | CGB | [01:01] | RO | 0x0 | Indicates whether huffman table codegen is running. |
-|  |  |  | DONE | [04:04] | RO | 0x0 | Set on frame completion and cleared when a new frame is accepted. |
-| 0x000c | IMSZ | Image Size. | IMW | [15:00] | RW | 0x0 |  |
-|  |  |  | IMH | [31:16] | RW | 0x0 |  |
-| 0x0014 | CGEN | Huffman Codegen Config. | TBL | [01:00] | RW | 0x0 | Controls which table type to generate. 00=DC LUMA, 01=DC CHROMA, 10=AC LUMA, 11=AC CHROMA. |
-|  |  |  | TRG | [31:31] | RW | 0x0 | Writing 1 triggers Huffman code generation from the stored tables. Hardware clears it when the codegen starts. |
-| 0x0018 | IRQP | Interrupt Pending (W1C). | DONE | [00:00] | W1C | 0x0 | A frame was encoded completely. |
-|  |  |  | INV | [01:01] | W1C | 0x0 | A start request was rejected because of an invalid image size. |
-| 0x001c | IRQE | Interrupt Enable. | DONE | [00:00] | RW | 0x0 | Enables Frame Done. |
-|  |  |  | INV | [01:01] | RW | 0x0 | Enables Invalid Config. |
-| 0x0030 | PERF0 | Performance Counter Cycles. | CYC | [31:00] | RO | 0x0 | Number of cycles in running state since last processing start. |
-| 0x0034 | PERF1 | Performance Counter Pixels. | PIX | [31:00] | RO | 0x0 | Number of pixels processed since last processing start. |
-| 0x0038 | PERF2 | Performance Counter Bytes. | BYTEO | [31:00] | RO | 0x0 | Number of encoded bytes produced since last processing start. |
-| 0x003c | PERF3 | Performance Counter Idle Cycles. | IDLE | [31:00] | RO | 0x0 | Cycles in running state in which no input pixel was accepted. |
-| 0x0040 | PERF4 | Performance Counter Flush Cycles. | FLSH | [31:00] | RO | 0x0 | Cycles from the last data unit entering the pipeline until the frame is done. |
-| 0x0044 | PERF5 | Performance Counter Frame Cycles. | FRAME | [31:00] | RO | 0x0 | Cycles from the accepted start request until the frame is done, including configuration. |
-| 0x0048 | PERF6 | Performance Counter Boot Cycles. | BOOT | [31:00] | RO | 0x0 | Cycles from reset until the default tables and Huffman codes were first ready. |
-| 0x0100:0x01ff | QLUMAR | Raw luma quantization table, used for bitstream generation. |  |  |  |  |  |
-| 0x0200:0x02ff | QCHROMAR | Raw chroma quantization table, used for bitstream generation. |  |  |  |  |  |
-| 0x0300:0x03ff | QLUMASC | Scaled luma quantization table, used during encoding. |  |  |  |  |  |
-| 0x0400:0x04ff | QCHROMASC | Scaled chroma quantization table, used during encoding. |  |  |  |  |  |
-| 0x0500:0x053f | HBITSDCL | HUFFBITS table for DC luma components. |  |  |  |  |  |
-| 0x0540:0x057f | HBITSDCC | HUFFBITS table for DC chroma components. |  |  |  |  |  |
-| 0x0580:0x05bf | HBITSACL | HUFFBITS table for AC luma components. |  |  |  |  |  |
-| 0x05c0:0x05ff | HBITSACC | HUFFBITS table for AC chroma components. |  |  |  |  |  |
-| 0x1000:0x13ff | HVALDCL | HUFFVAL table for DC luma components. |  |  |  |  |  |
-| 0x1400:0x17ff | HVALDCC | HUFFVAL table for DC chroma components. |  |  |  |  |  |
-| 0x1800:0x1bff | HVALACL | HUFFVAL table for AC luma components. |  |  |  |  |  |
-| 0x1c00:0x1fff | HVALACC | HUFFVAL table for AC chroma components. |  |  |  |  |  |
+```text
+Offset         Register   Description                        Field  Bits     Access  Reset  Field description
+0x0000         MIV        Module ID & Version Register.      MID    [11:00]  RC      0x1    Unique ID for this module.
+                                                             VRS    [18:16]  RC      0x0    Module version.
+0x0004         CTRL       Control Register.                  START  [00:00]  RW      0x0    Writing 1 requests processing. Hardware clears the request when it is accepted or rejected.
+0x0008         STS        Status Register.                   RDY    [00:00]  RO      0x0    Set once the default tables are loaded and their Huffman codes generated after reset. Low while a codegen runs.
+                                                             CGB    [01:01]  RO      0x0    Indicates whether huffman table codegen is running.
+                                                             DONE   [04:04]  RO      0x0    Set on frame completion and cleared when a new frame is accepted.
+0x000c         IMSZ       Image Size.                        IMW    [15:00]  RW      0x0
+                                                             IMH    [31:16]  RW      0x0
+0x0014         CGEN       Huffman Codegen Config.            TBL    [01:00]  RW      0x0    Controls which table type to generate. 00=DC LUMA, 01=DC CHROMA, 10=AC LUMA, 11=AC CHROMA.
+                                                             TRG    [31:31]  RW      0x0    Writing 1 triggers Huffman code generation from the stored tables. Hardware clears it when the codegen starts.
+0x0018         IRQP       Interrupt Pending (W1C).           DONE   [00:00]  W1C     0x0    A frame was encoded completely.
+                                                             INV    [01:01]  W1C     0x0    A start request was rejected because of an invalid image size.
+0x001c         IRQE       Interrupt Enable.                  DONE   [00:00]  RW      0x0    Enables Frame Done.
+                                                             INV    [01:01]  RW      0x0    Enables Invalid Config.
+0x0030         PERF0      Performance Counter Cycles.        CYC    [31:00]  RO      0x0    Number of cycles in running state since last processing start.
+0x0034         PERF1      Performance Counter Pixels.        PIX    [31:00]  RO      0x0    Number of pixels processed since last processing start.
+0x0038         PERF2      Performance Counter Bytes.         BYTEO  [31:00]  RO      0x0    Number of encoded bytes produced since last processing start.
+0x003c         PERF3      Performance Counter Idle Cycles.   IDLE   [31:00]  RO      0x0    Cycles in running state in which no input pixel was accepted.
+0x0040         PERF4      Performance Counter Flush Cycles.  FLSH   [31:00]  RO      0x0    Cycles from the last data unit entering the pipeline until the frame is done.
+0x0044         PERF5      Performance Counter Frame Cycles.  FRAME  [31:00]  RO      0x0    Cycles from the accepted start request until the frame is done, including configuration.
+0x0048         PERF6      Performance Counter Boot Cycles.   BOOT   [31:00]  RO      0x0    Cycles from reset until the default tables and Huffman codes were first ready.
+0x0100:0x01ff  QLUMAR                                                                       Raw luma quantization table, used for bitstream generation.
+0x0200:0x02ff  QCHROMAR                                                                     Raw chroma quantization table, used for bitstream generation.
+0x0300:0x03ff  QLUMASC                                                                      Scaled luma quantization table, used during encoding.
+0x0400:0x04ff  QCHROMASC                                                                    Scaled chroma quantization table, used during encoding.
+0x0500:0x053f  HBITSDCL                                                                     HUFFBITS table for DC luma components.
+0x0540:0x057f  HBITSDCC                                                                     HUFFBITS table for DC chroma components.
+0x0580:0x05bf  HBITSACL                                                                     HUFFBITS table for AC luma components.
+0x05c0:0x05ff  HBITSACC                                                                     HUFFBITS table for AC chroma components.
+0x1000:0x13ff  HVALDCL                                                                      HUFFVAL table for DC luma components.
+0x1400:0x17ff  HVALDCC                                                                      HUFFVAL table for DC chroma components.
+0x1800:0x1bff  HVALACL                                                                      HUFFVAL table for AC luma components.
+0x1c00:0x1fff  HVALACC                                                                      HUFFVAL table for AC chroma components.
+```
 <!-- regmap:end -->
 
 ## Resources and performance
