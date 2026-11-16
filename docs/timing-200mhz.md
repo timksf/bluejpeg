@@ -1,54 +1,91 @@
-The Full HD color encoder meets its internal OOC timing constraints on the PA200T's `xc7a200tfbg484-2` after the changes described here. Vivado 2025.2 reports **+0.014 ns setup WNS**, **0 ns TNS**, no failing setup endpoints, and **+0.060 ns hold WHS** after routing. The remaining margin is only 14 ps. The worst path is now CSR request decoding to its response register. Board integration still needs its own timing validation.
+# Timing closure at 200 MHz
 
-The synthesized top is `mkBlueJPEGTop_1920_12`, with a maximum image width of 1920, color enabled, a double-buffered tiler, and 12-bit DCT and quantization scales. Height is a runtime setting and the functional system test uses 1920 × 1080. The main clock is constrained to 5 ns and the separate DCT clock to 40 ns, matching the existing 8:1 configuration. The DCT itself is therefore running at 25 MHz in this experiment.
+The colour encoder `mkBlueJPEGTop_1920_12` (maximum width 1920, colour, double-buffered tiler,
+12-bit DCT and quantization precision) meets timing out of context at 200 MHz on the Artix-7
+`xc7a200tfbg484-2`. The main clock is constrained to 5 ns and the separate DCT clock to 40 ns, the
+8 to 1 ratio used throughout, so the DCT runs at 25 MHz. No false paths, multicycle paths, clock
+group exclusions, placement constraints or arithmetic approximations are used, the clock crossings
+between main and DCT clock stay timed, and all internal endpoints have clocks and delay constraints.
+External I/O delays and board clock roots are outside the scope of an out-of-context run and are
+checked when the core is integrated, as in the [1080p30 demonstration](1080p30-demo.md).
 
-The baseline and final builds use the same part and clock constraints. No false paths, multicycle paths, clock-group exclusions, placement constraints, arithmetic approximations, or image-size special cases were added. The existing elastic interfaces between JPEG modules remain in place.
+## Result
 
-| Routed setup slack | Baseline (ns) | Final (ns) |
+Vivado 2025.2 reports +0.014 ns setup slack, 0 ns total negative slack and +0.060 ns hold slack after
+routing. The worst path is the decoding of a CSR request into its response register. The table lists
+the worst routed setup slack per module before and after the changes described below, counting only
+paths whose start and end points both lie in the module.
+
+| Module | Before (ns) | After (ns) |
 | --- | ---: | ---: |
 | Complete core | -2.633 | +0.014 |
 | Image tiler | -2.633 | +0.319 |
-| JPEGBitstream | -2.448 | +0.230 |
-| DU processing, including quantization | -1.863 | +0.302 |
+| Bitstream writer | -2.448 | +0.230 |
+| DU processing including quantization, gearboxes and clock crossings | -1.863 | +0.302 |
 | Huffman encoder | -1.705 | +0.312 |
 | Table storage and code generation | -1.702 | +0.125 |
 | RLE | -1.074 | +0.481 |
 
-The module rows are the worst paths whose sequential endpoints are both in the named module. The DU processing row includes its gearboxes and clock crossings. In the final full-core report, the framewriter has +0.050 ns slack and CSR decoding has +0.014 ns. Clock crossings are still timed, with +0.660 ns setup slack from the main clock to the DCT clock and +0.302 ns in the reverse direction. All internal endpoints have clocks and maximum-delay constraints. External I/O delays, OOC partition pin locations, and the final board clock roots are not specified by this core-level experiment and must be checked during system integration.
+In the final report the frame writer has +0.050 ns slack, the crossing from the main to the DCT clock
++0.660 ns and the reverse direction +0.302 ns.
 
-The baseline identified several distinct problems:
-
-- The tiler used the general bank router for a single dual-port BRAM. Its non-power-of-two bank depth introduced division and remainder logic into address generation. It also multiplexed both logical clients across both physical ports and routed responses through an owner mux. The direct dual-port backend now binds each client to its own port. The general shared-bank accessor is unchanged. Read addresses are registered before BRAM requests, and the last write address and row increment are calculated when the width is configured.
-- JPEGBitstream cleared emitted bits through a 64-bit CReg, then shifted and appended the next codeword in the same cycle. Clearing is unnecessary because only the low `rg_bits` bits are valid and appending cannot move stale high bits into the valid region. The accumulator is now an ordinary register. Only the small count retains its CReg. Mask generation uses shifts and complements at the codeword or byte width, and final padding operates on one byte. A registered byte boundary separates extraction from stuffing. Completion waits until those bytes and their stuffing have been handled.
-- Quantization placed operand negation, multiplication, and product negation in one cycle through `signedMul`. The runtime quantizer now has rigid stages for table requests, operand magnitudes, unsigned multiplication, sign restoration, and rounding. All internal stages share one advance condition, and their `fire_when_enabled` and `no_implicit_conditions` assertions pass compilation. Signed extrema retain the original arithmetic behavior.
-- Huffman preparation combined absolute-value calculation and magnitude encoding, and emission combined LUTRAM lookup with codeword packing. Its rigid pipeline now separates preparation, symbol generation, table lookup, and packing under one advance condition with the same scheduling assertions. RLE registers zero classification before its variable-rate symbol logic.
-- Code generation now registers each code-length count before comparing it with the symbol counter. Per-table HUFFVAL reads are registered before selecting the destination table, splitting lookup from selection and writes.
-- CSR requests are registered before decoding. Startup rewind distribution is a separate control step from the guarded tiler and framewriter start handshakes, adding one startup cycle per frame. A framewriter comparison uses a precomputed last HUFFVAL index instead of subtracting from the total while emitting each symbol.
-
-There was a cross-module control path: the framewriter's guarded start influenced the rewind pulse and reset logic in other modules. It was a startup path, not a long streaming data path. The combinational table interfaces also cross module boundaries by design. The critical streaming operations were otherwise concentrated within modules, as expected.
-
-| Routed resources | Baseline | Final |
+| Routed resources | Before | After |
 | --- | ---: | ---: |
 | Slice LUTs | 6,941 | 6,021 |
 | Slice registers | 4,374 | 4,488 |
 | BRAM tiles | 25 | 25 |
 | DSPs | 11 | 11 |
 
-The complete OOC flow can be reproduced from the repository root with:
+## Design changes
+
+- The tiler used the general banked-memory router for a single dual-port BRAM. Its bank depth is not
+  a power of two, which put division and remainder logic into the address generation, and both
+  logical clients were multiplexed across both physical ports with a response multiplexer behind
+  them. A direct dual-port backend now binds each client to its own port, while the general router
+  remains available for other uses. Read addresses are registered before the BRAM request, and the
+  last write address and the row increment are computed when the width is configured.
+- The bitstream writer cleared emitted bits through a 64-bit CReg and then shifted and appended the
+  next codeword in the same cycle. Clearing is unnecessary, since only the low `rg_bits` bits are
+  valid and appending never moves stale upper bits into that range, so the accumulator is now an
+  ordinary register and only the bit count remains a CReg. Masks are built with shifts and
+  complements at codeword or byte width, final padding works on a single byte, and a registered
+  byte boundary separates extraction from stuffing. Completion waits until those bytes and their
+  stuffing have been handled.
+- Quantization performed operand negation, multiplication and product negation in one cycle through
+  `signedMul`. The runtime quantizer now has rigid stages for the table request, operand magnitudes,
+  unsigned multiplication, sign restoration and rounding, all advancing on one enable condition and
+  checked with `fire_when_enabled` and `no_implicit_conditions`. Signed extreme values keep their
+  previous arithmetic behaviour.
+- The Huffman encoder combined absolute value and magnitude encoding in its preparation step and
+  table lookup with codeword packing in its emission step. Its rigid pipeline now separates
+  preparation, symbol generation, table lookup and packing under one enable condition. RLE registers
+  the zero classification before its variable-rate symbol logic.
+- Code generation registers each code-length count before comparing it with the symbol counter, and
+  per-table HUFFVAL reads are registered before the destination table is selected.
+- CSR requests are registered before decoding. The rewind distribution at frame start is a separate
+  control step ahead of the guarded tiler and frame writer start handshakes, which adds one cycle per
+  frame, and the frame writer compares against a precomputed last HUFFVAL index instead of
+  subtracting from the total for every symbol.
+
+Apart from the start handshake of the frame writer, which reached into the rewind and reset logic of
+other modules, and the combinational table interfaces, the critical paths were contained within
+single modules.
+
+## Reproducing
 
 ```sh
-make -C hdl bitstream SYNTH=ooc TOP_MODULE=mkBlueJPEGTop_1920_12 BUILDDIR=build/timing_200_reproduce
+make -C hdl bitstream SYNTH=ooc TOP_MODULE=mkBlueJPEGTop_1920_12
 ```
 
-`synth_ooc.tcl` now synthesizes, optimizes, places, physically optimizes, and routes the core. `timing_reports.tcl` writes full-core, per-clock, and per-module paths at each major stage. Original `_tim1` and `_tim2` reports are retained. The local baseline artifacts are in `hdl/build/timing_200_baseline/mkBlueJPEGTop_1920_12_ooc/`, and the final artifacts are in `hdl/build/timing_200_final/mkBlueJPEGTop_1920_12_ooc/`. The most useful final files are:
+`hdl/src/synth/script/synth_ooc.tcl` synthesizes, optimizes, places, physically optimizes and routes
+the core, and `timing_reports.tcl` writes full-core, per-clock and per-module path reports after each
+stage. The relevant outputs in the build directory are the route summary, path and utilization
+reports, the per-module reports such as those for `i_img_tiler` and `i_stuffer`, and the routed
+checkpoint.
 
-- `mkBlueJPEGTop_1920_12_ooc_route_summary.rpt`
-- `mkBlueJPEGTop_1920_12_ooc_route_paths.rpt`
-- `mkBlueJPEGTop_1920_12_ooc_route_i_img_tiler.rpt`
-- `mkBlueJPEGTop_1920_12_ooc_route_i_stuffer.rpt`
-- `mkBlueJPEGTop_1920_12_ooc_route_util.rpt`
-- `mkBlueJPEGTop_1920_12_ooc_route.dcp`
-
-Functional validation includes all 36 existing JPEGBitstream cases across buffered and bypass inputs, with and without output stalls. The tiler test now covers widths 8, 128, and 1920 and both buffer modes. `TbQuantizePipeline` checks signed extrema, negative table multipliers, input bubbles, output stalls, and repeated rewind. The JPEG byte-accuracy test matches all 3,560 reference bytes, and the consecutive-frame test passes with color and double buffering enabled.
-
-The final Full HD system test passes three consecutive 1920 × 1080 frames, including repeat operation. Each frame contains 290,450 bytes in 284 UDP packets and matches the C++ reference byte for byte. Validation logs are saved under `hdl/build/timing_200_final/validation/`.
+The changes are covered by the existing regressions. All 36 bitstream writer cases with buffered and
+bypassed input, with and without output stalls, pass. The tiler test covers widths of 8, 128 and 1920
+in both buffer modes, and `TbQuantizePipeline` checks signed extreme values, negative table
+multipliers, input bubbles, output stalls and repeated rewind. The byte-accuracy test matches all
+3,560 reference bytes, the consecutive-frame test passes with colour and double buffering enabled,
+and the 1920 × 1080 system test passes three consecutive frames including repeat operation.
