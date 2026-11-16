@@ -7,3 +7,6 @@ vivado*
 __pycache__
 sim_build
 results.xml
+# WaveDrom timing diagrams, kept locally only
+assets/bitstream/
+assets/rle/
