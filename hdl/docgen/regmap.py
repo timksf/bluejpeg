@@ -4,8 +4,9 @@
     python3 hdl/docgen/regmap.py            # run inside the Nix shell, needs bsc
     python3 hdl/docgen/regmap.py --print    # print the table instead of editing README.md
 
-Elaborates RegDoc.bsv (doc_blue_csr_markdown over blue_jpeg_csrs) and replaces the text between the
-<!-- regmap:begin --> and <!-- regmap:end --> markers. Nothing is synthesized.
+Elaborates RegDoc.bsv (doc_blue_csr_markdown over blue_jpeg_csrs), formats the result as an aligned
+text table and replaces the text between the <!-- regmap:begin --> and <!-- regmap:end --> markers.
+Nothing is synthesized.
 """
 import argparse
 import re
@@ -32,11 +33,27 @@ def generate():
     return m.group(1).strip()
 
 
+def to_text_block(markdown):
+    """Turn the exporter's Markdown table into an aligned plain-text table in a code block.
+
+    GitHub wraps long cells in Markdown tables. A code block keeps one line per field and scrolls
+    horizontally instead, so the map stays dense and every column lines up.
+    """
+    rows = [[c.strip() for c in line.strip().strip("|").split("|")]
+            for line in markdown.splitlines() if line.startswith("|") and not line.startswith("| ---")]
+    #table regions have no fields, their description goes to the last column to keep the others narrow
+    body = [r if any(r[3:]) else r[:2] + [""] * 5 + [r[2]] for r in rows[1:]]
+    header = ["Offset", "Register", "Description", "Field", "Bits", "Access", "Reset", "Field description"]
+    widths = [max(len(r[i]) for r in [header] + body) for i in range(len(header))]
+    lines = ["  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip() for r in [header] + body]
+    return "```text\n" + "\n".join(lines) + "\n```"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--print", action="store_true", help="print the table, leave README.md alone")
     args = ap.parse_args()
-    table = generate()
+    table = to_text_block(generate())
     if args.print:
         print(table)
         return
