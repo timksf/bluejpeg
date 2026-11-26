@@ -4,6 +4,7 @@
 #   make rom                                    regenerate rom/pattern_192x192.mem from assets/sample_192x192.bmp
 #   make bitstream                              PA200T bitstream via BSVTools vivado_tcl (src/fpga/pa200t/script/synth.tcl)
 #   make bitstream SYNTH=ooc TOP_MODULE=mkBlueJPEGTop_1920_12   out-of-context synthesis of a core variant (src/synth)
+#   make bitstream SYNTH=ooc SYNTH_MAIN=synth/SynthDecoder TOP_MODULE=mkBlueJPEGDecTop_1920   same for a decoder variant
 
 ifeq ($(SYSTEM),udp)
 UDP_MEMORY      ?= mig
@@ -19,7 +20,8 @@ SCRIPT           := $(CURDIR)/src/fpga/pa200t_udp/script/synth.tcl
 endif
 
 ifeq ($(SYNTH),ooc)
-MAIN_MODULE      := synth/SynthTest
+SYNTH_MAIN       ?= synth/SynthTest
+MAIN_MODULE      := $(SYNTH_MAIN)
 TOP_MODULE       ?= mkBlueJPEGTop_1920_12
 PROJECT_NAME     := $(TOP_MODULE)_ooc
 SCRIPT           := $(CURDIR)/src/synth/script/synth_ooc.tcl
@@ -45,7 +47,7 @@ ROM_FILES  := $(wildcard $(ROM_DIR)/*.mem)
 
 VIVADO_ADD_PARAMS :=
 CONSTRAINT_FILES  :=
-EXTRA_BSV_LIBS    := $(addprefix $(CURDIR)/src/,encoder system system_udp synth fpga/pa200t fpga/pa200t_udp) $(TEST_DIR)/bdpi
+EXTRA_BSV_LIBS    := $(addprefix $(CURDIR)/src/,encoder decoder system system_udp synth fpga/pa200t fpga/pa200t_udp) $(TEST_DIR)/bdpi
 EXTRA_LIBRARIES   := png X11 z pthread
 RUN_FLAGS         :=
 
