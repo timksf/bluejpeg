@@ -31,7 +31,8 @@ typedef 4 DeZigZagBlocks;
  *
  * A 64-bit valid mask per block replaces clearing, so coefficients that were
  * never written read as zero. The natural position is registered ahead of
- * the write. The block tag (component, MCU end, frame end) is queued when a
+ * the write, and the valid bit is registered with the coefficient read, so
+ * the mask lookup and the zeroing are separate stages. The block tag (component, MCU end, frame end) is queued when a
  * block completes and rejoins the samples after the IDCT.
  */
 module mkDeZigZag(DeZigZag_ifc#(bits));
@@ -43,6 +44,7 @@ module mkDeZigZag(DeZigZag_ifc#(bits));
 
     FIFO#(DeqToken_t#(bits))                    f_in  <- mkBypassFIFO;
     FIFO#(Tuple2#(DeqToken_t#(bits), UInt#(6))) f_idx <- mkFIFO;
+    FIFO#(Tuple2#(Bool, Int#(bits)))            f_rd  <- mkFIFO;
     FIFO#(Int#(bits))                           f_out <- mkFIFO;
     FIFOF#(BlockTag_t)                          f_tag <- mkSizedFIFOF(8);
 
@@ -102,13 +104,19 @@ module mkDeZigZag(DeZigZag_ifc#(bits));
     //column-major read, the natural index of (u, v) = (idx % 8, idx / 8) is u * 8 + v
     rule r_read (blocks_rdy > 0);
         Bit#(6) nat = {rg_rd_idx[2:0], rg_rd_idx[5:3]};
-        f_out.enq(rg_mask[rg_rd_buf][nat] == 1 ? i_buf.sub({rg_rd_buf, nat}) : 0);
+        f_rd.enq(tuple2(rg_mask[rg_rd_buf][nat] == 1, i_buf.sub({rg_rd_buf, nat})));
         if(rg_rd_idx == 63) begin
             rg_rd_buf <= rg_rd_buf + 1;
             w_clear.wset(rg_rd_buf);
             pw_block_read.send;
         end
         rg_rd_idx <= rg_rd_idx + 1;
+    endrule
+
+    //coefficients that were never written leave as zero
+    rule r_emit;
+        match {.valid, .val} = f_rd.first; f_rd.deq;
+        f_out.enq(valid ? val : 0);
     endrule
 
     interface coef   = toPut(f_in);
