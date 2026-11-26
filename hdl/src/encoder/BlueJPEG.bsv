@@ -134,9 +134,10 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     //AXI-Lite config
 
-    //requests and responses registered, so CSR decoding is a stage of its own
+    //requests, address decode and responses registered, so each is a stage of its own
     BlueCSRCfg_t csr_cfg = BlueCSRCfg_t {
         buffer_in:        True,
+        buffer_decode:    True,
         buffer_out:       True,
         default_response: CSR_DECERR
     };
