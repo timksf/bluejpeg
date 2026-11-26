@@ -8,6 +8,7 @@ import BuildVector :: *;
 
 import Types :: *;
 import PrintUtil :: *;
+import SignedMul :: *;
 
 function ReadOnly#(t) reg_to_read_only(Reg#(t) r) = regToReadOnly(r);
 
@@ -80,7 +81,9 @@ endfunction
 * This function multiplies an integer of `bits` length with a compile-time
 * constant Integer that was scaled by 2^`bits_frac`. The constant is stored as
 * signed Q1.bits_frac, so values in [-2, 2) keep their integer bit instead of
-* truncating into the fractional field.
+* truncating into the fractional field. The product is a Verilog signed
+* multiply (signed_mul_wide), so a DSP takes the operands as they are instead
+* of the magnitudes bsc's signedMul feeds it with fabric negation around it.
 */
 function Int#(bits) scaled_mul_s(Bool sat, Bool round, NumProxy_t#(bits_frac) _proxy, Int#(bits) val, Integer f)
     provisos(
@@ -88,7 +91,7 @@ function Int#(bits) scaled_mul_s(Bool sat, Bool round, NumProxy_t#(bits_frac) _p
         Add#(bits, coeff_bits, bits_mul)
     );
     Int#(coeff_bits) f_const = fromInteger(f);
-    Int#(bits_mul)   prod    = signedMul(val, f_const);
+    Int#(bits_mul)   prod    = signed_mul_wide(val, f_const);
 
     //rounding: add 2^(bits_frac-1) before shifting
     Int#(bits_mul) prod_m = ?;
@@ -115,7 +118,7 @@ function Int#(bits) scaled_mul_rt(Bool sat, Bool round, NumProxy_t#(bits_frac) _
         Add#(bits, coeff_bits, bits_mul)
     );
     Int#(coeff_bits) f_const = signExtend(f);
-    Int#(bits_mul)   prod    = signedMul(val, f_const);
+    Int#(bits_mul)   prod    = signed_mul_wide(val, f_const);
 
     //rounding: add 2^(bits_frac-1) before shifting
     Int#(bits_mul) prod_m = ?;

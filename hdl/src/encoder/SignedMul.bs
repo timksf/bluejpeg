@@ -1,0 +1,19 @@
+package SignedMul(signed_mul_wide) where
+
+-- Signed multiply that reaches Verilog as a signed multiply. bsc emits every multiply unsigned, which Yosys narrows
+-- back to a signed multiplier but Vivado does not (three DSP48 for an 18 x 18 product with sign extended operands).
+-- The Verilog system function $signed can only be declared in Bluespec Classic, BSV accepts it in display tasks only.
+
+foreign signed_cast :: Bit n -> Bit n = "$signed"
+
+-- Full width signed product. The operands are sign extended to the result width before the cast, so the product
+-- keeps its width in any Verilog context (inside a concatenation an 18 bit signed multiply would be 18 bits wide).
+-- Synthesis trims the sign extension of signed operands (one DSP48 for 18 x 18 into 36 bits). Bluesim drops $signed,
+-- and the unsigned product of the sign extended operands is the same value modulo 2^m.
+signed_mul_wide :: (Add n i m, Add k j m) => Int n -> Int k -> Int m
+signed_mul_wide a b =
+  let wa :: Bit m
+      wa = signed_cast (pack (signExtend a))
+      wb :: Bit m
+      wb = signed_cast (pack (signExtend b))
+  in  unpack (wa * wb)

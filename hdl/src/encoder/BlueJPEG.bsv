@@ -134,7 +134,14 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
     //AXI-Lite config
 
-    BlueCSRAccess_ifc#(32, 32, 1, BlueJPEGCfg_ifc) i_csrs     <- create_blue_csr(blue_jpeg_csrs, True);
+    //requests and responses registered, so CSR decoding is a stage of its own
+    BlueCSRCfg_t csr_cfg = BlueCSRCfg_t {
+        buffer_in:        True,
+        buffer_out:       True,
+        default_response: CSR_DECERR
+    };
+
+    BlueCSRAccess_ifc#(32, 32, 1, BlueJPEGCfg_ifc) i_csrs     <- create_blue_csr_cfg(blue_jpeg_csrs, csr_cfg);
     BlueCSR_AXI4Lite_ifc#(32, 32, 1)               i_axi_csrs <- mkBlueCSRAXI4LiteAdapter(i_csrs.external, 1, 1);
 
     //optional documentations generation for CSRs
@@ -208,10 +215,11 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
     PulseWire          pw_start_frame <- mkPulseWire;
 
     //DU counting: tracks phase through interleaved MCU scan
-    Reg#(Bit#(16)) rg_mcu_w <- mkRegU;
-    Reg#(Bit#(16)) rg_mcu_h <- mkRegU;
-    Reg#(Bit#(16)) rg_mcu_x <- mkReg(0);
-    Reg#(Bit#(16)) rg_mcu_y <- mkReg(0);
+    //the last MCU column and row are registered at start, so the position tests are plain compares
+    Reg#(Bit#(16)) rg_mcu_x_last <- mkRegU;
+    Reg#(Bit#(16)) rg_mcu_y_last <- mkRegU;
+    Reg#(Bit#(16)) rg_mcu_x      <- mkReg(0);
+    Reg#(Bit#(16)) rg_mcu_y      <- mkReg(0);
 
     //table writes from AXI-Lite
 
@@ -298,7 +306,7 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
 
         let n_du = cfg.en_chroma ? 3 : fromInteger(1);
         Bool end_of_mcu = !cfg.en_chroma || (rg_mcu_phase == n_du - 1);
-        Bool is_last    = (end_of_mcu && rg_mcu_x == rg_mcu_w-1 && rg_mcu_y == rg_mcu_h-1);
+        Bool is_last    = (end_of_mcu && rg_mcu_x == rg_mcu_x_last && rg_mcu_y == rg_mcu_y_last);
 
         if(rg_du_pix == 0) begin
             PixType_t pt      = Luma;
@@ -323,9 +331,9 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
                 rg_mcu_phase <= rg_mcu_phase + 1;
 
             if(end_of_mcu) begin
-                if(rg_mcu_x == rg_mcu_w-1) begin
+                if(rg_mcu_x == rg_mcu_x_last) begin
                     rg_mcu_x <= 0;
-                    if(rg_mcu_y == rg_mcu_h-1)
+                    if(rg_mcu_y == rg_mcu_y_last)
                         rg_mcu_y <= 0;
                     else
                         rg_mcu_y <= rg_mcu_y + 1;
@@ -361,8 +369,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         Bit#(16) blk_rows = (height + 7) >> 3;
 
         rg_state        <= cfg_valid ? S_CONFIGURE : S_IDLE;
-        rg_mcu_w        <= blk_cols;
-        rg_mcu_h        <= blk_rows;
+        rg_mcu_x_last   <= blk_cols - 1;
+        rg_mcu_y_last   <= blk_rows - 1;
         rg_mcu_x        <= 0;
         rg_mcu_y        <= 0;
         rg_mcu_phase    <= 0;
