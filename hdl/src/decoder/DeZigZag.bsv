@@ -93,6 +93,7 @@ module mkDeZigZag(DeZigZag_ifc#(bits));
         if(t.pos.last) begin
             f_tag.enq(BlockTag_t {
                 comp:    t.pos.comp,
+                sub:     t.pos.sub,
                 mcu_end: t.pos.mcu_end,
                 last:    t.pos.last_block
             });

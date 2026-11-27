@@ -28,6 +28,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_dec_csrs(BlueJPEGDecCfg_ifc);
     Reg#(Bit#(16))     rg_imw;
     Reg#(Bit#(16))     rg_imh;
     Reg#(Bit#(2))      rg_ncomp;
+    Reg#(Bit#(2))      rg_sub;
     Reg#(Bit#(3))      rg_err;
 
     csr_regmap_def("BlueJPEGDec", "Register File for the BlueJPEG decoder.");
@@ -52,11 +53,12 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_dec_csrs(BlueJPEGDecCfg_ifc);
 
     csr_reg_def('h10, "FMT", "Frame Format of the last frame header.");
     rg_ncomp <- csr_reg_ro('h10, 0, 0, "NCMP", "Components", "1 for grayscale, 3 for YCbCr.");
+    rg_sub   <- csr_reg_ro('h10, 0, 4, "SUB",  "Chroma Subsampling", "0 for 4:4:4 or grayscale, 1 for 4:2:2, 2 for 4:2:0.");
 
 
     csr_reg_def('h14, "ERR", "Error Status.");
     rg_err <- csr_reg_ro('h14, 0, 0, "CODE", "Error Code",
-        "0 none, 1 stream does not start with SOI, 2 unsupported feature, 3 invalid Huffman code, 4 coefficient index overflow. The decoder stops on an error until reset.");
+        "Most recent error since reset. 0 none, 1 unexpected marker or a frame cut short, 2 unsupported feature, 3 invalid Huffman code, 4 coefficient index overflow. The decoder skips frames with header errors and completes frames with data errors using grey blocks, then continues.");
 
 
     //pending bits latch regardless of enable and double as sticky status
@@ -64,7 +66,7 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_dec_csrs(BlueJPEGDecCfg_ifc);
     csr_reg_def('h18, "IRQP", "Interrupt Pending (W1C).");
     csr_reg_def('h1C, "IRQE", "Interrupt Enable.");
     csr_irq('h18, 'h1C, 0, 0, pw_frame_done, "DONE", "Frame Done", "The last pixel of a frame has left the decoder.");
-    csr_irq('h18, 'h1C, 1, 0, pw_error,      "ERR",  "Error",      "The decoder stopped on an error, see ERR.");
+    csr_irq('h18, 'h1C, 1, 0, pw_error,      "ERR",  "Error",      "An error occurred, see ERR and PERF5.");
 
 
     //free-running read-only event counters, software works with differences
@@ -83,12 +85,16 @@ module [BlueCSRCtx_t#(32, 32)] blue_jpeg_dec_csrs(BlueJPEGDecCfg_ifc);
     csr_reg_def('h40, "PERF4", "Performance Counter Frames.");
     let _frm <- csr_reg_counter_ro('h40, Bit#(32)'(0), 0, pw_frame_done, "FRM", "Frame Counter", "Frames decoded.");
 
+    csr_reg_def('h44, "PERF5", "Performance Counter Errors.");
+    let _errs <- csr_reg_counter_ro('h44, Bit#(32)'(0), 0, pw_error, "ERRS", "Error Counter", "Error events, a damaged frame can raise more than one.");
+
     method Action status(Bool busy, FrameInfo_t info, DecError_t err);
         rg_busy  <= busy;
         if(busy) pw_busy.send;
         rg_imw   <= pack(info.width);
         rg_imh   <= pack(info.height);
         rg_ncomp <= pack(info.ncomp);
+        rg_sub   <= pack(info.sub);
         rg_err   <= zeroExtend(pack(err));
     endmethod
 

@@ -12,26 +12,40 @@ typedef Bit#(2) CompIdx_t;
 //dequantized coefficients are clamped to the 8-bit baseline range, which bounds every IDCT node
 typedef Int#(12) Coef_t;
 
-typedef struct {
-    UInt#(16) width;
-    UInt#(16) height;
-    UInt#(2)  ncomp;
-} FrameInfo_t deriving(Bits, Eq, FShow);
+//chroma subsampling of a colour frame, named by the luma sampling factors (chroma is always 1x1)
+//4:4:4 is 1x1, 4:2:2 is 2x1 and 4:2:0 is 2x2, grayscale frames count as 4:4:4
+typedef enum { Sub444, Sub422, Sub420 } ChromaSub_t deriving(Bits, Eq, FShow);
 
 typedef struct {
+    UInt#(16)   width;
+    UInt#(16)   height;
+    UInt#(2)    ncomp;
+    ChromaSub_t sub;
+} FrameInfo_t deriving(Bits, Eq, FShow);
+
+//one block of an MCU in decoding order, sub is the position {row, column} of a luma block within the MCU
+typedef struct {
+    CompIdx_t      comp;
+    Bit#(2)        sub;
     QuantTableId_t tq;
     HuffTableId_t  td;
     HuffTableId_t  ta;
-} ScanComp_t deriving(Bits, Eq, FShow);
+} ScanBlock_t deriving(Bits, Eq, FShow);
 
+//blocks of the largest MCU, four luma and two chroma blocks for 4:2:0
+typedef 6 MaxMcuBlocks;
+
+//skip marks the scan of a rejected frame, its entropy-coded data is only drained
 typedef struct {
-    UInt#(2)               ncomp;
-    UInt#(13)              mcu_w;
-    UInt#(13)              mcu_h;
-    Vector#(3, ScanComp_t) comps;
+    Bool                               skip;
+    UInt#(3)                           nblk_m1;
+    UInt#(13)                          mcu_w;
+    UInt#(13)                          mcu_h;
+    Vector#(MaxMcuBlocks, ScanBlock_t) blocks;
 } ScanCfg_t deriving(Bits, Eq, FShow);
 
-typedef enum { Dqt, Dht, Sof, Sos, Dri } SegKind_t deriving(Bits, Eq, FShow);
+//Soi carries no payload, it tells the frame parser that a new frame starts
+typedef enum { Dqt, Dht, Sof, Sos, Dri, Soi } SegKind_t deriving(Bits, Eq, FShow);
 
 //payload byte of a header segment the frame parser handles, idx counts from 0 and saturates at 31
 typedef struct {
@@ -47,10 +61,14 @@ typedef struct {
     Vector#(16, Bit#(8))   offset;
 } HuffLimits_t deriving(Bits, Eq, FShow);
 
+//HUFFVAL read of the code length search, the index candidates for codes of up to 8 bits (lo) and longer (hi)
+//are both read, short picks lo after the read
 typedef struct {
     Bool          ac;
     HuffTableId_t id;
-    Bit#(8)       idx;
+    Bit#(8)       lo;
+    Bit#(8)       hi;
+    Bool          short;
 } HuffValIdx_t deriving(Bits, Eq, FShow);
 
 //codes up to this many bits decode through the lookahead table
@@ -80,6 +98,7 @@ typedef union tagged {
 typedef struct {
     QuantTableId_t tq;
     CompIdx_t      comp;
+    Bit#(2)        sub;
     UInt#(6)       k;
     Bool           last;
     Bool           mcu_end;
@@ -112,6 +131,7 @@ typedef struct {
 
 typedef struct {
     CompIdx_t comp;
+    Bit#(2)   sub;
     Bool      mcu_end;
     Bool      last;
 } BlockTag_t deriving(Bits, Eq, FShow);
@@ -127,9 +147,10 @@ typedef struct {
     Bool    last;
 } PixelOut_t deriving(Bits, Eq, FShow);
 
+//errors are reported per event, the decoder conceals or skips the frame and continues with the next one
 typedef enum {
     None,
-    MissingSoi,
+    BadMarker,
     Unsupported,
     BadHuffCode,
     CoefOverflow

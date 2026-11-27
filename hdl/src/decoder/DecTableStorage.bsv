@@ -10,12 +10,29 @@ import ClientServer :: *;
 import EncoderUtil :: *;
 import DecoderTypes :: *;
 
+//table writes of the frame parser, one per DQT or DHT payload byte
+typedef union tagged {
+    struct {
+        QuantTableId_t tq;
+        UInt#(6)       k;
+        UInt#(8)       q;
+    } QuantWrite;
+    struct {
+        Bool          ac;
+        HuffTableId_t id;
+    } HuffStart;
+    UInt#(8) HuffCount;
+    struct {
+        UInt#(8) idx;
+        Bit#(8)  v;
+    } HuffValue;
+} TableCmd_t deriving(Bits, Eq, FShow);
+
 interface DecTableStorage_ifc;
-    //writes from the frame parser
-    method Action write_quant(QuantTableId_t tq, UInt#(6) k, UInt#(8) q);
-    method Action huff_start(Bool ac, HuffTableId_t id);
-    method Action huff_count(UInt#(8) n);
-    method Action huff_value(UInt#(8) idx, Bit#(8) v);
+    //writes from the frame parser, registered before they are applied
+    //cmd_ready is a register, the writer checks it in its rule guard so cmd itself has no condition
+    method Bool                cmd_ready;
+    interface Put#(TableCmd_t) cmd;
 
     //to the Huffman decoder, limits are registers for the parallel length search
     method HuffLimits_t                      huff_limits(Bool ac, HuffTableId_t id);
@@ -136,9 +153,12 @@ module mkDecTableStorage#(Bool en_chroma, Bool en_look)(DecTableStorage_ifc);
     //lookahead tables ordered {id, ac}, so a grayscale build stores only the first 512 entries
     function Bit#(10) look_addr(Bit#(2) t, Bit#(8) bits) = {t[0], t[1], bits};
 
+    //both index candidates are registered addresses of their own read port, the choice follows the read
     function Bit#(8) read_huff_val();
-        let i = w_hval_idx;
-        return i.ac ? i_ac_val.sub({eff_id(i.id), i.idx}) : i_dc_val.sub({eff_id(i.id), i.idx[3:0]});
+        let     i  = w_hval_idx;
+        Bit#(8) lo = i.ac ? i_ac_val.sub({eff_id(i.id), i.lo}) : i_dc_val.sub({eff_id(i.id), i.lo[3:0]});
+        Bit#(8) hi = i.ac ? i_ac_val.sub({eff_id(i.id), i.hi}) : i_dc_val.sub({eff_id(i.id), i.hi[3:0]});
+        return i.short ? lo : hi;
     endfunction
 
     function UInt#(8) read_quant();
@@ -233,20 +253,20 @@ module mkDecTableStorage#(Bool en_chroma, Bool en_look)(DecTableStorage_ifc);
         endrule
     end
 
-    method Action write_quant(QuantTableId_t tq, UInt#(6) k, UInt#(8) q);
+    function Action write_quant(QuantTableId_t tq, UInt#(6) k, UInt#(8) q) = action
         i_quant.upd({eff_id(tq), pack(k)}, q);
-    endmethod
+    endaction;
 
-    method Action huff_start(Bool ac, HuffTableId_t id);
+    function Action huff_start(Bool ac, HuffTableId_t id) = action
         rg_ac    <= ac;
         rg_id    <= id;
         rg_len   <= 0;
         rg_code  <= 0;
         rg_k     <= 0;
         rg_total <= 0;
-    endmethod
+    endaction;
 
-    method Action huff_count(UInt#(8) n);
+    function Action huff_count(UInt#(8) n) = action
         UInt#(17) code_end = rg_code + extend(n);
         w_commit.wset(tuple4(tbl_idx(rg_ac, rg_id), rg_len, code_end, rg_k - truncate(pack(rg_code))));
         rg_code <= code_end << 1;
@@ -260,19 +280,35 @@ module mkDecTableStorage#(Bool en_chroma, Bool en_look)(DecTableStorage_ifc);
             counts: readVReg(rg_counts),
             total:  total
         });
-    endmethod
+    endaction;
 
-    method Action huff_value(UInt#(8) idx, Bit#(8) v);
+    function Action huff_value(UInt#(8) idx, Bit#(8) v) = action
         if(rg_ac) i_ac_val.upd({eff_id(rg_id), pack(idx)}, v);
         else if(idx < 16) i_dc_val.upd({eff_id(rg_id), pack(idx)[3:0]}, v);
         if(en_look) f_look_val.enq(v);
-    endmethod
+    endaction;
+
+    //commands arrive registered, so the parser's byte decoding and the table updates are separate stages
+    FIFOF#(TableCmd_t) f_cmd <- mkGFIFOF(True, False);
+
+    rule r_cmd;
+        let c = f_cmd.first; f_cmd.deq;
+        case(c) matches
+            tagged QuantWrite .w: write_quant(w.tq, w.k, w.q);
+            tagged HuffStart  .h: huff_start(h.ac, h.id);
+            tagged HuffCount  .n: huff_count(n);
+            tagged HuffValue  .v: huff_value(v.idx, v.v);
+        endcase
+    endrule
+
+    method cmd_ready = f_cmd.notFull;
+    interface cmd    = toPut(f_cmd);
 
     method HuffLook_t huff_look(Bool ac, HuffTableId_t id, Bit#(HuffLookBits) bits);
         return en_look ? i_look.sub(look_addr(tbl_idx(ac, id), bits)) : unpack(0);
     endmethod
 
-    method huff_busy = en_look && (rg_lf_active || f_look_req.notEmpty || isValid(rg_look_wr));
+    method huff_busy = f_cmd.notEmpty || (en_look && (rg_lf_active || f_look_req.notEmpty || isValid(rg_look_wr)));
 
     method HuffLimits_t huff_limits(Bool ac, HuffTableId_t id);
         let t = tbl_idx(ac, id);

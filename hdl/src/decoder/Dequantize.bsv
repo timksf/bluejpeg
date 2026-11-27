@@ -1,5 +1,6 @@
 package Dequantize;
 
+import DReg :: *;
 import FIFO :: *;
 import FIFOF :: *;
 import Real :: *;
@@ -16,6 +17,9 @@ import DecoderTypes :: *;
 interface Dequantize_ifc#(numeric type bits);
     interface Client#(QuantIdx_t, UInt#(8))           quant;
     interface Server#(CoefToken_t, DeqToken_t#(bits)) data;
+
+    //the last coefficient of a scan has read its table entry, one cycle later
+    method Bool scan_done;
 endinterface
 
 //extra fraction bits of the prescale constants, removed again by rounding
@@ -51,6 +55,8 @@ endfunction
  *
  * The clamp bounds every IDCT node (see IDCTPass1Int), so the IDCT needs no
  * saturating arithmetic. Tokens without a value pass through unchanged.
+ * scan_done tells the frame parser when the last coefficient of a scan has
+ * taken its table entry, after which the tables may change.
  */
 module mkDequantize#(NumProxy_t#(dfrac) _p)(Dequantize_ifc#(bits))
     provisos(
@@ -85,7 +91,8 @@ module mkDequantize#(NumProxy_t#(dfrac) _p)(Dequantize_ifc#(bits))
     //the sign travels with the operands through the later stages
     Vector#(3, Reg#(Bool)) rg_sign <- replicateM(mkRegU);
 
-    PulseWire pw_input <- mkPulseWire;
+    PulseWire  pw_input <- mkPulseWire;
+    Reg#(Bool) rg_done  <- mkDReg(False);
     Bool      advance   = f_out.notFull;
 
     rule r_table_req (advance);
@@ -114,9 +121,10 @@ module mkDequantize#(NumProxy_t#(dfrac) _p)(Dequantize_ifc#(bits))
     (* fire_when_enabled, no_implicit_conditions *)
     rule r_magnitude (advance);
         let v = rg_tok[0].val;
-        rg_mag <= unpack(truncate(pack(abs(v))));
-        rg_neg <= v < 0;
-        rg_q   <= w_resp;
+        rg_mag  <= unpack(truncate(pack(abs(v))));
+        rg_neg  <= v < 0;
+        rg_q    <= w_resp;
+        rg_done <= rg_valid[0] && rg_tok[0].pos.last_block && rg_tok[0].pos.last;
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
@@ -153,6 +161,8 @@ module mkDequantize#(NumProxy_t#(dfrac) _p)(Dequantize_ifc#(bits))
 
     interface quant = toGPClient(rg_req, asReg(w_resp));
     interface data  = toGPServer(f_in, f_out);
+
+    method scan_done = rg_done;
 
 endmodule
 

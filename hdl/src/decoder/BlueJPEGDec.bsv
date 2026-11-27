@@ -22,7 +22,6 @@ import Dequantize :: *;
 import DeZigZag :: *;
 import IDCT :: *;
 import IDCTProc :: *;
-import McuMerger :: *;
 import ImageUntilingEngine :: *;
 import BlueJPEGDecRegs :: *;
 
@@ -64,6 +63,8 @@ endinterface
  *   double_buffer_untiler   overlap filling one MCU row with emitting the previous one
  *   en_chroma               YCbCr support, otherwise grayscale only with half the table storage
  *   en_huff_lookahead       lookahead tables that decode codes of up to eight bits in two cycles instead of three
+ *   max_chroma_sub          most subsampled colour format accepted, 4:2:0 doubles the luma line buffer,
+ *                           block-order output (no untiler) supports only 4:4:4
  */
 typedef struct {
     Clock                      slow_clock;
@@ -76,6 +77,7 @@ typedef struct {
     Bool                       double_buffer_untiler;
     Bool                       en_chroma;
     Bool                       en_huff_lookahead;
+    ChromaSub_t                max_chroma_sub;
 } BlueJPEGDecCfg_t#(
     numeric type max_img_width,
     numeric type idct_scale,
@@ -101,6 +103,16 @@ typedef struct {
  * Output pixels are YCbCr with the packing the encoder accepts, and TLAST
  * marks the last pixel of a frame. A frame counts as busy from its accepted
  * scan header until that last pixel.
+ *
+ * Each frame selects its chroma subsampling in its SOF header, up to
+ * max_chroma_sub. The untiler upsamples subsampled chroma by replication.
+ *
+ * Errors do not stop the decoder. Every error raises an ERR event and the
+ * decoder recovers at the frame level. A frame with an unsupported or
+ * malformed header is dropped up to the next SOI and produces no pixels. A
+ * frame whose entropy-coded data is corrupt or cut short is completed with
+ * grey blocks, so it still leaves with its full size and TLAST. Bytes outside
+ * frames are ignored, so a stream may start anywhere and carry padding.
  */
 module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
         max_imw,
@@ -129,7 +141,8 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
         Add#(PrescaleGuard, f__, PrescaleProd#(dequant_scale)),
 
         //mkImageUntilingEngine: block column index fits the MCU counter
-        Add#(TLog#(TDiv#(TAdd#(max_imw, 7), 8)), g__, 13)
+        Add#(TLog#(TDiv#(TAdd#(max_imw, 7), 8)), g__, 13),
+        Add#(2, h__, TLog#(TDiv#(TAdd#(max_imw, 7), 8)))
     );
 
     staticAssert(valueOf(pixel_bits) == 8,     "BlueJPEGDec pixel width must be 8 bits");
@@ -137,6 +150,10 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
     staticAssert(valueOf(idct_scale) <= 15,    "BlueJPEGDec IDCT scale above 15 bits needs two DSPs per multiply");
     staticAssert(valueOf(dequant_scale) >= 2,  "BlueJPEGDec dequantization scale must be at least 2 bits");
     staticAssert(valueOf(dequant_scale) <= 10, "BlueJPEGDec dequantization scale above 10 bits needs two DSPs per multiply");
+    staticAssert(cfg.en_untiler || cfg.max_chroma_sub == Sub444, "BlueJPEGDec block-order output supports only 4:4:4");
+
+    //grayscale-only builds accept only 4:4:4 geometry
+    ChromaSub_t max_sub = cfg.en_chroma ? cfg.max_chroma_sub : Sub444;
 
     //AXI-Lite config
 
@@ -160,14 +177,13 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
 
     DecTableStorage_ifc     i_tables  <- mkDecTableStorage(cfg.en_chroma, cfg.en_huff_lookahead);
     JPEGMarkerParser_ifc    i_markers <- mkJPEGMarkerParser;
-    JPEGFrameParser_ifc     i_frames  <- mkJPEGFrameParser(i_tables, cfg.en_chroma, max_width);
+    JPEGFrameParser_ifc     i_frames  <- mkJPEGFrameParser(i_tables, cfg.en_chroma, max_sub, max_width);
     JPEGBitstreamDec_ifc    i_bits    <- mkJPEGBitstreamDec;
     HuffDecoder_ifc         i_huff    <- mkHuffDecoder(i_bits, i_tables.huff_limits, i_tables.huff_look, i_tables.huff_busy, cfg.en_huff_lookahead);
     RLD_ifc                 i_rld     <- mkRLD;
     Dequantize_ifc#(w_col)  i_dequant <- mkDequantize(cfg._prx_qsc);
     DeZigZag_ifc#(w_col)    i_dezz    <- mkDeZigZag;
-    McuMerger_ifc           i_merger  <- mkMcuMerger(cfg.en_chroma);
-    ImageUntilingEngine_ifc i_untiler <- mkImageUntilingEngine(cfg._prx_miw, cfg.en_untiler, cfg.double_buffer_untiler);
+    ImageUntilingEngine_ifc i_untiler <- mkImageUntilingEngine(cfg._prx_miw, cfg.en_untiler, cfg.double_buffer_untiler, cfg.en_chroma, max_sub);
 
     IDCTProcCfg_t#(idct_scale, dequant_scale) idct_cfg = IDCTProcCfg_t {
         slow_clock:     cfg.slow_clock,
@@ -198,7 +214,18 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
     mkConnection(i_rld.data.response,      i_dequant.data.request);
     mkConnection(i_dequant.data.response,  i_dezz.coef);
     mkConnection(i_dezz.sample,            i_idct.data.request);
-    mkConnection(i_merger.pixel,           i_untiler.pix_in);
+
+    //frame-level control between the parsers and the dequantizer, all sources are registered pulses
+
+    (* fire_when_enabled *)
+    rule r_skip (i_frames.skip_req matches tagged Valid .parity);
+        i_markers.skip(parity);
+    endrule
+
+    (* fire_when_enabled *)
+    rule r_scan_done (i_dequant.scan_done);
+        i_frames.scan_done;
+    endrule
 
     Reg#(Bit#(6))    rg_idx <- mkReg(0);
     Reg#(BlockTag_t) rg_tag <- mkRegU;
@@ -212,7 +239,7 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
             tag    = t;
             rg_tag <= t;
         end
-        i_merger.comp_sample.put(CompSample_t {
+        i_untiler.sample.put(CompSample_t {
             tag:    tag,
             sample: s
         });
@@ -221,9 +248,9 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
 
     //control and status
 
-    Reg#(UInt#(4)) rg_in_flight <- mkReg(0);
-    Reg#(Bool)     rg_err_seen  <- mkReg(False);
-    PulseWire      pw_done      <- mkPulseWire;
+    Reg#(UInt#(4))   rg_in_flight <- mkReg(0);
+    Reg#(DecError_t) rg_err_last  <- mkReg(None);
+    PulseWire        pw_done      <- mkPulseWire;
 
     rule r_pix_out;
         let p <- i_untiler.pix_out.get;
@@ -239,6 +266,7 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
         if(p.last) pw_done.send;
     endrule
 
+    //error events of the stages, one is reported when several coincide
     Maybe#(DecError_t) err = isValid(i_markers.error) ? i_markers.error
                            : (isValid(i_frames.error) ? i_frames.error : i_huff.error);
 
@@ -247,10 +275,10 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
         Bool start = i_frames.scan_start;
         Bool busy  = rg_in_flight != 0;
         rg_in_flight <= rg_in_flight + (start ? 1 : 0) - (pw_done ? 1 : 0);
-        rg_err_seen  <= isValid(err);
+        if(err matches tagged Valid .e) rg_err_last <= e;
 
-        i_csrs.internal.status(busy, i_frames.info, fromMaybe(None, err));
-        i_csrs.internal.events(start && !busy, pw_done, isValid(err) && !rg_err_seen);
+        i_csrs.internal.status(busy, i_frames.info, rg_err_last);
+        i_csrs.internal.events(start && !busy, pw_done, isValid(err));
     endrule
 
     //interfaces

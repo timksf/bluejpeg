@@ -31,8 +31,9 @@ endinterface
  * there.
  *
  * After the End token of a segment the window is padded with ones (T.81
- * F.2.2.5). drain drops the window and any segment bytes up to End, so the
- * next scan starts clean.
+ * F.2.2.5). The prefetch register then holds 0xFF bytes, so the refill
+ * datapath is the same with and without padding. drain drops the window and
+ * any segment bytes up to End, so the next scan starts clean.
  */
 module mkJPEGBitstreamDec(JPEGBitstreamDec_ifc);
 
@@ -74,11 +75,11 @@ module mkJPEGBitstreamDec(JPEGBitstreamDec_ifc);
                 win = win << used;
                 cnt = cnt - used;
             end else begin
-                //bytes come from the prefetch register, or are ones after End
-                Bit#(8) b0 = rg_pad ? 'hFF : fromMaybe(0, pre[0]);
-                Bit#(8) b1 = rg_pad ? 'hFF : fromMaybe(0, pre[1]);
-                Bool    v0 = rg_pad || isValid(pre[0]);
-                Bool    v1 = rg_pad || isValid(pre[1]);
+                //bytes come from the prefetch register, which holds ones after End
+                Bit#(8) b0 = fromMaybe(0, pre[0]);
+                Bit#(8) b1 = fromMaybe(0, pre[1]);
+                Bool    v0 = isValid(pre[0]);
+                Bool    v1 = isValid(pre[1]);
                 //rg_pos tracks 40 - rg_cnt so the insert shifts start from a register
                 if(v0 && rg_cnt <= 40) begin
                     win = win | (zeroExtend(b0) << rg_pos);
@@ -111,6 +112,9 @@ module mkJPEGBitstreamDec(JPEGBitstreamDec_ifc);
                     end
                 endcase
             end
+
+            //after End both slots refill with ones every cycle
+            if(pad) pre = replicate(tagged Valid 'hFF);
         end
 
         rg_win <= win;
