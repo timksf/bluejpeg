@@ -9,6 +9,7 @@ import SpecialFIFOs :: *;
 
 import DecoderTypes :: *;
 import DecTableStorage :: *;
+import DecStdTables :: *;
 
 interface JPEGFrameParser_ifc;
     interface Put#(SegByte_t)   seg;
@@ -51,7 +52,12 @@ typedef struct {
  * another segment kind only after the other handlers' queues are empty,
  * which keeps the segments in stream order, and the markers and lengths
  * between segments give it the cycles for that. Table writes go to the table
- * storage through its registered command queue.
+ * storage through its registered command queue. With fixed tables no DHT
+ * reaches the table storage. Instead each table definition, its BITS and
+ * HUFFVAL bytes, runs through a CRC-32 that has to match the CRC of the
+ * standard table of its id (id 0 luminance, id 1 chrominance) at the end of
+ * the table, otherwise the frame is rejected. A different table passes with a
+ * probability of 2^-32, and the check needs no table ROM.
  *
  * Supported is baseline sequential Huffman with 8-bit samples, one
  * interleaved scan of all components and no restart interval. A colour frame
@@ -77,7 +83,13 @@ typedef struct {
  * the quantization table read in the dequantizer, the last table read of a
  * scan, and until the handlers are idle.
  */
-module mkJPEGFrameParser#(DecTableStorage_ifc tables, Bool en_chroma, ChromaSub_t max_sub, Integer max_width)(JPEGFrameParser_ifc);
+module mkJPEGFrameParser#(
+    DecTableStorage_ifc tables,
+    Bool                en_chroma,
+    ChromaSub_t         max_sub,
+    Integer             max_width,
+    Bool                fixed_huff
+)(JPEGFrameParser_ifc);
 
     Integer n_tables = en_chroma ? 2 : 1;
 
@@ -97,10 +109,13 @@ module mkJPEGFrameParser#(DecTableStorage_ifc tables, Bool en_chroma, ChromaSub_
     PulseWire     pw_sof <- mkPulseWire;
 
     //rejections, one pulse per rule that can reject
-    PulseWire pw_bad_dri <- mkPulseWire;
-    PulseWire pw_bad_tbl <- mkPulseWire;
-    PulseWire pw_bad_sof <- mkPulseWire;
-    PulseWire pw_bad_sos <- mkPulseWire;
+    PulseWire  pw_bad_dri <- mkPulseWire;
+    PulseWire  pw_bad_tbl <- mkPulseWire;
+    PulseWire  pw_bad_sof <- mkPulseWire;
+    PulseWire  pw_bad_sos <- mkPulseWire;
+
+    //a DHT table that differs from the standard table, registered between the CRC compare and the frame state
+    Reg#(Bool) rg_bad_crc <- mkDReg(False);
 
     //scans issued whose last coefficient has not yet read its quantization table
     Reg#(UInt#(2)) rg_scans  <- mkReg(0);
@@ -117,6 +132,11 @@ module mkJPEGFrameParser#(DecTableStorage_ifc tables, Bool en_chroma, ChromaSub_
     Reg#(UInt#(9))       rg_total <- mkReg(0);
     Reg#(QuantTableId_t) rg_tq    <- mkReg(0);
     Reg#(Bool)           rg_skip  <- mkReg(False);
+    Reg#(Bit#(2))        rg_std   <- mkReg(0);
+    Reg#(Bit#(32))       rg_crc   <- mkReg(0);
+
+    //CRCs of the standard tables the DHT definitions are checked against with fixed tables, indexed {ac, id}
+    Vector#(4, Bit#(32)) std_crc = genWith(std_huff_crc);
 
     //SOF handler, frame geometry, component list position, and the sampling checks and MCU grid
     //candidates registered as their bytes arrive
@@ -145,7 +165,7 @@ module mkJPEGFrameParser#(DecTableStorage_ifc tables, Bool en_chroma, ChromaSub_
     //frame state and the scan count, each from the pulses of the rules that change it
     (* fire_when_enabled, no_implicit_conditions *)
     rule r_frame;
-        Bool bad    = pw_bad_dri || pw_bad_tbl || pw_bad_sof || pw_bad_sos;
+        Bool bad    = pw_bad_dri || pw_bad_tbl || pw_bad_sof || pw_bad_sos || rg_bad_crc;
         Bool report = bad && !rg_bad;
         rg_bad   <= pw_soi ? False : (bad || rg_bad);
         rg_sof   <= pw_soi ? False : (pw_sof || rg_sof);
@@ -224,10 +244,12 @@ module mkJPEGFrameParser#(DecTableStorage_ifc tables, Bool en_chroma, ChromaSub_
             case(phase)
                 Hdr: begin
                     rg_skip  <= !table_ok(s.data[3:0]);
+                    rg_std   <= {s.data[4], s.data[0]};
+                    rg_crc   <= crc32_init;
                     rg_cnt   <= 0;
                     rg_total <= 0;
                     rg_phase <= Count;
-                    if(!rg_bad) tables.cmd.put(tagged HuffStart {
+                    if(!rg_bad && !fixed_huff) tables.cmd.put(tagged HuffStart {
                         ac: s.data[4] == 1,
                         id: truncate(s.data)
                     });
@@ -235,13 +257,23 @@ module mkJPEGFrameParser#(DecTableStorage_ifc tables, Bool en_chroma, ChromaSub_
                 end
                 Count: begin
                     UInt#(9) total = rg_total + extend(unpack(s.data));
-                    if(!rg_skip && !rg_bad) tables.cmd.put(tagged HuffCount unpack(s.data));
+                    Bit#(32) crc   = crc32_byte(rg_crc, s.data);
+                    Bool     done  = rg_cnt == 15 && total == 0;
+                    rg_crc <= crc;
+                    if(fixed_huff) begin
+                        rg_bad_crc <= !rg_skip && !rg_bad && done && crc != std_crc[rg_std];
+                    end else if(!rg_skip && !rg_bad) tables.cmd.put(tagged HuffCount unpack(s.data));
                     rg_total <= total;
                     rg_cnt   <= rg_cnt == 15 ? 0 : rg_cnt + 1;
                     if(rg_cnt == 15) rg_phase <= total == 0 ? Hdr : Val;
                 end
                 Val: begin
-                    if(!rg_skip && !rg_bad) tables.cmd.put(tagged HuffValue {
+                    Bit#(32) crc  = crc32_byte(rg_crc, s.data);
+                    Bool     done = rg_cnt + 1 == rg_total;
+                    rg_crc <= crc;
+                    if(fixed_huff) begin
+                        rg_bad_crc <= !rg_skip && !rg_bad && done && crc != std_crc[rg_std];
+                    end else if(!rg_skip && !rg_bad) tables.cmd.put(tagged HuffValue {
                         idx: truncate(rg_cnt),
                         v:   s.data
                     });

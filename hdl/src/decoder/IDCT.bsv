@@ -164,6 +164,23 @@ function Vector#(8, Int#(bits)) idct_stage_h(IDCTWork_t#(bits) w);
 endfunction
 
 /*
+ * One IDCT pass. With shallow the pass has two register stages instead of
+ * six, for an IDCT clock that leaves the long stage chains time, such as the
+ * main clock divided by eight. Both compute the same values.
+ */
+module mkIDCT1D#(NumProxy_t#(cfrac) p, Bool shallow)(DCT1D_ifc#(bits))
+    provisos(
+        NumAlias#(TAdd#(bits, IDCTCoeffBits#(cfrac)), bits_mul)
+    );
+    DCT1D_ifc#(bits) ifc;
+    if(shallow)
+        ifc <- mkIDCT1DShallow(p);
+    else
+        ifc <- mkIDCT1DDeep(p);
+    return ifc;
+endmodule
+
+/*
  * Rigid pipeline after mkDCT1D_rigid: one register per stage, valid bits
  * track bubbles and a single stall from the two-entry output FIFO freezes all
  * stages, so no ready signal ripples through the stage chain. Stages hold at
@@ -173,7 +190,7 @@ endfunction
  *
  *   rg_n[0] -ab-> rg_n[1] -m-> rg_wide -cd-> rg_n[2] -e-> rg_n[3] -fg-> rg_n[4] -h-> f_out
  */
-module mkIDCT1D#(NumProxy_t#(cfrac) p)(DCT1D_ifc#(bits))
+module mkIDCT1DDeep#(NumProxy_t#(cfrac) p)(DCT1D_ifc#(bits))
     provisos(
         NumAlias#(TAdd#(bits, IDCTCoeffBits#(cfrac)), bits_mul)
     );
@@ -231,6 +248,64 @@ module mkIDCT1D#(NumProxy_t#(cfrac) p)(DCT1D_ifc#(bits))
 
 endmodule
 
+/*
+ * The same rigid pipeline with the stages folded around the multiplication.
+ * The products stay in their own register, which the DSPs absorb as output
+ * register, and the adder chain behind it, at most five adders deep, ends in
+ * the output FIFO. That removes four of the six ten-slot stage registers.
+ *
+ *   rg_in -ab m-> rg_wide -cdefgh-> f_out
+ */
+module mkIDCT1DShallow#(NumProxy_t#(cfrac) p)(DCT1D_ifc#(bits))
+    provisos(
+        NumAlias#(TAdd#(bits, IDCTCoeffBits#(cfrac)), bits_mul)
+    );
+
+    let coeffs = prepare_idct_coeffs(2 ** fromInteger(valueOf(cfrac)));
+
+    Reg#(IDCTWork_t#(bits))           rg_in   <- mkRegU;
+    Reg#(Vector#(10, Int#(bits_mul))) rg_wide <- mkRegU;
+
+    //the input valid is a DReg so idle cycles insert bubbles, it is held manually during stalls
+    Reg#(Bool) rg_in_valid   <- mkDReg(False);
+    Reg#(Bool) rg_wide_valid <- mkReg(False);
+
+    FIFOF#(Vector#(8, Int#(bits))) f_out   <- mkFIFOF;
+    Wire#(Bool)                    w_stall <- mkBypassWire;
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_stall;
+        w_stall <= !f_out.notFull;
+    endrule
+
+    rule r_hold (w_stall);
+        rg_in_valid <= rg_in_valid;
+    endrule
+
+    rule r_advance (!w_stall);
+        rg_wide_valid <= rg_in_valid;
+        rg_wide       <= idct_stage_m(p, coeffs, idct_stage_b(idct_stage_a(rg_in)));
+    endrule
+
+    rule r_output (!w_stall && rg_wide_valid);
+        let w = idct_stage_d(idct_stage_c(p, rg_wide));
+        f_out.enq(idct_stage_h(idct_stage_g(idct_stage_f(idct_stage_e(w)))));
+    endrule
+
+    method overflow = False;
+
+    interface Server data;
+        interface Put request;
+            method Action put(Vector#(8, Int#(bits)) x) if(!w_stall);
+                rg_in       <= append(x, replicate(0));
+                rg_in_valid <= True;
+            endmethod
+        endinterface
+        interface response = toGet(f_out);
+    endinterface
+
+endmodule
+
 function UInt#(8) to_pixel(NumProxy_t#(dfrac) _p, Int#(bits) v)
     provisos(
         Add#(8, d__, bits)
@@ -248,7 +323,7 @@ endfunction
  * A last registered stage rounds away the dfrac fraction bits, adds the level
  * shift and clamps to 8-bit samples, so only pixel rows leave the module.
  */
-module mkIDCT2D#(NumProxy_t#(cfrac) p, NumProxy_t#(dfrac) pd)(IDCT2D_ifc#(bits_in))
+module mkIDCT2D#(NumProxy_t#(cfrac) p, NumProxy_t#(dfrac) pd, Bool shallow)(IDCT2D_ifc#(bits_in))
     provisos(
         NumAlias#(TAdd#(bits_in, TSub#(IDCTPass2Int, IDCTPass1Int)), bits_out),
         Add#(bits_in, a__, bits_out),
@@ -259,8 +334,8 @@ module mkIDCT2D#(NumProxy_t#(cfrac) p, NumProxy_t#(dfrac) pd)(IDCT2D_ifc#(bits_i
         Add#(8, d__, bits_out)
     );
 
-    DCT1D_ifc#(bits_in)                    i_col <- mkIDCT1D(p);
-    DCT1D_ifc#(bits_out)                   i_row <- mkIDCT1D(p);
+    DCT1D_ifc#(bits_in)                    i_col <- mkIDCT1D(p, shallow);
+    DCT1D_ifc#(bits_out)                   i_row <- mkIDCT1D(p, shallow);
     TransposeBufferOpt_ifc#(Int#(bits_in)) i_tp  <- mkTransposeBufferOpt;
     FIFO#(Vector#(8, UInt#(8)))            f_out <- mkFIFO;
 

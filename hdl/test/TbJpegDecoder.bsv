@@ -48,7 +48,9 @@ module [Module] mkTbJpegDecoderCase#(
     Bool        double_buffer,
     Bool        en_chroma,
     Bool        en_look,
-    ChromaSub_t max_sub
+    ChromaSub_t max_sub,
+    Bool        shallow_idct,
+    Bool        fixed_tables
 )(TestHandler_ifc);
 
     function print_s   = print_mod_pre_color_t_s;
@@ -68,7 +70,9 @@ module [Module] mkTbJpegDecoderCase#(
         double_buffer_untiler: double_buffer,
         en_chroma:             en_chroma,
         en_huff_lookahead:     en_look,
-        max_chroma_sub:        max_sub
+        max_chroma_sub:        max_sub,
+        shallow_idct:          shallow_idct,
+        fixed_huff_tables:     fixed_tables
     };
     BlueJPEGDec_ifc dut      <- mkBlueJPEGDec(cfg);
     let             csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_dec_csrs);
@@ -313,7 +317,7 @@ module [Module] mkTbJpegDecoderCase#(
 endmodule
 
 module [Module] mkTbJpegDecoder(TestHandler_ifc);
-    let ifc <- mkTbJpegDecoderCase(True, True, True, False, Sub420);
+    let ifc <- mkTbJpegDecoderCase(True, True, True, False, Sub420, False, False);
     return ifc;
 endmodule
 

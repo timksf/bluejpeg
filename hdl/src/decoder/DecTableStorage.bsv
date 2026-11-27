@@ -9,6 +9,7 @@ import ClientServer :: *;
 
 import EncoderUtil :: *;
 import DecoderTypes :: *;
+import DecStdTables :: *;
 
 //table writes of the frame parser, one per DQT or DHT payload byte
 typedef union tagged {
@@ -91,8 +92,14 @@ endmodule
  * up. Without en_look there is neither lookahead table nor fill engine,
  * huff_look reads as a miss and huff_busy stays low.
  * Without chroma, only table id 0 is stored and other ids alias to it.
+ *
+ * With fixed, the Huffman tables are the standard tables of T.81 Annex K.3
+ * (see DecStdTables), and limits, offsets, HUFFVAL and the lookahead entries
+ * are constants. There are no limit registers, no HUFFVAL LUTRAM and no fill
+ * engine, and the frame parser sends no DHT commands. Quantization tables
+ * stay programmable.
  */
-module mkDecTableStorage#(Bool en_chroma, Bool en_look)(DecTableStorage_ifc);
+module mkDecTableStorage#(Bool en_chroma, Bool en_look, Bool fixed)(DecTableStorage_ifc);
 
     Integer n_tables = en_chroma ? 2 : 1;
 
@@ -100,7 +107,7 @@ module mkDecTableStorage#(Bool en_chroma, Bool en_look)(DecTableStorage_ifc);
     Vector#(4, Vector#(16, Reg#(UInt#(17)))) rg_limit  = newVector;
     Vector#(4, Vector#(16, Reg#(Bit#(8))))   rg_offset = newVector;
     for(Integer t = 0; t < 4; t = t + 1) begin
-        if(t % 2 < n_tables) begin
+        if(t % 2 < n_tables && !fixed) begin
             rg_limit[t]  <- replicateM(mkReg(0));
             rg_offset[t] <- replicateM(mkReg(0));
         end else begin
@@ -158,7 +165,9 @@ module mkDecTableStorage#(Bool en_chroma, Bool en_look)(DecTableStorage_ifc);
         let     i  = w_hval_idx;
         Bit#(8) lo = i.ac ? i_ac_val.sub({eff_id(i.id), i.lo}) : i_dc_val.sub({eff_id(i.id), i.lo[3:0]});
         Bit#(8) hi = i.ac ? i_ac_val.sub({eff_id(i.id), i.hi}) : i_dc_val.sub({eff_id(i.id), i.hi[3:0]});
-        return i.short ? lo : hi;
+        //constant tables get the full index, so a single read of a ROM that stays in LUTs
+        Vector#(4, Vector#(256, Bit#(8))) vals = genWith(std_huff_vals);
+        return fixed ? vals[tbl_idx(i.ac, i.id)][i.lo] : (i.short ? lo : hi);
     endfunction
 
     function UInt#(8) read_quant();
@@ -187,7 +196,7 @@ module mkDecTableStorage#(Bool en_chroma, Bool en_look)(DecTableStorage_ifc);
     //end of the entry range of a code, (code + 1) * 2^(HuffLookBits - len)
     function UInt#(9) code_range_end(UInt#(9) code, UInt#(5) len) = (code + 1) << (fromInteger(valueOf(HuffLookBits)) - len);
 
-    if(en_look) begin
+    if(en_look && !fixed) begin
         rule r_look_start (!rg_lf_active);
             let r = f_look_req.first; f_look_req.deq;
             rg_lf         <= r;
@@ -305,14 +314,22 @@ module mkDecTableStorage#(Bool en_chroma, Bool en_look)(DecTableStorage_ifc);
     interface cmd    = toPut(f_cmd);
 
     method HuffLook_t huff_look(Bool ac, HuffTableId_t id, Bit#(HuffLookBits) bits);
-        return en_look ? i_look.sub(look_addr(tbl_idx(ac, id), bits)) : unpack(0);
+        HuffLook_t e = unpack(0);
+        if(en_look && fixed) begin
+            function HuffLook_t entry(Integer t, Integer b) = std_huff_look(t, fromInteger(b));
+            function Vector#(TExp#(HuffLookBits), HuffLook_t) table_of(Integer t) = genWith(entry(t));
+            Vector#(4, Vector#(TExp#(HuffLookBits), HuffLook_t)) rom = genWith(table_of);
+            e = rom[tbl_idx(ac, id)][bits];
+        end else if(en_look) e = i_look.sub(look_addr(tbl_idx(ac, id), bits));
+        return e;
     endmethod
 
-    method huff_busy = f_cmd.notEmpty || (en_look && (rg_lf_active || f_look_req.notEmpty || isValid(rg_look_wr)));
+    method huff_busy = f_cmd.notEmpty || (en_look && !fixed && (rg_lf_active || f_look_req.notEmpty || isValid(rg_look_wr)));
 
     method HuffLimits_t huff_limits(Bool ac, HuffTableId_t id);
         let t = tbl_idx(ac, id);
-        return HuffLimits_t {
+        Vector#(4, HuffLimits_t) std = genWith(std_huff_limits);
+        return fixed ? std[t] : HuffLimits_t {
             limit:  readVReg(rg_limit[t]),
             offset: readVReg(rg_offset[t])
         };

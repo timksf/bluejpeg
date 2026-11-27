@@ -65,6 +65,10 @@ endinterface
  *   en_huff_lookahead       lookahead tables that decode codes of up to eight bits in two cycles instead of three
  *   max_chroma_sub          most subsampled colour format accepted, 4:2:0 doubles the luma line buffer,
  *                           block-order output (no untiler) supports only 4:4:4
+ *   shallow_idct            two register stages per IDCT pass instead of six, for a slow_clock of the main clock
+ *                           divided by eight, saves registers at equal results
+ *   fixed_huff_tables       the standard Huffman tables of T.81 Annex K.3 as constants (id 0 luma, id 1 chroma),
+ *                           DHT segments must match them or the frame is rejected, streams without DHT decode
  */
 typedef struct {
     Clock                      slow_clock;
@@ -78,6 +82,8 @@ typedef struct {
     Bool                       en_chroma;
     Bool                       en_huff_lookahead;
     ChromaSub_t                max_chroma_sub;
+    Bool                       shallow_idct;
+    Bool                       fixed_huff_tables;
 } BlueJPEGDecCfg_t#(
     numeric type max_img_width,
     numeric type idct_scale,
@@ -175,11 +181,11 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
 
     Integer max_width = cfg.en_untiler ? valueOf(max_imw) : 0;
 
-    DecTableStorage_ifc     i_tables  <- mkDecTableStorage(cfg.en_chroma, cfg.en_huff_lookahead);
+    DecTableStorage_ifc     i_tables  <- mkDecTableStorage(cfg.en_chroma, cfg.en_huff_lookahead, cfg.fixed_huff_tables);
     JPEGMarkerParser_ifc    i_markers <- mkJPEGMarkerParser;
-    JPEGFrameParser_ifc     i_frames  <- mkJPEGFrameParser(i_tables, cfg.en_chroma, max_sub, max_width);
+    JPEGFrameParser_ifc     i_frames  <- mkJPEGFrameParser(i_tables, cfg.en_chroma, max_sub, max_width, cfg.fixed_huff_tables);
     JPEGBitstreamDec_ifc    i_bits    <- mkJPEGBitstreamDec;
-    HuffDecoder_ifc         i_huff    <- mkHuffDecoder(i_bits, i_tables.huff_limits, i_tables.huff_look, i_tables.huff_busy, cfg.en_huff_lookahead);
+    HuffDecoder_ifc         i_huff    <- mkHuffDecoder(i_bits, i_tables.huff_limits, i_tables.huff_look, i_tables.huff_busy, cfg.en_huff_lookahead, cfg.fixed_huff_tables);
     RLD_ifc                 i_rld     <- mkRLD;
     Dequantize_ifc#(w_col)  i_dequant <- mkDequantize(cfg._prx_qsc);
     DeZigZag_ifc#(w_col)    i_dezz    <- mkDeZigZag;
@@ -189,7 +195,8 @@ module [Module] mkBlueJPEGDec#(BlueJPEGDecCfg_t#(
         slow_clock:     cfg.slow_clock,
         slow_reset:     cfg.slow_reset,
         _idct_scale:    cfg._prx_dsc,
-        _dequant_scale: cfg._prx_qsc
+        _dequant_scale: cfg._prx_qsc,
+        shallow:        cfg.shallow_idct
     };
     IDCTProc_ifc#(w_col) i_idct <- mkIDCTProc(idct_cfg);
 

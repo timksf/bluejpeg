@@ -22,6 +22,7 @@ typedef struct {
     Reset              slow_reset;
     NumProxy_t#(cfrac) _idct_scale;
     NumProxy_t#(dfrac) _dequant_scale;
+    Bool               shallow;
 } IDCTProcCfg_t#(numeric type cfrac, numeric type dfrac);
 
 /*
@@ -54,7 +55,7 @@ module mkIDCTProc#(IDCTProcCfg_t#(cfrac, dfrac) cfg)(IDCTProc_ifc#(bits))
     Gearbox#(1, 8, Int#(bits)) i_gear_i <- mk1toNGearbox(fast_clock, fast_reset, cfg.slow_clock, cfg.slow_reset);
     Gearbox#(8, 1, UInt#(8))   i_gear_o <- mkNto1Gearbox(cfg.slow_clock, cfg.slow_reset, fast_clock, fast_reset);
 
-    IDCT2D_ifc#(bits) i_idct <- mkIDCT2D(cfg._idct_scale, cfg._dequant_scale, clocked_by cfg.slow_clock, reset_by cfg.slow_reset);
+    IDCT2D_ifc#(bits) i_idct <- mkIDCT2D(cfg._idct_scale, cfg._dequant_scale, cfg.shallow, clocked_by cfg.slow_clock, reset_by cfg.slow_reset);
 
     //coefficient serialization sample -> column
     mkConnection(toGet(f_i), gearbox_fast_put(i_gear_i));

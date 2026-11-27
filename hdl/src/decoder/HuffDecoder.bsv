@@ -43,7 +43,8 @@ typedef struct {
 //LIMIT(l) left-aligned to 16 bits, LIMIT(l) * 2^(16 - l), is non-decreasing in l for canonical codes,
 //so the matches form a thermometer and its edge is the code length
 //the alignment is a static shift of the l + 1 significant bits, so each compare is only l + 1 bits wide
-function HuffMatch_t huff_find(HuffLimits_t lim, Bit#(16) bits);
+//with split the two halves of the lengths select separately (lo and hi, short picks), otherwise lo holds the index
+function HuffMatch_t huff_find(HuffLimits_t lim, Bit#(16) bits, Bool split);
     Vector#(16, Bool)    match_l = newVector;
     Vector#(16, Bit#(8)) idx_l   = newVector;
     for(Integer l = 1; l <= 16; l = l + 1) begin
@@ -55,7 +56,7 @@ function HuffMatch_t huff_find(HuffLimits_t lim, Bit#(16) bits);
 
     //the edge selects with an AND-OR over masked candidates, which keeps the sixteen index adders
     //in parallel with the compares, a priority mux lets synthesis share one adder behind the select
-    //each half of the lengths is selected on its own, the HUFFVAL read takes both and short picks one
+    //split selects each half of the lengths on its own, the HUFFVAL read takes both and short picks one
     Bit#(16) m     = pack(match_l);
     Bit#(16) first = m & ~(m << 1);
     //a code exists exactly when the 16-bit limit, the top of the thermometer, matches
@@ -64,12 +65,12 @@ function HuffMatch_t huff_find(HuffLimits_t lim, Bit#(16) bits);
         len:   0,
         lo:    0,
         hi:    0,
-        short: m[7] == 1
+        short: !split || m[7] == 1
     };
     for(Integer l = 0; l < 16; l = l + 1) begin
         if(first[l] == 1) res.len = res.len | fromInteger(l + 1);
-        if(first[l] == 1 && l < 8)  res.lo = res.lo | idx_l[l];
-        if(first[l] == 1 && l >= 8) res.hi = res.hi | idx_l[l];
+        if(first[l] == 1 && (l < 8 || !split)) res.lo = res.lo | idx_l[l];
+        if(first[l] == 1 && l >= 8 && split)   res.hi = res.hi | idx_l[l];
     end
     return res;
 endfunction
@@ -115,13 +116,19 @@ endfunction
  * block per remaining block of the scan without reading the window, so the
  * frame completes with flat grey blocks. Drain then drops the rest of the
  * entropy-coded segment. A scan marked skip is drained right away.
+ *
+ * With fixed tables the limits are constants, and Find compares against the
+ * set the registered table choice selects instead of a registered copy. The
+ * compares against constants leave Find enough time to select the full
+ * HUFFVAL index, so the constant HUFFVAL needs one read port.
  */
 module mkHuffDecoder#(
     JPEGBitstreamDec_ifc bits,
     function HuffLimits_t limits(Bool ac, HuffTableId_t id),
     function HuffLook_t look(Bool ac, HuffTableId_t id, Bit#(HuffLookBits) b),
     Bool tables_busy,
-    Bool en_look
+    Bool en_look,
+    Bool fixed
 )(HuffDecoder_ifc);
 
     HuffState_t first_state = en_look ? Look : Find;
@@ -248,7 +255,9 @@ module mkHuffDecoder#(
     end
 
     rule r_find (rg_state == Find && (en_look || bits.ready) && f_sym.notFull);
-        let m = huff_find(rg_lim, bits.window[47:32]);
+        //constant tables are selected by the registered table choice directly, which folds into the compares
+        HuffLimits_t lim = fixed ? limits(rg_sel_ac, rg_sel_id) : rg_lim;
+        let          m   = huff_find(lim, bits.window[47:32], !fixed);
         if(!en_look) begin
             rg_end_r <= genWith(lands_on_end);
             rg_ovf_r <= genWith(lands_beyond);
