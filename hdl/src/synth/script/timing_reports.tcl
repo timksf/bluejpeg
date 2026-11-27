@@ -7,7 +7,7 @@ proc timing_reports {stage} {
         set name [get_property NAME $clock]
         report_timing -from $clock -to $clock -delay_type max -max_paths 30 -nworst 1 -file ${prefix}_${name}.rpt
     }
-    foreach module {i_img_tiler i_stuffer i_huff i_tables i_rle i_du_proc i_fwriter i_csrs i_axi_csrs} {
+    foreach module {i_img_tiler i_stuffer i_huff i_tables i_rle i_du_proc i_fwriter i_csrs i_axi_csrs i_markers i_frames i_bits i_rld i_dequant i_dezz i_idct i_merger i_untiler} {
         set cells [get_cells -hier -filter "IS_SEQUENTIAL && NAME =~ *${module}*"]
         if {[llength $cells]} {
             report_timing -from $cells -to $cells -delay_type max -max_paths 10 -nworst 1 -file ${prefix}_${module}.rpt

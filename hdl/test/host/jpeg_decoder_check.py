@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Inputs and checks for the TbJpegDecoder* Bluesim tests.
 
-    jpeg_decoder_check.py gen   <simdir> [--profile color|look|blocks|gray]  write the test inputs
+    jpeg_decoder_check.py gen   <simdir> [--profile color|look|blocks|gray|lean]  write the test inputs
     jpeg_decoder_check.py check <simdir> [--order raster|blocks]             compare dec_out_<i>.raw against libjpeg
 
 Input i is one of three files, see TbJpegDecoder.bsv:
@@ -90,6 +90,14 @@ def truncate(data: bytes) -> bytes:
     return data[:cut]
 
 
+def without_dht(data: bytes) -> bytes:
+    """No Huffman tables, like webcam MJPEG, the standard tables apply."""
+    dht = [(start, end) for marker, start, end in segments(data) if marker == 0xC4]
+    for start, end in reversed(dht):
+        data = data[:start] + data[end:]
+    return data
+
+
 def with_dri(data: bytes) -> bytes:
     """A restart interval, which the decoder rejects."""
     sos = [start for marker, start, _ in segments(data) if marker == 0xDA][0]
@@ -141,6 +149,17 @@ def gen(simdir: Path, profile: str) -> None:
             ("in", camera_like(jpg(src, "422", quality=80))),
             ("skip", jpg(src, "420", quality=90)),
             ("in", jpg(src, "422", quality=75)),
+            ("bad", corrupt(jpg(src, "422", quality=90))),
+            ("in", jpg(crop, "444", quality=70)),
+        ]
+    elif profile == "lean":
+        #standard Huffman tables only, inputs 0, 3, 4 and 5 match the color profile for a bitwise comparison
+        cases = [base[0], base[1], ("in", jpg(crop, "444", quality=50)), base[3], base[4], base[5]] + [
+            ("in", jpg(src, "422", quality=90)),
+            ("skip", jpg(crop, "422", quality=50, optimize=True)),
+            ("in", camera_like(jpg(src, "422", quality=80))),
+            ("in", without_dht(jpg(src, "422", quality=75))),
+            ("skip", jpg(src, "420", quality=90)),
             ("bad", corrupt(jpg(src, "422", quality=90))),
             ("in", jpg(crop, "444", quality=70)),
         ]
@@ -293,7 +312,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["gen", "check"])
     ap.add_argument("simdir", type=Path, nargs="?", default=HDL_DIR / "build" / "TbJpegDecoder")
-    ap.add_argument("--profile", choices=["color", "look", "blocks", "gray"], default="color")
+    ap.add_argument("--profile", choices=["color", "look", "blocks", "gray", "lean"], default="color")
     ap.add_argument("--order", choices=["raster", "blocks"], default="raster")
     args = ap.parse_args()
     if args.cmd == "gen":

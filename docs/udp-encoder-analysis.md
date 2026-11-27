@@ -40,7 +40,7 @@ The worst path with both ends inside the encoder runs from the buffer threshold 
 tiler through its write address logic into the address input of a line buffer BRAM. It has a data
 path of 10.09 ns, 3.79 ns of logic and 6.30 ns of routing, over 14 logic levels including eight
 CARRY4, and +1.542 ns of slack. The line buffer address and control logic, not the DCT arithmetic,
-limits the encoder in this build. The tiler changes described in [timing-200mhz.md](timing-200mhz.md)
+limits the encoder in this build. The tiler changes for 200 MHz
 address this path, and reset fan-out is the other point to consider when raising the clock.
 
 ## Reproducing

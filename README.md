@@ -154,8 +154,7 @@ register map and programmable tables.
 The tiler line buffer takes 24 of the 25 BRAM tiles, and the table storage the remaining two RAMB18.
 In this build the longest path inside the encoder is the address and control logic of the tiler line
 buffer, not the DCT arithmetic. [`docs/udp-encoder-analysis.md`](docs/udp-encoder-analysis.md) has
-the details, and [`docs/timing-200mhz.md`](docs/timing-200mhz.md) describes the changes that close
-timing at 200 MHz.
+the details.
 
 Any configuration can also be synthesized, placed and routed on its own. The out-of-context flow
 constrains the main clock to 200 MHz and the DCT clock to 25 MHz and writes timing and utilization
