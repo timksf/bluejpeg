@@ -130,7 +130,8 @@ module [Module] mkTestCase(TestHandler_ifc)
             _prx_pixw           : ?,
             en_tiler            : True,
             double_buffer_tiler : False,
-            en_chroma           : False
+            en_chroma           : False,
+            shallow_dct         : False
         };
     BlueJPEG_ifc dut <- mkBlueJPEG(jpeg_cfg);
     let csr_defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);

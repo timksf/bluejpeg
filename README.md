@@ -41,6 +41,7 @@ Compile-time parameters are the fields and numeric types of `BlueJPEGCfg_t` in
 | `en_chroma` | Builds the colour path, grayscale-only when disabled | `True`, `False` |
 | `en_tiler` | Builds the tiler, without it the input must arrive in 8 × 8 block order | `True`, `False` |
 | `double_buffer_tiler` | Doubles the line buffer to accept a strip while the last one drains | `True`, `False` |
+| `shallow_dct` | Two register stages per DCT pass instead of seven, for a DCT clock well below the main clock | `True`, `False` |
 | `slow_clock`, `slow_reset` | Clock and reset of the DCT, which may be the main clock | |
 
 ```bsv
@@ -53,14 +54,16 @@ BlueJPEGCfg_t#(1920, 12, 12, 8) cfg = BlueJPEGCfg_t {
     _prx_pixw:           ?,
     en_tiler:            True,
     double_buffer_tiler: True,
-    en_chroma:           True
+    en_chroma:           True,
+    shallow_dct:         False
 };
 BlueJPEG_ifc i_enc <- mkBlueJPEG(cfg);
 ```
 
 Image size and tables are set through the register map. The tables reset to ITU-T T.81 Annex K.
 `hdl/src/synth/SynthTest.bsv` has ready-made tops such as `mkBlueJPEGTop_1920_12`,
-`mkBlueJPEGTop_2560_12_12`, `mkBlueJPEGGrayTop_1920_12_12` and `mkBlueJPEGGrayTop_720_12_12`.
+`mkBlueJPEGTop_1920_12_shallow`, `mkBlueJPEGTop_2560_12_12`, `mkBlueJPEGGrayTop_1920_12_12` and
+`mkBlueJPEGGrayTop_720_12_12`.
 
 ## Integration
 

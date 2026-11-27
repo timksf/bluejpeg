@@ -32,11 +32,11 @@ Bool full_size = False;
 `endif
 
 module [Module] mkTbEncoderThroughput(TestHandler_ifc);
-    let i_test <- mkEncoderThroughput(1);
+    let i_test <- mkEncoderThroughput(1, False);
     return i_test;
 endmodule
 
-module [Module] mkEncoderThroughput#(Integer dct_divider)(TestHandler_ifc);
+module [Module] mkEncoderThroughput#(Integer dct_divider, Bool shallow_dct)(TestHandler_ifc);
     let clk <- exposeCurrentClock;
     let rst <- exposeCurrentReset;
     Clock dct_clock = clk;
@@ -56,7 +56,8 @@ module [Module] mkEncoderThroughput#(Integer dct_divider)(TestHandler_ifc);
         _prx_pixw:           ?,
         en_tiler:            True,
         double_buffer_tiler: True,
-        en_chroma:           True
+        en_chroma:           True,
+        shallow_dct:         shallow_dct
     };
     BlueJPEG_ifc i_dut <- mkBlueJPEG(cfg);
     let defs <- build_blue_csr_tb_lookup(blue_jpeg_csrs);

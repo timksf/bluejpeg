@@ -52,7 +52,8 @@ module [Module] mkUdpEncoder#(Clock clk_dct, Reset rst_dct)(BlueJPEG_ifc);
         _prx_pixw:           ?,
         en_tiler:            True,
         double_buffer_tiler: True,
-        en_chroma:           True
+        en_chroma:           True,
+        shallow_dct:         False
     };
     BlueJPEG_ifc i_encoder <- mkBlueJPEG(cfg);
     return i_encoder;

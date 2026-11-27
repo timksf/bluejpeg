@@ -72,7 +72,7 @@ module mkDCT2D_Opt#(NumProxy_t#(frac_bits) f_scale, Bool buffer_in, Bool omit_sc
 
 endmodule
 
-module mkDCT2D_Opt_rigid#(NumProxy_t#(frac_bits) f_scale, Bool buffer_in, Bool omit_scaling, Bool transpose_output, Bool dct_safe_arith)(DCT2DOptRigid_ifc#(bits));
+module mkDCT2D_Opt_rigid#(NumProxy_t#(frac_bits) f_scale, Bool buffer_in, Bool omit_scaling, Bool transpose_output, Bool dct_safe_arith, Bool shallow)(DCT2DOptRigid_ifc#(bits));
 
     FIFO#(Vector#(8, Int#(bits)))           f_in;
     FIFO#(Vector#(8, Int#(TAdd#(bits, 7)))) f_out <- mkFIFO;
@@ -82,8 +82,8 @@ module mkDCT2D_Opt_rigid#(NumProxy_t#(frac_bits) f_scale, Bool buffer_in, Bool o
     else
         f_in <- mkBypassFIFO;
 
-    DCT1D_ifc#(TAdd#(bits, 4)) i_dct_row <- mkDCT1D_rigid(f_scale, !omit_scaling, dct_safe_arith);
-    DCT1D_ifc#(TAdd#(bits, 7)) i_dct_col <- mkDCT1D_rigid(f_scale, !omit_scaling, dct_safe_arith);
+    DCT1D_ifc#(TAdd#(bits, 4)) i_dct_row <- mkDCT1D_pass(f_scale, !omit_scaling, dct_safe_arith, shallow);
+    DCT1D_ifc#(TAdd#(bits, 7)) i_dct_col <- mkDCT1D_pass(f_scale, !omit_scaling, dct_safe_arith, shallow);
 
     TransposeBufferOpt_ifc#(Int#(TAdd#(bits, 4))) i_tp0 <- mkTransposeBufferOpt;
     TransposeBufferOpt_ifc#(Int#(TAdd#(bits, 7))) i_tp1 = ?;

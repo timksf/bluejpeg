@@ -73,7 +73,8 @@ module [Module] mkJpegTestSystem#(Clock clk_uart, Reset rst_uart)(JpegTestSystem
         _prx_pixw:           ?,
         en_tiler:            True,
         double_buffer_tiler: True,
-        en_chroma:           True
+        en_chroma:           True,
+        shallow_dct:         False
     };
     BlueJPEG_ifc i_enc <- mkBlueJPEG(cfg_jpeg);
 

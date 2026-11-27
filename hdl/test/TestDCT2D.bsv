@@ -23,7 +23,8 @@ module [Module] mkTestDCT2D(TestHandler_ifc);
     function print_fmt = print_mod_pre_color_t_f;
 
     let t1 <- mkTestCase;
-    let t2 <- mkTestCaseOpt;
+    let t2 <- mkTestCaseOpt(False);
+    let t3 <- mkTestCaseOpt(True);
 
     Stmt s = seq
         print_s("Testing mkDCT2D...", BLUE);
@@ -32,6 +33,9 @@ module [Module] mkTestDCT2D(TestHandler_ifc);
         print_s("Testing mkDCT2D_Opt_rigid...", BLUE);
         t2.go();
         while(!t2.done()) action endaction
+        print_s("Testing mkDCT2D_Opt_rigid, shallow...", BLUE);
+        t3.go();
+        while(!t3.done()) action endaction
     endseq;
 
     FSM i_test_fsm <- mkFSM(s);
@@ -138,13 +142,13 @@ module [Module] mkTestCase(TestHandler_ifc);
 
 endmodule
 
-module [Module] mkTestCaseOpt(TestHandler_ifc);
+module [Module] mkTestCaseOpt#(Bool shallow)(TestHandler_ifc);
 
     function print_s = print_mod_pre_color_t_s;
     function print_fmt = print_mod_pre_color_t_f;
 
     NumProxy_t#(12)       dct_scale = ?;
-    DCT2DOptRigid_ifc#(8) dut       <- mkDCT2D_Opt_rigid(dct_scale, False, True, False, False);
+    DCT2DOptRigid_ifc#(8) dut       <- mkDCT2D_Opt_rigid(dct_scale, False, True, False, False, shallow);
 
     Reg#(Bit#(32)) rg_counter <- mkReg(0);
     Reg#(Bit#(32)) rg_errors  <- mkReg(0);

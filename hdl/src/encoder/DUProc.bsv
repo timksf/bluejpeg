@@ -40,6 +40,7 @@ typedef struct {
     Bool                   transpose_in_dct;
     NumProxy_t#(q_scale)   _q_scale;
     Bool                   dct_safe_arith;
+    Bool                   shallow_dct;
     Bool                   debug;
 } DUProcCfg_t#(numeric type dct_scale, numeric type q_scale);
 
@@ -174,7 +175,7 @@ module mkDUProc_Opt#(DUProcCfg_t#(dct_scale, q_scale) cfg)(DUProc_ifc#(pixel_bit
     Gearbox#(8, 1, Int#(TAdd#(pixel_bits, 7))) i_gear_o <- mkNto1Gearbox(cfg.slow_clock, cfg.slow_reset, fast_clock,     fast_reset);
 
     //processing submodules
-    DCT2DOptRigid_ifc#(pixel_bits)    i_dct   <- mkDCT2D_Opt_rigid(cfg._dct_scale, False, !cfg.scale_in_dct, cfg.transpose_in_dct, cfg.dct_safe_arith, clocked_by cfg.slow_clock, reset_by cfg.slow_reset);
+    DCT2DOptRigid_ifc#(pixel_bits)    i_dct   <- mkDCT2D_Opt_rigid(cfg._dct_scale, False, !cfg.scale_in_dct, cfg.transpose_in_dct, cfg.dct_safe_arith, cfg.shallow_dct, clocked_by cfg.slow_clock, reset_by cfg.slow_reset);
     Quant_ifc#(TAdd#(pixel_bits, 7))  i_quant <- mkQuantize_RT(cfg._q_scale, False);
     Zigzag_ifc#(TAdd#(pixel_bits, 7)) i_zz    <- mkZigZag_Opt(False, !cfg.transpose_in_dct);
 

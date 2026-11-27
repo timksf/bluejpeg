@@ -413,4 +413,84 @@ module mkDCT1D_rigid#(NumProxy_t#(bits_frac) _scale_proxy, Bool scale_out, Bool 
 
 endmodule
 
+/*
+ * The rigid pipeline folded around the multiplications, like mkIDCT1DShallow in the decoder.
+ * The butterflies in front of the multiplications, at most three adders deep, feed the product
+ * register, which the DSPs absorb as output register, and the three butterfly stages behind it
+ * end in the output FIFO. With scale_out the output scaling products also sit in that chain.
+ * The values equal those of mkDCT1D_rigid with two register stages instead of seven, so the
+ * pass needs a clock that leaves the adder chains time, such as the main clock divided by eight.
+ *
+ *   rg_in -0 1 2 3-> rg_prod, rg_helper3 -4 5 6-> f_out
+ */
+module mkDCT1D_shallow#(NumProxy_t#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_arith)(DCT1D_ifc#(bits))
+    provisos(
+        Add#(bits_frac, 2, coeff_bits),
+        Add#(bits, coeff_bits, bits_mul)
+    );
+
+    Real scale = 2 ** fromInteger(valueof(bits_frac));
+    let coeffs  = prepare_coeffs(scale);
+    let scoeffs = prepare_scoeffs(scale);
+
+    Reg#(Vector#(8, Int#(bits))) rg_in      <- mkRegU;
+    Reg#(Vector#(8, Int#(bits))) rg_prod    <- mkRegU;
+    Reg#(Int#(bits))             rg_helper3 <- mkRegU;
+
+    //the input valid is a DReg so idle cycles insert bubbles, it is held manually during stalls
+    Reg#(Bool) rg_in_valid   <- mkDReg(False);
+    Reg#(Bool) rg_prod_valid <- mkReg(False);
+
+    FIFOF#(Vector#(8, Int#(bits))) f_out   <- mkFIFOF;
+    Wire#(Bool)                    w_stall <- mkBypassWire;
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule r_stall;
+        w_stall <= !f_out.notFull;
+    endrule
+
+    rule r_hold (w_stall);
+        rg_in_valid <= rg_in_valid;
+    endrule
+
+    rule r_advance (!w_stall);
+        let c = aan_stage1(safe_arith, aan_stage0(safe_arith, rg_in));
+        rg_prod_valid <= rg_in_valid;
+        rg_helper3    <= aan_stage3_helper(safe_arith, _scale_proxy, coeffs, aan_stage2_helper(safe_arith, c));
+        rg_prod       <= aan_stage3(safe_arith, _scale_proxy, coeffs, aan_stage2(safe_arith, c));
+    endrule
+
+    rule r_output (!w_stall && rg_prod_valid);
+        let f = aan_stage5(safe_arith, aan_stage4(safe_arith, rg_prod, rg_helper3));
+        f_out.enq(aan_stage6(safe_arith, scale_out, _scale_proxy, scoeffs, f));
+    endrule
+
+    method overflow = False;
+
+    interface Server data;
+        interface Put request;
+            method Action put(Vector#(8, Int#(bits)) x) if(!w_stall);
+                rg_in       <= x;
+                rg_in_valid <= True;
+            endmethod
+        endinterface
+        interface response = toGet(f_out);
+    endinterface
+
+endmodule
+
+//one rigid DCT pass, shallow folds it into two register stages instead of seven
+module mkDCT1D_pass#(NumProxy_t#(bits_frac) _scale_proxy, Bool scale_out, Bool safe_arith, Bool shallow)(DCT1D_ifc#(bits))
+    provisos(
+        Add#(bits_frac, 2, coeff_bits),
+        Add#(bits, coeff_bits, bits_mul)
+    );
+    DCT1D_ifc#(bits) ifc;
+    if(shallow)
+        ifc <- mkDCT1D_shallow(_scale_proxy, scale_out, safe_arith);
+    else
+        ifc <- mkDCT1D_rigid(_scale_proxy, scale_out, safe_arith);
+    return ifc;
+endmodule
+
 endpackage

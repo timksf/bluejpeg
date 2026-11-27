@@ -60,6 +60,7 @@ typedef struct {
     Bool                       en_tiler;
     Bool                       double_buffer_tiler;
     Bool                       en_chroma;
+    Bool                       shallow_dct;
 } BlueJPEGCfg_t#(
     numeric type max_img_width,
     numeric type dct_scale,
@@ -129,7 +130,8 @@ module [Module] mkBlueJPEG#(BlueJPEGCfg_t#(
         transpose_in_dct : False,
         _q_scale         : cfg._prx_qsc,
         debug            : False,
-        dct_safe_arith   : False
+        dct_safe_arith   : False,
+        shallow_dct      : cfg.shallow_dct
     };
 
     //AXI-Lite config

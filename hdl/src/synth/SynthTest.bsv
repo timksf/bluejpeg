@@ -48,7 +48,7 @@ endmodule
 module [Module] mkDCT2D_Optimized_rigid(DCT2DOptRigid_ifc#(8));
     NumProxy_t#(12) f_scale = ?;
     DCT2DOptRigid_ifc#(8) ifc();
-    mkDCT2D_Opt_rigid#(f_scale, False, True, False, False) __int(ifc);
+    mkDCT2D_Opt_rigid#(f_scale, False, True, False, False, False) __int(ifc);
     return ifc;
 endmodule
 
@@ -98,7 +98,8 @@ module [Module] mkDUProc_16b(DUProcLegacy_ifc#(8, 16));
         transpose_in_dct : False,
         _q_scale         : quant_scale,
         debug            : False,
-        dct_safe_arith   : False
+        dct_safe_arith   : False,
+        shallow_dct      : False
     };
 
     DUProcLegacy_ifc#(8, 16) ifc();
@@ -124,7 +125,8 @@ module [Module] mkDUProc_Opt_8b(DUProc_ifc#(8));
         transpose_in_dct : False,
         _q_scale         : quant_scale,
         debug            : False,
-        dct_safe_arith   : False
+        dct_safe_arith   : False,
+        shallow_dct      : False
     };
 
     DUProc_ifc#(8) ifc();
@@ -164,6 +166,18 @@ endmodule
 
 (* default_clock_osc="aclk", default_reset="aresetn" *)
 module [Module] mkBlueJPEGTop_1920_12#(Clock dct_clock)(BlueJPEG_ifc);
+    let ifc <- mkBlueJPEGTop_1920_12_cfg(dct_clock, False);
+    return ifc;
+endmodule
+
+//two register stages per DCT pass, for a DCT clock of the main clock divided by eight
+(* default_clock_osc="aclk", default_reset="aresetn" *)
+module [Module] mkBlueJPEGTop_1920_12_shallow#(Clock dct_clock)(BlueJPEG_ifc);
+    let ifc <- mkBlueJPEGTop_1920_12_cfg(dct_clock, True);
+    return ifc;
+endmodule
+
+module [Module] mkBlueJPEGTop_1920_12_cfg#(Clock dct_clock, Bool shallow_dct)(BlueJPEG_ifc);
 
     //fast clock and associated reset
     let aclk    <- exposeCurrentClock;
@@ -184,7 +198,8 @@ module [Module] mkBlueJPEGTop_1920_12#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : True,
-        en_chroma           : True
+        en_chroma           : True,
+        shallow_dct         : shallow_dct
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
@@ -215,7 +230,8 @@ module [Module] mkBlueJPEGTop_2560_12_12#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : False,
-        en_chroma           : True
+        en_chroma           : True,
+        shallow_dct         : False
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
@@ -246,7 +262,8 @@ module [Module] mkBlueJPEGGrayTop_1920_12_12#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : False,
-        en_chroma           : False
+        en_chroma           : False,
+        shallow_dct         : False
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);
@@ -277,7 +294,8 @@ module [Module] mkBlueJPEGGrayTop_720_12_12#(Clock dct_clock)(BlueJPEG_ifc);
         _prx_pixw           : pixel_width,
         en_tiler            : True,
         double_buffer_tiler : False,
-        en_chroma           : False
+        en_chroma           : False,
+        shallow_dct         : False
     };
     BlueJPEG_ifc ifc();
     mkBlueJPEG#(jpeg_cfg) __internal(ifc);

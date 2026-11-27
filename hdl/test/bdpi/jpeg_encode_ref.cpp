@@ -77,8 +77,8 @@ extern "C" {
         auto quant_fn   = fixedpoint_pipeline::make_fixed_quantize<Q_SCALE, DPW>();
         auto reorder_fn = fixedpoint_pipeline::make_zigzag<DPW>();
 
-        //encode to a temporary file
-        std::string tmp_name = "/tmp/jpeg_encode_ref_output";
+        //encode into the simulation's working directory, its build directory, so parallel tests keep their own reference
+        std::string tmp_name = "jpeg_encode_ref_output";
 
         jpegencode::jpeg_params_t params {
             .width                          = img.width(),

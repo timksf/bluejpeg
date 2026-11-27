@@ -64,9 +64,14 @@ encoder output stalls.
 ```sh
 make -C hdl sim RUN_TEST=TbEncoderThroughput UDP_TEST_1080P=1 BUILDDIR=build/throughput_shared
 make -C hdl sim RUN_TEST=TbEncoderThroughputDiv8 UDP_TEST_1080P=1 BUILDDIR=build/throughput_div8
+make -C hdl sim RUN_TEST=TbEncoderThroughputShallow UDP_TEST_1080P=1 BUILDDIR=build/throughput_shallow
+make -C hdl sim RUN_TEST=TestDCTShallow             # deep and shallow DCT bit-identical under stalls
 ```
 
-Both encode two frames, check every byte and `tlast` and fail if `PERF5` exceeds three cycles per pixel
+`TbEncoderThroughputShallow` runs the DCT at one eighth with `shallow_dct`, which finishes a frame
+80 cycles earlier (6,236,680 instead of 6,236,760).
+
+The throughput tests encode two frames, check every byte and `tlast` and fail if `PERF5` exceeds three cycles per pixel
 plus 5 %.
 
 In `hdl/test/host/throughput`, `metadata_capacity_probe.py` copies the encoder packages with another

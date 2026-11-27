@@ -19,7 +19,8 @@ module [Module] mkJpegEncoderResource(BlueJPEG_ifc);
         _prx_pixw          : ?,
         en_tiler           : True,
         double_buffer_tiler: True,
-        en_chroma          : True
+        en_chroma          : True,
+        shallow_dct        : False
     };
     let i_enc <- mkBlueJPEG(cfg);
     return i_enc;

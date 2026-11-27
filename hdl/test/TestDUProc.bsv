@@ -45,7 +45,8 @@ module [Module] mkTestDUProc(TestHandler_ifc);
         transpose_in_dct : False,
         _q_scale         : quant_scale,
         debug            : True,
-        dct_safe_arith   : False
+        dct_safe_arith   : False,
+        shallow_dct      : False
     };
 
     DUProcLegacy_ifc#(PixelWidth, DCTWidth) dut      <- mkDUProc(dut_cfg, clocked_by fast_clock, reset_by fast_reset);
