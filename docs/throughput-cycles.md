@@ -1,21 +1,16 @@
 # Encoder throughput
 
-The encoder processes one component sample per main clock cycle. Y, Cb and Cr data units share a
-single processing lane, so a 4:4:4 pixel needs at least three cycles and the upper bound is 1/3 pixel
-per main clock cycle. This document shows how close the encoder gets to that bound, where the
-remaining cycles go and how the queues between the stages are sized.
+Y, Cb and Cr data units share one lane at one component sample per cycle, so the bound is 1/3 pixel
+per main clock cycle.
 
-All figures come from simulation of a 1920 × 1080 YCbCr 4:4:4 frame with a maximum width of 1920,
-a double-buffered tiler, 12-bit DCT and quantization precision and the default tables. They are
-counted in main clock cycles, independent of the clock frequency. The image is the crop of
-`assets/sample_1920x1280.bmp` used by the system tests. Every frame produces 290,450 bytes and is
-compared byte for byte with the C++ reference. Table initialization and configuration happen before
-the measurement.
+Figures are from simulation of the 1920 × 1080 crop of `assets/sample_1920x1280.bmp` (290,450 bytes,
+byte-checked against the C++ reference), 1920 maximum width, double-buffered tiler, 12-bit
+precision, default tables, counted in main clock cycles after configuration.
 
 ## Measured frame time
 
-With an output sink that never stalls, the encoder reaches 99.74 % of the bound, whether the DCT
-runs on the main clock or at one eighth of it, as in the 200 MHz configuration.
+With a non-stalling sink the encoder reaches 99.74 % of the bound, with the DCT on the main clock or
+at one eighth of it (the 200 MHz configuration).
 
 | Configuration | Frame cycles (`PERF5`) | Pixels per cycle | Share of the 1/3 bound |
 | --- | ---: | ---: | ---: |
@@ -23,12 +18,8 @@ runs on the main clock or at one eighth of it, as in the 200 MHz configuration.
 | DCT at one eighth of the main clock | 6,236,760 | 0.33248 | 99.74 % |
 | Ideal | 6,220,800 | 0.33333 | 100 % |
 
-`PERF5` counts from the accepted start request to the end of the frame. The last byte reaches the
-consumer two cycles later.
-
-With the DCT on the main clock, the lane advances 6,220,800 component samples within an interval of
-6,221,057 cycles, so the only loss in steady state is 257 single-cycle bubbles at data unit
-boundaries. The whole frame splits up as follows.
+`PERF5` counts from the accepted start to the end of the frame. The last byte leaves two cycles later.
+With the DCT on the main clock the frame splits up as follows.
 
 | Contribution | Cycles |
 | --- | ---: |
@@ -38,18 +29,16 @@ boundaries. The whole frame splits up as follows.
 | Flush and completion | 206 |
 | Total | 6,236,632 |
 
-The remaining 0.25 % is therefore filling and draining, not a reduced steady-state rate. The tiler
-serves one pixel per cycle, since each logical client is bound to its own BRAM port, and in the trace
-2,041,066 of the 2,073,599 intervals between tiler outputs are one cycle long. The longer gaps fall
-where the chroma data units are processed.
+The 0.25 % loss is fill and drain, not a reduced steady-state rate. The tiler serves one pixel per
+cycle (one BRAM port per client). 2,041,066 of 2,073,599 tiler output intervals are one cycle, the
+longer ones fall on chroma data units.
 
-Throughput depends on the image. Long runs of zeros and long codewords cost cycles in the run-length
-and Huffman stages, and a different image or table set can produce more output bytes per pixel.
+Throughput depends on the image, since long zero runs and long codewords cost cycles in the entropy
+coder.
 
 ## Per-data-unit metadata queues
 
-When the dispatcher sends the first sample of a data unit, it reserves one entry in three small
-queues that carry the data unit's metadata to later stages.
+The dispatcher reserves one entry in each of three metadata queues per data unit.
 
 | Queue | Token | Width | Depth | Released |
 | --- | --- | ---: | ---: | --- |
@@ -57,24 +46,18 @@ queues that carry the data unit's metadata to later stages.
 | `RLE.mkRLE.f_comp` | Y, Cb or Cr DC predictor | 2 bits | 8 | After the last coefficient of the data unit |
 | `HuffEncoder.mkHuffEncoder.f_meta` | Table selection and last data unit flag | 2 bits | 8 | After the final symbol of the data unit |
 
-A data unit can only start when all three queues have room, so their depth limits how many data
-units can be in flight between dispatch and the last stage. At one data unit per 64 cycles, eight
-entries cover 512 cycles of pipeline latency. With four entries the encoder already reached 99.75 %
-of the bound when the DCT ran on the main clock, but only 72.6 % with the DCT at one eighth, because
-the slower DCT and its gearboxes add latency. The dispatcher then sent four data units and waited
-96 cycles for a free entry, which gives 0.242 pixels per cycle, as measured. Eight entries restore
-the full rate in both configurations at a cost of 20 bits of storage. They are sized for the tested
-configuration and are not a bound for arbitrary clock ratios, and long downstream stalls still stop
-the dispatcher safely through back-pressure.
+Queue depth limits the data units in flight. At 64 cycles per data unit, eight entries cover 512
+cycles of latency. Four entries give 99.75 % with the DCT on the main clock but 72.6 % with the DCT at
+one eighth, where the dispatcher waits 96 cycles after every four data units (0.242 pixels per
+cycle). Eight entries restore full rate in both cases for 20 bits of storage. The depth is sized for
+the tested clock ratios, other ratios may need more.
 
 ## Effect of the output path
 
-A slow consumer stalls the encoder through its output stream. Stalls propagate back through frame
-writer, bitstream writer, Huffman encoder and run-length coder until the metadata queues fill and
-dispatch stops. In the DDR3/UDP system this happened when the packetizer stopped collecting bytes
-while it sent a packet, which limited the system to 91.4 % of the bound in simulation despite ample
-average Ethernet bandwidth. The packetizer now collects the next packet while sending the previous
-one, and the [1080p30 demonstration](1080p30-demo.md) runs without encoder output stalls.
+Output stalls propagate back until the metadata queues fill and dispatch stops. A packetizer that
+stopped collecting while sending limited the DDR3/UDP system to 91.4 % in simulation. It now collects
+the next packet during transmission, and the [1080p30 demonstration](1080p30-demo.md) runs without
+encoder output stalls.
 
 ## Reproducing
 
@@ -83,15 +66,12 @@ make -C hdl sim RUN_TEST=TbEncoderThroughput UDP_TEST_1080P=1 BUILDDIR=build/thr
 make -C hdl sim RUN_TEST=TbEncoderThroughputDiv8 UDP_TEST_1080P=1 BUILDDIR=build/throughput_div8
 ```
 
-Both testbenches encode two consecutive frames, compare every byte and `tlast` with the C++
-reference and fail if `PERF5` exceeds three cycles per pixel plus 5 %, which also covers the strip
-filling and draining of the 192 × 192 fixture.
+Both encode two frames, check every byte and `tlast` and fail if `PERF5` exceeds three cycles per pixel
+plus 5 %.
 
-Two tools in `hdl/test/host/throughput` support deeper analysis. `metadata_capacity_probe.py` copies
-the affected encoder packages with a different queue depth into a separate directory, which can then
-be simulated by passing it as `TEST_DIR`. `profile_generated.py` instruments a generated Bluesim model
-in its own output directory to record which rules fire in every main clock cycle and the state of the
-FIFOs, without changing the original model or its byte checks.
+In `hdl/test/host/throughput`, `metadata_capacity_probe.py` copies the encoder packages with another
+queue depth for simulation through `TEST_DIR`, and `profile_generated.py` records rule firings and
+FIFO state per cycle in a copy of a Bluesim model.
 
 ```sh
 python3 hdl/test/host/throughput/metadata_capacity_probe.py build/metadata_probe --depth 4

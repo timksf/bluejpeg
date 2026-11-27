@@ -10,3 +10,6 @@ results.xml
 # WaveDrom timing diagrams, kept locally only
 assets/bitstream/
 assets/rle/
+# timing notes, kept locally only
+docs/timing-200mhz.md
+docs/decoder-timing-200mhz.md

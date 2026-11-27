@@ -6,7 +6,7 @@ import DefaultValue :: *;
 import GetPut :: *;
 import AXI4_Lite_Slave :: *;
 import BlueXLNX :: *;
-import Ethernet :: *;
+import BlueEthernet :: *;
 
 (* always_ready, always_enabled *)
 interface PA200T_UDP_MDIO_ifc;

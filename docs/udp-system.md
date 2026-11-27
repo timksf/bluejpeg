@@ -1,11 +1,12 @@
 # DDR3/UDP system
 
-The UDP system runs the encoder on the PA200T board (Artix-7 `xc7a200tfbg484-2`) with a frame store
-in DDR3 and Gigabit Ethernet for input and output. A host loads raster YCbCr frames over UDP, the
-system reads a frame back, encodes it and returns the JPEG as numbered UDP datagrams. Frames can be
-encoded once or repeatedly, which makes the system a throughput test bench for the encoder as well
-as a demonstration. The board-independent part lives in `hdl/src/system_udp`, the board top with
-clocks, pins and constraints in `hdl/src/fpga/pa200t_udp`.
+Encoder on the PA200T board (Artix-7 `xc7a200tfbg484-2`) with a DDR3 frame store and Gigabit
+Ethernet. The host loads YCbCr frames over UDP, the system encodes a stored frame once or repeatedly
+and returns the JPEG as numbered UDP datagrams. Board-independent logic is in `hdl/src/system_udp`,
+the board top with clocks, pins and constraints in `hdl/src/fpga/pa200t_udp`. The UDP endpoint and
+MDIO controller come from [blueethernet](https://github.com/timksf/blueethernet) in `dep/blueethernet`.
+
+![DDR3/UDP system](../assets/udp-system.drawio.svg)
 
 ## Build variants
 
@@ -15,55 +16,36 @@ clocks, pins and constraints in `hdl/src/fpga/pa200t_udp`.
 | BRAM | `SYSTEM=udp UDP_MEMORY=bram` | BRAM holding the 192 × 192 test pattern | Everything on 83.333 MHz |
 | Split clocks | `SYSTEM=udp UDP_DEMO_200=1` | DDR3 behind a clock crossing | Encoder 200 MHz, DCT 25 MHz, system 125 MHz, memory 81.25 MHz |
 
-The split-clock variant reaches 1080p30 and is described in [1080p30-demo.md](1080p30-demo.md). In
-all variants the RGMII MAC runs on 125 MHz transmit clocks, including a 90 degree shifted copy, and
-crosses into the application clock through its own asynchronous frame FIFOs. The MAC from
-`hdl/libraries/ethernet` adds synchronizers for its enable controls and its inter-frame gap setting
-for that purpose, and the RGMII input delay cells use their own `IODELAY_GROUP` next to the one of
-the MIG.
+The split-clock variant is described in [1080p30-demo.md](1080p30-demo.md). In all variants the
+RGMII MAC runs on 125 MHz transmit clocks (plus a 90° copy) and crosses into the application clock
+through its frame FIFOs. The RGMII input delays use their own `IODELAY_GROUP` beside the MIG's.
 
-The MIG project in `hdl/src/fpga/pa200t_udp/ip` uses the 325 MHz DDR setting, the closest the wizard
-offers for the board's 200 MHz input clock. Its generated RTL specifies a 5000 ps input period with
-a PLL multiplier of 13 and a divider of 2, so the physical 200 MHz board clock is used exactly, and
-the build checks that parameter. The MIG also supplies all DDR pin constraints.
+The MIG project in `hdl/src/fpga/pa200t_udp/ip` uses the 325 MHz DDR setting with a 5000 ps input
+period, PLL multiplier 13 and divider 2, so it runs from the 200 MHz board clock directly. The build
+checks this parameter. The MIG supplies all DDR pin constraints.
 
 ## Data path
 
-```text
-JTAG bus master -> AXI4-Lite bus -> SYS, MDIO, ETH and JPEG registers
+The frame store serves one client at a time (loader, reader, verify or peek and poke).
 
-UDP RX -> loader -----------+
-JTAG peek and poke ---------+-> frame store (AXI4 master) -> DDR3
-frame reader <--------------+
-     | 24-bit pixels
-     v
-BlueJPEG (1920 wide, 4:4:4, 12-bit precision, double-buffered tiler)
-     | JPEG bytes
-     v
-packetizer -> UDP TX -> RGMII MAC -> PHY
-```
+- Reader fetches INCR bursts of up to 256 words, never across a 4 KiB boundary, with two bursts in
+  flight into a 512-entry BRAM FIFO
+- Verify reads a frame and computes two wrapping 32-bit sums, of all words and of the running sums
+- Loader writes and peek and poke complete after the AXI write response
+- A frame word is `{8'h00, Y, Cb, Cr}` at word address `BASE` plus the raster pixel index
 
-The frame store gives the memory to one client at a time. The reader fetches a frame in INCR bursts
-of up to 256 words that never cross a 4 KiB boundary, keeps at most two bursts in flight and buffers
-them in a 512-entry BRAM FIFO, so DDR3 latency does not reach the encoder. Verification reads a
-frame and computes two wrapping 32-bit sums, the sum of all words and the sum of the running sums,
-which the host compares with its own values. Loader writes and single-word peek and poke accesses
-complete only after the AXI write response. A frame word is `{8'h00, Y, Cb, Cr}`, and its word
-address is the pixel index in raster order plus `BASE`.
-
-The loader validates a whole datagram before it writes anything, including its length, the stream
-side-band and the pixel range. A rejected datagram is drained without touching memory, so repeated
-datagrams are harmless and malformed ones have no effect. The packetizer collects up to 1024 JPEG
-bytes per datagram in a 2048-byte BRAM FIFO, so the next packet is collected while the previous one
-is transmitted, and it publishes a packet only once all its bytes are stored.
+The loader checks length, side-band and pixel range of a whole datagram before writing. Rejected
+datagrams are drained, so duplicates are harmless and malformed ones have no effect. The packetizer
+stores up to 1024 JPEG bytes per datagram in a 2048-byte BRAM FIFO and fills the next packet while
+the previous one is sent.
 
 ## Wire formats
 
-Loader datagrams go to UDP port 5000. Their payload starts with the index of the first pixel as a
-32-bit big-endian number, followed by 1 to 480 pixels of three bytes each, `Y`, `Cb`, `Cr`.
-Datagrams are accepted only while `CTRL.LOADEN` is set and the system is idle.
+Loader datagrams go to UDP port 5000. The payload is the first pixel index (32-bit big-endian)
+followed by 1 to 480 pixels of `Y`, `Cb`, `Cr` bytes. They are accepted only while `CTRL.LOADEN` is set
+and the system is idle.
 
-JPEG datagrams go to UDP port 5001 and carry an eight-byte header followed by 1 to 1024 JPEG bytes.
+JPEG datagrams go to UDP port 5001, an eight-byte header followed by 1 to 1024 JPEG bytes.
 
 | Byte | Field |
 | --- | --- |
@@ -101,16 +83,13 @@ JPEG datagrams go to UDP port 5001 and carry an eight-byte header followed by 1 
 | `0x5c` | PKTS | UDP packets of the frame |
 | `0x60` | PERIOD | Cycles between the last two frame starts |
 
-The system does not configure the encoder. The host writes the encoder's `IMSZ` and `IRQE` once, and
-the system then starts frames through the encoder's `start_frame` method. LED0 shows the encoder
-interrupt and LED1 DDR3 calibration.
+The host writes the encoder's `IMSZ` and `IRQE` once. The system then starts frames through
+`start_frame`. LED0 shows the encoder interrupt, LED1 DDR3 calibration.
 
 ## Building and simulating
 
-All commands run from the repository root inside the Nix shell (`nix develop ./nix`), which supplies
-Bluespec, GCC, Icarus Verilog, OpenOCD and Tcl. Bitstreams also need Vivado on the path. The pinned
-BSVTools version needs `hdl/patches/bsvtools-vivado-exit.patch` so that Vivado failures stop the
-build.
+Run from the repository root inside `nix develop ./nix`. Bitstreams also need Vivado. The pinned
+BSVTools needs `hdl/patches/bsvtools-vivado-exit.patch` so Vivado failures stop the build.
 
 ```sh
 git -C dep/BSVTools apply ../../hdl/patches/bsvtools-vivado-exit.patch
@@ -118,49 +97,46 @@ make -C hdl sim RUN_TEST=TestJpegUdpSystem                     # 192 × 192 end-
 make -C hdl sim RUN_TEST=TestJpegUdpSystem UDP_TEST_1080P=1 BUILDDIR=build/TestJpegUdpSystem1080   # 1920 × 1080
 make -C hdl sim RUN_TEST=TbUdpPacketizer                       # packet lengths, stalls, overlap
 python3 -m unittest discover -s hdl/test/host/udp -p 'test_*.py' -v
-make -C hdl/libraries/ethernet/test test
 make -C hdl bitstream SYSTEM=udp                               # DDR3 variant
 make -C hdl bitstream SYSTEM=udp UDP_MEMORY=bram               # BRAM variant
 ```
 
-`TestJpegUdpSystem` loads a frame over the modelled UDP interface, including a duplicate and a
-malformed datagram, checks peek and poke and both checksums, encodes one frame and two repeated
-frames and compares every JPEG byte with the C++ reference. The 1080p fixture is a crop of
-`assets/sample_1920x1280.bmp`.
+`TestJpegUdpSystem` loads a frame over modelled UDP (including a duplicate and a malformed datagram),
+checks peek, poke and checksums, encodes one single and two repeated frames and compares every byte
+with the C++ reference. The 1080p fixture is a crop of `assets/sample_1920x1280.bmp`.
 
 ## Running on the board
 
-The FPGA is configured through the board's FT232H into SRAM, the configuration flash is not
-written. Register access goes through a J-Link on the custom JTAG header. The session scripts reset
-and initialize the PHY, set up the UDP endpoint, configure the encoder once and keep OpenOCD running
-with Tcl RPC on port 6666. The network addresses default to those in `bluejpeg_udp_jlink.tcl` and
-can be overridden through the `udp_*` variables.
+The FPGA is configured over the board's FT232H (SRAM only). Registers are accessed through a J-Link on
+the JTAG header. The session script initializes the PHY, UDP endpoint and encoder and keeps OpenOCD
+running with Tcl RPC on port 6666. Network addresses default to those in `bluejpeg_udp_jlink.tcl`
+and are overridden through the `udp_*` variables.
 
 ```sh
 openocd -f hdl/test/host/udp/pa200t_load.tcl -c 'pld load 0 /path/to/image.bit' -c shutdown
 openocd -f hdl/test/host/udp/bluejpeg_udp_jlink.tcl
 ```
 
-The BRAM variant needs the frame size and counter clock overridden.
+The BRAM variant overrides frame size and counter clock.
 
 ```sh
 openocd -c 'set udp_width 192' -c 'set udp_height 192' -c 'set bluejpeg_udp_hz 83333333.333333' -f hdl/test/host/udp/bluejpeg_udp_jlink.tcl
 ```
 
-For the DDR3 variants, `load_frame.py` crops a BMP to 1920 × 1080, converts it to YCbCr with the same
-float32 arithmetic as the C++ reference, sends it in paced datagrams, triggers VERIFY and resends the
-whole frame if the checksums differ. `--prepare-only` checks the crop and conversion without network
-or JTAG access. `recv_jpeg.py` reassembles datagrams by frame and sequence number, reports gaps,
-handles duplicates, writes `frame_<number>.jpg` and with `--expect` requires an exact byte match.
-Start the receiver before requesting frames. The 1080p simulation above produces the reference JPEG.
+- `load_frame.py` crops a BMP to 1920 × 1080, converts it to YCbCr like the C++ reference, sends it,
+  runs VERIFY and resends on a checksum mismatch. `--prepare-only` skips network and JTAG
+- `recv_jpeg.py` reassembles datagrams, reports gaps, writes `frame_<number>.jpg` and with `--expect`
+  requires a byte match against the 1080p simulation output
+
+Start the receiver before requesting frames.
 
 ```sh
 python3 hdl/test/host/udp/recv_jpeg.py --output udp-rx --expect hdl/build/TestJpegUdpSystem1080/udp_capture.jpg --count 100
 python3 hdl/test/host/udp/load_frame.py assets/sample_1920x1280.bmp
 ```
 
-The OpenOCD console then starts single frames or repeat mode and prints the counters. Clearing REPEAT
-lets the current frame finish.
+From the OpenOCD console, start a frame, toggle repeat (the current frame finishes) and print the
+counters.
 
 ```tcl
 bluejpeg_udp_start pa200t.tap
@@ -171,11 +147,12 @@ bluejpeg_udp_report pa200t.tap
 
 ## Results
 
-Both single-clock variants meet timing, the DDR3 variant at 81.25 MHz with +0.343 ns setup and
-+0.008 ns hold slack and the BRAM variant at 83.333 MHz with +0.306 ns setup slack. The complete
-DDR3 design uses 19,917 LUTs, 18,759 registers, 33 BRAM tiles and 11 DSPs, of which the encoder
-takes the share listed in [udp-encoder-analysis.md](udp-encoder-analysis.md). On the board the PHY
-links at 1 Gb/s full duplex, DDR3 calibrates and loaded frames verify against the host checksums.
-Single frames and runs of 100 repeated frames matched the C++ reference byte for byte for both the
-192 × 192 pattern and the 1920 × 1080 frame, the latter at 290,450 bytes in 284 packets per frame,
-without lost packets or protocol errors.
+| Variant | Clock | Setup slack | Hold slack |
+| --- | ---: | ---: | ---: |
+| DDR3 | 81.25 MHz | +0.343 ns | +0.008 ns |
+| BRAM | 83.333 MHz | +0.306 ns | |
+
+The DDR3 design uses 19,917 LUTs, 18,759 registers, 33 BRAM tiles and 11 DSPs, the encoder share is in
+[udp-encoder-analysis.md](udp-encoder-analysis.md). On the board, single frames and runs of 100
+repeated frames match the C++ reference for both the 192 × 192 pattern and the 1920 × 1080 frame
+(290,450 bytes in 284 packets), without lost packets.

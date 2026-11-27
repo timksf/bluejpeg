@@ -1,44 +1,35 @@
 # BlueJPEG
 
-BlueJPEG is a configurable baseline JPEG encoder written in Bluespec SystemVerilog. It works as a
-generator, so a few compile-time parameters select the maximum image width, the arithmetic precision,
-the colour mode and the input buffering, and the build emits a Verilog core sized for exactly that
-configuration. The core accepts YCbCr pixels over AXI4-Stream, is configured over AXI4-Lite and
-streams out a complete JFIF file.
+Baseline JPEG encoder in Bluespec SystemVerilog. Compile-time parameters set the maximum image width,
+arithmetic precision, colour mode and input buffering. The core takes YCbCr pixels over AXI4-Stream,
+is configured over AXI4-Lite and emits a complete JFIF file.
 
-- Baseline sequential DCT with Huffman coding and a complete JFIF file as output
-- YCbCr 4:4:4 colour or grayscale with 8-bit samples, at any height and any width up to the configured
-  maximum, both set at runtime
-- Quantization and Huffman tables programmable at runtime, with Huffman codes generated on chip
-- One component sample per clock cycle, so a 4:4:4 pixel takes three cycles, and a 1920 × 1080 frame
-  reaches 99.7 % of that rate
-- DCT in a separate clock domain, so the arithmetic can run at a fraction of the main clock
-- Output byte-identical to the C++ reference encoder in `sw/` at 12-bit DCT and quantization precision
-- Encodes 1920 × 1080 at 31.9 frames per second on an Artix-7 with the encoder clocked at 200 MHz
+- Baseline sequential DCT with Huffman coding
+- YCbCr 4:4:4 or grayscale, 8-bit samples, image size set at runtime up to the configured width
+- Quantization and Huffman tables programmable at runtime, Huffman codes generated on chip
+- One component sample per cycle, so three cycles per 4:4:4 pixel, 99.7 % of that rate at 1080p
+- DCT in its own clock domain
+- Output byte-identical to the C++ reference encoder in `sw/` at 12-bit precision
+- 1920 × 1080 at 31.9 frames per second on an Artix-7 with the encoder at 200 MHz
 
 ## Architecture
 
 ![BlueJPEG top-level pipeline](assets/toplevel.svg)
 
-Pixels arrive in raster order and the image tiler (the *Derasterizer* in the figure) collects eight
-lines in a BRAM line buffer to form 8 × 8 blocks. With double buffering enabled, the next strip of
-eight lines fills while the current one drains. A channel splitter and a dispatcher turn every 8 × 8
-block into one Y, one Cb and one Cr data unit, which pass one after another through a single
-processing lane. The lane applies a mean shift, a separable AAN 2D DCT built from a row DCT, a
-transpose buffer and a column DCT, quantization with the AAN scale factors folded into the tables,
-and zigzag reordering. Run-length coding and the Huffman encoder turn the coefficients into
-codewords, and the bitstream writer packs them into bytes and inserts the stuffing byte after every
-`0xFF`. The frame writer emits the JFIF headers from the current tables and then passes the scan data
-through. All stages are connected by elastic interfaces, so back-pressure from the output stream
-propagates cleanly up to the pixel input.
+The tiler (*Derasterizer* in the figure) buffers eight raster lines in BRAM and reads them out as
+8 × 8 blocks. With double buffering the next strip fills while the current one drains. Each block is
+split into Y, Cb and Cr data units, which share one processing lane with mean shift, AAN 2D DCT (row
+DCT, transpose buffer, column DCT), quantization with the AAN scale factors folded into the tables,
+and zigzag reordering. Run-length coding and Huffman coding produce codewords, the bitstream writer packs
+them into bytes and stuffs `0x00` after every `0xFF`, and the frame writer prepends the JFIF headers.
+All stages are elastic, so output back-pressure propagates to the pixel input.
 
-A more detailed block diagram with stage widths and control signals is in
-[`assets/system.drawio.png`](assets/system.drawio.png), and the architecture is described at length in
-[`assets/architecture/bluejpeg-architecture.pdf`](assets/architecture/bluejpeg-architecture.pdf).
+Block diagram with stage widths in [`assets/system.drawio.png`](assets/system.drawio.png), full
+description in [`assets/architecture/bluejpeg-architecture.pdf`](assets/architecture/bluejpeg-architecture.pdf).
 
 ## Configuration
 
-The compile-time parameters are the fields and numeric types of `BlueJPEGCfg_t` in
+Compile-time parameters are the fields and numeric types of `BlueJPEGCfg_t` in
 `hdl/src/encoder/BlueJPEG.bsv`.
 
 | Parameter | Effect | Typical values |
@@ -48,8 +39,8 @@ The compile-time parameters are the fields and numeric types of `BlueJPEGCfg_t` 
 | `quant_scale` | Fixed-point width of the quantizer arithmetic and the scaled tables | 12, 14, 16 |
 | `pixel_width` | Input sample width | 8 |
 | `en_chroma` | Builds the colour path, grayscale-only when disabled | `True`, `False` |
-| `en_tiler` | Builds the tiler, without it the input must already be in 8 × 8 block order, for example from a 2D DMA | `True`, `False` |
-| `double_buffer_tiler` | Doubles the line buffer so a new strip is accepted while the last one drains | `True`, `False` |
+| `en_tiler` | Builds the tiler, without it the input must arrive in 8 × 8 block order | `True`, `False` |
+| `double_buffer_tiler` | Doubles the line buffer to accept a strip while the last one drains | `True`, `False` |
 | `slow_clock`, `slow_reset` | Clock and reset of the DCT, which may be the main clock | |
 
 ```bsv
@@ -67,10 +58,9 @@ BlueJPEGCfg_t#(1920, 12, 12, 8) cfg = BlueJPEGCfg_t {
 BlueJPEG_ifc i_enc <- mkBlueJPEG(cfg);
 ```
 
-Image size, quantization tables and Huffman tables are set through the register map, and the tables
-default to those of ITU-T T.81 Annex K after reset. `hdl/src/synth/SynthTest.bsv` provides ready-made
-tops such as `mkBlueJPEGTop_1920_12` (colour, 1920 wide, double-buffered), `mkBlueJPEGTop_2560_12_12`,
-`mkBlueJPEGGrayTop_1920_12_12` and `mkBlueJPEGGrayTop_720_12_12`.
+Image size and tables are set through the register map. The tables reset to ITU-T T.81 Annex K.
+`hdl/src/synth/SynthTest.bsv` has ready-made tops such as `mkBlueJPEGTop_1920_12`,
+`mkBlueJPEGTop_2560_12_12`, `mkBlueJPEGGrayTop_1920_12_12` and `mkBlueJPEGGrayTop_720_12_12`.
 
 ## Integration
 
@@ -82,20 +72,17 @@ tops such as `mkBlueJPEGTop_1920_12` (colour, 1920 wide, double-buffered), `mkBl
 | `irq` | out | High while an enabled interrupt is pending |
 | `busy` | out | High while a frame is encoded |
 
-After reset the encoder loads its default tables and generates their Huffman codes, and `STS.RDY`
-rises once it is ready. To encode a frame, write the image size to `IMSZ`, enable the interrupts of
-interest in `IRQE` and set `CTRL.START`. The encoder then expects width × height pixels on `s_axis`
-and returns the JFIF file on `m_axis`. `IRQP.DONE` signals the end of the frame and is cleared by
-writing 1, while a start with an invalid image size is rejected and raises `IRQP.INV`. Custom tables
-can be written between frames. After changing a Huffman table, trigger code generation for it through
-`CGEN`. The counters `PERF0` to `PERF6` report cycles, pixels, bytes, idle cycles, flush cycles,
-total frame cycles and boot time of the last frame.
+1. Wait for `STS.RDY`, set after reset once the default tables and Huffman codes are loaded
+2. Write `IMSZ`, enable interrupts in `IRQE` and set `CTRL.START`
+3. Send width × height pixels on `s_axis` and receive the JFIF file on `m_axis`
+4. `IRQP.DONE` marks the end of the frame (write 1 to clear). An invalid size raises `IRQP.INV`
+
+Tables can be rewritten between frames. After changing a Huffman table, regenerate its codes through
+`CGEN`. `PERF0` to `PERF6` report statistics of the last frame.
 
 ## Register map
 
-Offsets are in bytes from the base of the encoder's AXI4-Lite window, and table regions hold one entry
-per 32-bit word. The table is generated from the register definitions in
-`hdl/src/encoder/BlueJPEGRegs.bsv`.
+Byte offsets, one table entry per 32-bit word. Generated from `hdl/src/encoder/BlueJPEGRegs.bsv`.
 
 <!-- regmap:begin -->
 ```text
@@ -138,10 +125,8 @@ Offset         Register   Description                        Field  Bits     Acc
 
 ## Resources and performance
 
-The figures below are the encoder's share of the routed DDR3/UDP example system on the PA200T
-(`xc7a200tfbg484-2`, Vivado 2025.2). The encoder is configured for a maximum width of 1920, 8-bit
-YCbCr 4:4:4, 12-bit DCT and quantization precision and a double-buffered tiler, and includes its
-register map and programmable tables.
+Encoder share of the routed DDR3/UDP system on the PA200T (`xc7a200tfbg484-2`, Vivado 2025.2), with
+1920 maximum width, 4:4:4, 12-bit precision, double-buffered tiler, register map and tables.
 
 | Resource | Encoder | Share of the device |
 | --- | ---: | ---: |
@@ -151,22 +136,17 @@ register map and programmable tables.
 | BRAM tiles | 25 | 6.8 % |
 | DSP48E1 | 11 | 1.5 % |
 
-The tiler line buffer takes 24 of the 25 BRAM tiles, and the table storage the remaining two RAMB18.
-In this build the longest path inside the encoder is the address and control logic of the tiler line
-buffer, not the DCT arithmetic. [`docs/udp-encoder-analysis.md`](docs/udp-encoder-analysis.md) has
-the details, and [`docs/timing-200mhz.md`](docs/timing-200mhz.md) describes the changes that close
-timing at 200 MHz.
+The tiler line buffer takes 24 BRAM tiles, the tables two RAMB18. The critical path inside the encoder
+is the line buffer address logic, see [`docs/udp-encoder-analysis.md`](docs/udp-encoder-analysis.md)
+and [`docs/timing-200mhz.md`](docs/timing-200mhz.md).
 
-Any configuration can also be synthesized, placed and routed on its own. The out-of-context flow
-constrains the main clock to 200 MHz and the DCT clock to 25 MHz and writes timing and utilization
-reports for each stage.
+Out-of-context implementation of a single configuration, main clock 200 MHz and DCT clock 25 MHz.
 
 ```sh
 make -C hdl bitstream SYNTH=ooc TOP_MODULE=mkBlueJPEGTop_1920_12
 ```
 
-Throughput was measured in simulation on a 1920 × 1080 colour frame with an output sink that never
-stalls, counted in main clock cycles.
+Throughput in simulation, 1920 × 1080 4:4:4, non-stalling sink, main clock cycles.
 
 | Clocking | Frame cycles (`PERF5`) | Pixels per cycle | Share of the 1/3 limit |
 | --- | ---: | ---: | ---: |
@@ -174,18 +154,16 @@ stalls, counted in main clock cycles.
 | DCT at one eighth of the main clock | 6,236,760 | 0.33248 | 99.74 % |
 | Ideal | 6,220,800 | 0.33333 | 100 % |
 
-The difference to the ideal is the filling of the first strip, single-cycle bubbles between data units
-and the final flush. Throughput depends on the image, since long runs of zeros and long codewords
-cost cycles in the entropy coder. [`docs/throughput-cycles.md`](docs/throughput-cycles.md) has the
-full analysis.
+The gap to the ideal is the first strip fill, single-cycle bubbles between data units and the flush.
+Details in [`docs/throughput-cycles.md`](docs/throughput-cycles.md).
 
 ## Example system with 1080p30 over UDP
 
-`hdl/src/system_udp` and `hdl/src/fpga/pa200t_udp` build a demonstration system for the PA200T board,
-an Artix-7 `xc7a200t` with DDR3 and Gigabit Ethernet. The host loads frames into DDR3 over UDP, the
-system reads them back and encodes them, and the JPEG returns as UDP datagrams of up to 1024 payload
-bytes, each with a short header carrying the frame number, a sequence number and a last-packet flag.
-A JTAG-to-AXI bridge gives the host access to all registers.
+![DDR3/UDP system](assets/udp-system.drawio.svg)
+
+`hdl/src/system_udp` and `hdl/src/fpga/pa200t_udp` build a system for the PA200T board (Artix-7
+`xc7a200t`, DDR3, Gigabit Ethernet). The host loads frames into DDR3 over UDP, the system encodes them
+and returns the JPEG as UDP datagrams. Registers are reached over JTAG.
 
 | Domain | Frequency | Contents |
 | --- | ---: | --- |
@@ -194,24 +172,21 @@ A JTAG-to-AXI bridge gives the host access to all registers.
 | System | 125 MHz | UDP and RGMII, frame control, packetizer, DDR requests |
 | Memory | 81.25 MHz | DDR3 controller interface |
 
-On the board the system encodes a 1920 × 1080 4:4:4 frame every 31.3 ms, or 31.9 frames per second,
-producing 290,450 bytes in 284 packets per frame without stalling the encoder output. Every captured
-frame matched the C++ reference byte for byte, including an animated sequence of 30 frames replayed
-from DDR3 for more than 2,900 frames. The frames are loaded in advance because raw 1080p30 video needs
-about 1.5 Gb/s, more than a Gigabit link carries.
+On the board a 1920 × 1080 frame takes 31.3 ms (31.9 fps), 290,450 bytes in 284 packets, without
+encoder output stalls. All captured frames match the C++ reference. Frames are preloaded because raw
+1080p30 needs about 1.5 Gb/s.
 
 ```sh
 make -C hdl sim RUN_TEST=TbJpegUdpDemo UDP_TEST_1080P=1    # split-clock simulation of three frames
 make -C hdl bitstream SYSTEM=udp UDP_DEMO_200=1            # board image
 ```
 
-[`docs/1080p30-demo.md`](docs/1080p30-demo.md) describes the board procedure and the measurements, and
-[`docs/udp-system.md`](docs/udp-system.md) the system and its host tools.
+System and host tools in [`docs/udp-system.md`](docs/udp-system.md), board procedure and measurements
+in [`docs/1080p30-demo.md`](docs/1080p30-demo.md).
 
 ## Building and testing
 
-All commands run inside the Nix shell, entered with `nix develop ./nix` from the repository root. The
-FPGA flows also need Vivado on the path.
+Run inside `nix develop ./nix` from the repository root. FPGA flows also need Vivado.
 
 ```sh
 make -C hdl sim                                    # default test, RUN_TEST selects hdl/test/<name>.bsv
@@ -221,9 +196,8 @@ make -C hdl sim RUN_TEST=TestJpegSystem            # small test system, pattern 
 make -C hdl bitstream                              # PA200T design sending a 192 × 192 test image over UART
 ```
 
-Each test builds in `hdl/build/<RUN_TEST>` and fails when its output contains `ERROR`. The
-testbenches compare the hardware with the C++ reference encoder through BDPI, and the reference also
-builds on its own.
+Each test builds in `hdl/build/<RUN_TEST>` and fails when its output contains `ERROR`. Testbenches
+compare against the C++ reference through BDPI. The reference also builds standalone.
 
 ```sh
 cd sw && mkdir build && cd build && cmake .. && make
@@ -242,7 +216,7 @@ hdl/test/            Bluesim testbenches, hdl/test/bdpi holds the C++ reference 
 sw/                  C++ reference encoder
 docs/                design notes and measurements
 assets/              diagrams and test images
-dep/                 submodules such as BSVTools, bluecsr, bluefabric, bluej, blueuart and bluexlnx
+dep/                 submodules such as BSVTools, blueethernet, bluecsr, bluefabric, bluej, blueuart and bluexlnx
 ```
 
 ## Further work
@@ -255,7 +229,4 @@ dep/                 submodules such as BSVTools, bluecsr, bluefabric, bluej, bl
 
 ## License
 
-BlueJPEG is released under the MIT License, see [`LICENSE`](LICENSE). The Ethernet RTL in
-`hdl/libraries/ethernet/rtl` is derived from
-[verilog-ethernet](https://github.com/alexforencich/verilog-ethernet) and keeps its MIT licence
-notice. Submodules under `dep/` carry their own licences.
+MIT, see [`LICENSE`](LICENSE). Submodules under `dep/` carry their own licences.

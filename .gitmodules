@@ -31,3 +31,6 @@
 [submodule "dep/verilog-ethernet"]
 	path = dep/verilog-ethernet
 	url = https://github.com/alexforencich/verilog-ethernet.git
+[submodule "dep/blueethernet"]
+	path = dep/blueethernet
+	url = https://github.com/timksf/blueethernet

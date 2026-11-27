@@ -189,7 +189,7 @@ proc bluej_mdio_write {tap phy reg data {instruction 0x23}} {
 }
 
 # ---- UDP endpoint (0x2000) and traffic generator (0x3000) ---------------
-# Register maps: libraries/ethernet/README.md and libraries/ethernet/src/UdpTraffic.bsv.
+# Register maps: dep/blueethernet/docs/registers.md.
 
 set bluej_eth_base     0x2000
 set bluej_traffic_base 0x3000
