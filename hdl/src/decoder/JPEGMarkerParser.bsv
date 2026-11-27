@@ -98,7 +98,6 @@ module mkJPEGMarkerParser(JPEGMarkerParser_ifc);
     Reg#(Bool)              rg_ff    <- mkReg(False);
     Reg#(Bit#(1))           rg_par   <- mkReg(0);
 
-    //pending skip request of the frame parser
     //pending skip request of the frame parser, matched against the frame parity when it arrives
     RWire#(Bit#(1)) w_skip        <- mkRWire;
     Reg#(Bool)      rg_skip       <- mkReg(False);
@@ -107,7 +106,7 @@ module mkJPEGMarkerParser(JPEGMarkerParser_ifc);
 
     Reg#(Maybe#(DecError_t)) rg_error <- mkDReg(tagged Invalid);
 
-    //the frame parity toggles here at each SOI of r_byte, so r_byte only reads registers of this rule
+    //the frame parity toggles here at each SOI, so the byte rules only read registers of this rule
     //a request that arrives with an SOI belongs to the frame that SOI ends
     (* fire_when_enabled, no_implicit_conditions *)
     rule r_skip;
@@ -144,116 +143,106 @@ module mkJPEGMarkerParser(JPEGMarkerParser_ifc);
         end
     endrule
 
-    rule r_byte (!rg_skip);
+    //one rule per state group, each guarded by its states, so the entropy-coded byte path is a rule of its own
+
+    function Action start_frame() = action
+        f_seg.enq(SegByte_t {
+            kind: Soi,
+            idx:  0,
+            last: True,
+            data: 0
+        });
+        pw_soi.send;
+    endaction;
+
+    //outside frames everything but SOI is ignored
+    rule r_hunt (!rg_skip && rg_state == Hunt);
         let m = f_cls.first; f_cls.deq;
-        let b = m.data;
-
-        MarkerState_t      next  = rg_state;
-        Bool               ff    = rg_ff;
-        Bool               soi   = False;
-        Maybe#(DecError_t) err   = tagged Invalid;
-        Maybe#(SegByte_t)  seg   = tagged Invalid;
-        Maybe#(EcsToken_t) tok   = tagged Invalid;
-
-        case(rg_state)
-            Hunt: begin
-                if(ff && m.is_soi) begin
-                    soi  = True;
-                    next = MarkerFF;
-                end
-                ff = m.is_ff;
-            end
-            MarkerFF: begin
-                if(m.is_ff) next = MarkerCode;
-                else begin
-                    err  = tagged Valid BadMarker;
-                    next = Hunt;
-                end
-            end
-            MarkerCode: begin
-                rg_seg <= m.parsed;
-                if(m.is_ff) next = MarkerCode;
-                else if(m.is_soi) begin
-                    err  = tagged Valid BadMarker;
-                    soi  = True;
-                    next = MarkerFF;
-                end else if(m.is_eoi) next = Hunt;
-                else if(m.bad_sof) begin
-                    err  = tagged Valid Unsupported;
-                    next = Hunt;
-                end else if(m.is_rst) begin
-                    err  = tagged Valid BadMarker;
-                    next = Hunt;
-                end else if(m.no_length) next = MarkerFF;
-                else next = LenHi;
-            end
-            LenHi: begin
-                rg_len <= unpack({b, 8'h00});
-                next   = LenLo;
-            end
-            LenLo: begin
-                UInt#(16) l = rg_len | extend(unpack(b));
-                rg_len <= l - 2;
-                rg_idx <= 0;
-                if(l < 2) begin
-                    err  = tagged Valid BadMarker;
-                    next = Hunt;
-                end else next = l == 2 ? MarkerFF : Payload;
-            end
-            Payload: begin
-                Bool last = rg_len == 1;
-                if(rg_seg matches tagged Valid .k) seg = tagged Valid SegByte_t {
-                    kind: k,
-                    idx:  rg_idx,
-                    last: last,
-                    data: b
-                };
-                rg_len <= rg_len - 1;
-                rg_idx <= rg_idx == 31 ? 31 : rg_idx + 1;
-                ff     = False;
-                if(last) next = rg_seg == tagged Valid Sos ? Ecs : MarkerFF;
-            end
-            Ecs: begin
-                if(ff) begin
-                    if(m.is_zero) begin
-                        tok = tagged Valid tagged Byte 'hFF;
-                        ff = False;
-                    end else if(!m.is_ff) begin
-                        //any marker ends the segment, only EOI ends the frame cleanly
-                        tok  = tagged Valid End;
-                        ff   = False;
-                        next = Hunt;
-                        if(m.is_soi) begin
-                            err  = tagged Valid BadMarker;
-                            soi  = True;
-                            next = MarkerFF;
-                        end else if(m.is_rst) err = tagged Valid Unsupported;
-                        else if(!m.is_eoi)    err = tagged Valid BadMarker;
-                    end
-                end else if(m.is_ff) begin
-                    ff = True;
-                end else begin
-                    tok = tagged Valid tagged Byte b;
-                end
-            end
-        endcase
-
-        if(soi) begin
-            seg = tagged Valid SegByte_t {
-                kind: Soi,
-                idx:  0,
-                last: True,
-                data: 0
-            };
-            pw_soi.send;
+        if(rg_ff && m.is_soi) begin
+            start_frame;
+            rg_state <= MarkerFF;
         end
+        rg_ff <= m.is_ff;
+    endrule
 
-        if(seg matches tagged Valid .x) f_seg.enq(x);
-        if(tok matches tagged Valid .x) f_ecs.enq(x);
+    rule r_marker (!rg_skip && (rg_state == MarkerFF || rg_state == MarkerCode));
+        let m = f_cls.first; f_cls.deq;
+        if(rg_state == MarkerFF) begin
+            if(m.is_ff) rg_state <= MarkerCode;
+            else begin
+                rg_error <= tagged Valid BadMarker;
+                rg_state <= Hunt;
+            end
+        end else begin
+            rg_seg <= m.parsed;
+            if(m.is_ff) noAction;
+            else if(m.is_soi) begin
+                rg_error <= tagged Valid BadMarker;
+                start_frame;
+                rg_state <= MarkerFF;
+            end else if(m.is_eoi) rg_state <= Hunt;
+            else if(m.bad_sof) begin
+                rg_error <= tagged Valid Unsupported;
+                rg_state <= Hunt;
+            end else if(m.is_rst) begin
+                rg_error <= tagged Valid BadMarker;
+                rg_state <= Hunt;
+            end else rg_state <= m.no_length ? MarkerFF : LenHi;
+        end
+    endrule
 
-        rg_error <= err;
-        rg_ff    <= ff;
-        rg_state <= next;
+    rule r_length (!rg_skip && (rg_state == LenHi || rg_state == LenLo));
+        let       m = f_cls.first; f_cls.deq;
+        UInt#(16) l = rg_len | extend(unpack(m.data));
+        if(rg_state == LenHi) begin
+            rg_len   <= unpack({m.data, 8'h00});
+            rg_state <= LenLo;
+        end else begin
+            rg_len <= l - 2;
+            rg_idx <= 0;
+            if(l < 2) begin
+                rg_error <= tagged Valid BadMarker;
+                rg_state <= Hunt;
+            end else rg_state <= l == 2 ? MarkerFF : Payload;
+        end
+    endrule
+
+    rule r_payload (!rg_skip && rg_state == Payload);
+        let  m    = f_cls.first; f_cls.deq;
+        Bool last = rg_len == 1;
+        if(rg_seg matches tagged Valid .k) f_seg.enq(SegByte_t {
+            kind: k,
+            idx:  rg_idx,
+            last: last,
+            data: m.data
+        });
+        rg_len <= rg_len - 1;
+        rg_idx <= rg_idx == 31 ? 31 : rg_idx + 1;
+        rg_ff  <= False;
+        if(last) rg_state <= rg_seg == tagged Valid Sos ? Ecs : MarkerFF;
+    endrule
+
+    //entropy-coded data, any marker ends the segment and only EOI ends the frame cleanly
+    rule r_ecs (!rg_skip && rg_state == Ecs);
+        let                m   = f_cls.first; f_cls.deq;
+        Maybe#(EcsToken_t) tok = tagged Invalid;
+        if(rg_ff) begin
+            if(m.is_zero) begin
+                tok = tagged Valid tagged Byte 'hFF;
+                rg_ff <= False;
+            end else if(!m.is_ff) begin
+                tok = tagged Valid End;
+                rg_ff    <= False;
+                rg_state <= m.is_soi ? MarkerFF : Hunt;
+                if(m.is_soi) begin
+                    rg_error <= tagged Valid BadMarker;
+                    start_frame;
+                end else if(m.is_rst) rg_error <= tagged Valid Unsupported;
+                else if(!m.is_eoi)    rg_error <= tagged Valid BadMarker;
+            end
+        end else if(m.is_ff) rg_ff <= True;
+        else tok = tagged Valid tagged Byte m.data;
+        if(tok matches tagged Valid .t) f_ecs.enq(t);
     endrule
 
     interface bytes = toPut(f_in);
